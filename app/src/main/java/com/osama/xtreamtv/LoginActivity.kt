@@ -100,7 +100,7 @@ class LoginActivity : AppCompatActivity() {
         error.visibility = View.GONE
         lifecycleScope.launch {
             try {
-                val api = XtreamApi(playlist.toAccount())
+                val api = XtreamApi(playlist.toAccount(), cacheDir)
                 val info = api.userInfo()
                 val problem = accountProblem(info)
                 if (problem != null) {

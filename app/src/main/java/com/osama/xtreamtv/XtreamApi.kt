@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -32,6 +33,8 @@ data class StreamItem(
     val note: String? = null,
     /** Live channels: days of catch-up (tv_archive) the server keeps; 0 = none. */
     val archiveDays: Int = 0,
+    /** Movies/series: when the provider added it (unix seconds), for "Recently added". */
+    val added: Long = 0,
 )
 
 data class UserInfo(
@@ -73,6 +76,8 @@ data class VodInfo(
     val cast: String?,
     val cover: String?,
     val ext: String?,
+    /** YouTube video id, when the provider has one. */
+    val trailer: String? = null,
 )
 
 data class Episode(
@@ -92,6 +97,8 @@ data class SeriesInfo(
     val releaseDate: String?,
     val cover: String?,
     val seasons: Map<Int, List<Episode>>,
+    val cast: String? = null,
+    val trailer: String? = null,
 )
 
 data class ServerInput(val base: String, val username: String?, val password: String?)
@@ -181,7 +188,34 @@ suspend fun probeStream(start: String): StreamProbe? = withContext(Dispatchers.I
     }
 }
 
-class XtreamApi(val account: Account) {
+/**
+ * [cacheDir]: where category and stream lists are kept between app launches so screens open
+ * instantly; they are refreshed from the server after [LIST_CACHE_MS] (or with refreshLists()).
+ */
+class XtreamApi(val account: Account, private val cacheDir: File? = null) {
+
+    companion object {
+        private const val LIST_CACHE_MS = 12 * 60 * 60 * 1000L
+        private val CACHED_ACTIONS = setOf(
+            "get_live_categories", "get_vod_categories", "get_series_categories",
+            "get_live_streams", "get_vod_streams", "get_series",
+        )
+    }
+
+    /** Drop the saved lists for this account so the next load comes from the server. */
+    fun clearListCache() {
+        val dir = listCacheDir() ?: return
+        dir.listFiles()?.forEach { it.delete() }
+    }
+
+    private fun listCacheDir(): File? {
+        val root = cacheDir ?: return null
+        val id = md5(account.base + "|" + account.username)
+        return File(root, "lists/$id").apply { mkdirs() }
+    }
+
+    private fun md5(text: String): String =
+        java.security.MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private val base = account.base.trimEnd('/')
     private val user = Uri.encode(account.username)
@@ -254,10 +288,16 @@ class XtreamApi(val account: Account) {
             )
         }
         ContentType.MOVIE -> o.str("stream_id")?.let { id ->
-            StreamItem(type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"))
+            StreamItem(
+                type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"),
+                added = o.long("added") ?: 0,
+            )
         }
         ContentType.SERIES -> o.str("series_id")?.let { id ->
-            StreamItem(type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.rating("rating"))
+            StreamItem(
+                type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.rating("rating"),
+                added = o.long("last_modified") ?: 0,
+            )
         }
     }
 
@@ -277,6 +317,7 @@ class XtreamApi(val account: Account) {
             cast = info.str("cast") ?: info.str("actors"),
             cover = info.str("movie_image") ?: info.str("cover_big"),
             ext = data.str("container_extension"),
+            trailer = info.str("youtube_trailer"),
         )
     }
 
@@ -329,6 +370,8 @@ class XtreamApi(val account: Account) {
             releaseDate = info.str("releaseDate") ?: info.str("release_date"),
             cover = info.str("cover"),
             seasons = seasons,
+            cast = info.str("cast"),
+            trailer = info.str("youtube_trailer"),
         )
     }
 
@@ -372,7 +415,24 @@ class XtreamApi(val account: Account) {
             .append("/player_api.php?username=").append(user)
             .append("&password=").append(pass)
         for ((k, v) in params) url.append('&').append(k).append('=').append(Uri.encode(v))
-        val text = httpGet(url.toString()).trim().trimStart('﻿')
+        // Lists (categories, channels, movies, series) are cached on the device.
+        val action = params.firstOrNull { it.first == "action" }?.second
+        val cacheFile = if (action in CACHED_ACTIONS) {
+            listCacheDir()?.let { File(it, md5(params.joinToString("&") { p -> p.first + "=" + p.second }) + ".json") }
+        } else {
+            null
+        }
+        val fresh = cacheFile != null && cacheFile.exists() && System.currentTimeMillis() - cacheFile.lastModified() < LIST_CACHE_MS
+        val text = if (fresh) {
+            cacheFile!!.readText()
+        } else {
+            try {
+                httpGet(url.toString()).also { body -> cacheFile?.let { f -> runCatching { f.writeText(body) } } }
+            } catch (e: IOException) {
+                // Offline or server hiccup: an old list is better than none.
+                if (cacheFile != null && cacheFile.exists()) cacheFile.readText() else throw e
+            }
+        }.trim().trimStart('﻿')
         if (text.isEmpty()) {
             null
         } else {

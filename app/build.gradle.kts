@@ -47,6 +47,10 @@ android {
         jvmTarget = "17"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     lint {
         checkReleaseBuilds = false
         abortOnError = false

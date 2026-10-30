@@ -260,10 +260,10 @@ class BrowseActivity : AppCompatActivity() {
 
     private fun onLongPress(item: StreamItem) {
         if (currentCategory?.id == CAT_CONTINUE) {
-            prefs.removeProgress(item.id)
-            Toast.makeText(this, "Removed from Continue watching", Toast.LENGTH_SHORT).show()
-            allItems = localItems(CAT_CONTINUE)
-            applyFilter(scrollToTop = false)
+            confirmRemoveProgress(this, prefs, item) {
+                allItems = localItems(CAT_CONTINUE)
+                applyFilter(scrollToTop = false)
+            }
             return
         }
         val added = prefs.toggleFavorite(item)

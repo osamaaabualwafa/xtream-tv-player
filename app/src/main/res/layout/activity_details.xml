@@ -69,6 +69,13 @@
                 android:visibility="gone" />
 
             <Button
+                android:id="@+id/trailer"
+                style="@style/TvButton"
+                android:layout_marginLeft="12dp"
+                android:text="▶  Trailer"
+                android:visibility="gone" />
+
+            <Button
                 android:id="@+id/favorite"
                 style="@style/TvButton"
                 android:layout_marginLeft="12dp" />

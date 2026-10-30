@@ -282,7 +282,7 @@ object Session {
     fun api(context: Context): XtreamApi? {
         api?.let { return it }
         val account = Prefs(context).account ?: return null
-        return XtreamApi(account).also { api = it }
+        return XtreamApi(account, context.applicationContext.cacheDir).also { api = it }
     }
 
     fun start(newApi: XtreamApi, info: UserInfo) {
@@ -309,6 +309,28 @@ fun accountProblem(info: UserInfo): String? {
         exp != null && exp * 1000 < System.currentTimeMillis() -> "Subscription expired on ${formatDate(exp)}"
         else -> null
     }
+}
+
+/** Long-press on a Continue watching card: ask first, so a long OK press can't wipe progress by accident. */
+fun confirmRemoveProgress(activity: Activity, prefs: Prefs, item: StreamItem, onRemoved: () -> Unit) {
+    androidx.appcompat.app.AlertDialog.Builder(activity)
+        .setTitle("Remove from Continue watching?")
+        .setMessage("${item.name}\nThe saved position is deleted too.")
+        .setPositiveButton("Remove") { _, _ ->
+            prefs.removeProgress(item.id)
+            android.widget.Toast.makeText(activity, "Removed from Continue watching", android.widget.Toast.LENGTH_SHORT).show()
+            onRemoved()
+        }
+        .setNegativeButton("Keep", null)
+        .show()
+}
+
+/** "7.491" -> "7.5" (favorites saved before ratings were rounded keep the raw value). */
+fun displayRating(raw: String?): String? {
+    val value = raw?.toDoubleOrNull() ?: return raw
+    if (value <= 0.0) return null
+    val rounded = Math.round(value * 10) / 10.0
+    return if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
 }
 
 fun formatDate(unixSeconds: Long): String =
@@ -392,6 +414,8 @@ class ItemAdapter(
     private val grid: Boolean,
     private val onClick: (Int, StreamItem) -> Unit,
     private val onLongClick: ((Int, StreamItem) -> Unit)?,
+    /** Optional row layout (Home rows); defaults to poster grid / channel list. */
+    private val layout: Int? = null,
 ) : RecyclerView.Adapter<ItemAdapter.VH>() {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -414,7 +438,7 @@ class ItemAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val view = LayoutInflater.from(parent.context)
-            .inflate(if (grid) R.layout.item_poster else R.layout.item_channel, parent, false)
+            .inflate(layout ?: if (grid) R.layout.item_poster else R.layout.item_channel, parent, false)
         if (grid) view.onFocusChangeListener = scaleOnFocus
         return VH(view)
     }
@@ -422,7 +446,7 @@ class ItemAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
         holder.title.text = item.name
-        holder.subtitle.text = item.note ?: if (grid) item.rating?.let { "★ $it" } ?: "" else item.num ?: ""
+        holder.subtitle.text = item.note ?: if (grid) displayRating(item.rating)?.let { "★ $it" } ?: "" else item.num ?: ""
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
         holder.image.load(item.image) {
             crossfade(false)

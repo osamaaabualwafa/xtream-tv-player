@@ -1,7 +1,9 @@
 package com.osama.xtreamtv
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -122,6 +124,33 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
+    /** Trailer button when the provider has a YouTube id (or link) for this title. */
+    private fun showTrailer(trailer: String?) {
+        val value = trailer?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        val button = findViewById<Button>(R.id.trailer)
+        button.visibility = View.VISIBLE
+        button.setOnClickListener {
+            val isLink = value.startsWith("http")
+            val intents = if (isLink) {
+                listOf(Intent(Intent.ACTION_VIEW, Uri.parse(value)))
+            } else {
+                listOf(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$value")),
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$value")),
+                )
+            }
+            val started = intents.any { intent ->
+                try {
+                    startActivity(intent)
+                    true
+                } catch (e: ActivityNotFoundException) {
+                    false
+                }
+            }
+            if (!started) Toast.makeText(this, "Install YouTube to watch trailers", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun updateFavoriteButton() {
         val fav = item.id in prefs.favoriteIds(item.type)
         favoriteButton.text = if (fav) "★  Favorite" else "☆  Add to favorites"
@@ -165,6 +194,7 @@ class DetailsActivity : AppCompatActivity() {
                     info.cast?.let { "Cast: $it" },
                 ).joinToString("\n")
                 plot.text = listOfNotNull(info.plot, extra.ifEmpty { null }).joinToString("\n\n")
+                showTrailer(info.trailer)
                 loadPoster(info.cover)
             } catch (e: CancellationException) {
                 throw e
@@ -231,7 +261,8 @@ class DetailsActivity : AppCompatActivity() {
                     info.releaseDate?.take(4),
                     info.genre,
                 ).joinToString("   ·   ")
-                plot.text = info.plot ?: ""
+                plot.text = listOfNotNull(info.plot, info.cast?.let { "Cast: $it" }).joinToString("\n\n")
+                showTrailer(info.trailer)
                 loadPoster(info.cover)
                 seasons = info.seasons
                 if (seasons.isEmpty()) {
