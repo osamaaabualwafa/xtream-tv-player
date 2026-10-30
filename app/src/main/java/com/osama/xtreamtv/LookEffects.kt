@@ -36,6 +36,54 @@ object Look {
     fun applyBackground(activity: Activity) {
         val index = Prefs(activity).backgroundStyle.coerceIn(0, BACKGROUND_STYLES.size - 1)
         activity.theme.applyStyle(BACKGROUND_STYLES[index], true)
+        // Once the screen has its size (after setContentView and the first layout).
+        val decor = activity.window.decorView
+        decor.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (flattenBackground(activity)) decor.viewTreeObserver.removeOnGlobalLayoutListener(this)
+            }
+        })
+    }
+
+    /** The screen background painted once, shared by every screen (same style, colour and size). */
+    private var flatKey: String? = null
+    private var flatBitmap: android.graphics.Bitmap? = null
+
+    /**
+     * The glow backgrounds are three full-screen layers (a fill and two soft gradients) on top of
+     * the window's own fill, all repainted on every frame while a list scrolls: too much for TV
+     * graphics chips. Paint them once into a picture and drop the hidden window fill.
+     */
+    /** True when done (or nothing to do); false to try again after the next layout. */
+    private fun flattenBackground(activity: Activity): Boolean {
+        if (activity.isFinishing) return true
+        val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return false
+        val holder = if (content.background != null) content else content.getChildAt(0) ?: return false
+        val bg = holder.background ?: return true
+        val w = holder.width
+        val h = holder.height
+        if (w <= 0 || h <= 0) return false
+        // Full-screen screens only (not a pop-up window), and only the drawn glow kinds.
+        if (w < activity.resources.displayMetrics.widthPixels / 2) return true
+        if (bg is android.graphics.drawable.ColorDrawable || bg is android.graphics.drawable.BitmapDrawable) {
+            if (bg is android.graphics.drawable.ColorDrawable && bg.alpha == 255) activity.window.setBackgroundDrawable(null)
+            return true
+        }
+        val prefs = Prefs(activity)
+        val key = "${prefs.backgroundStyle}/${prefs.accentIndex}/${w}x$h"
+        val bitmap = flatBitmap.takeIf { flatKey == key } ?: try {
+            android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
+                bg.setBounds(0, 0, w, h)
+                bg.draw(Canvas(b))
+                flatBitmap = b
+                flatKey = key
+            }
+        } catch (e: OutOfMemoryError) {
+            return true
+        }
+        holder.background = android.graphics.drawable.BitmapDrawable(activity.resources, bitmap)
+        activity.window.setBackgroundDrawable(null)
+        return true
     }
 
     /** In attachBaseContext: the chosen text size on top of the TV's own. */

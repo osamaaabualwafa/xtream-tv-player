@@ -125,6 +125,7 @@ class PlayerActivity : AppCompatActivity() {
             current?.get()?.takeIf { it.wasMini }?.finish()
         }
         private const val VOD_RETRIES = 5
+        private const val LIVE_RETRIES = 4
         private const val STILL_WATCHING_AFTER = 3
         private val PARSE_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
@@ -216,6 +217,9 @@ class PlayerActivity : AppCompatActivity() {
     private var probed = false
     /** Movies / episodes: reconnect attempts after a network or server error (reset once playing). */
     private var vodRetries = 0
+    /** Live: tries for the current channel after the server refused it (connection still counted). */
+    private var liveRetries = 0
+    private val retryLive = Runnable { playChannel(channelIndex, banner = false, retry = true) }
     /** Episodes started on their own (no key pressed since): ask "Still watching?" at [STILL_WATCHING_AFTER]. */
     private var autoEpisodes = 0
     private val retryVod = Runnable {
@@ -698,6 +702,21 @@ class PlayerActivity : AppCompatActivity() {
                 playerView.postDelayed(retryVod, 2_000L * vodRetries)
                 return
             }
+            // Live: a 1-connection account is refused for a few seconds after changing channels
+            // (the server still counts the old one). Try again a few times before showing an error.
+            if (isLive && liveRetries < LIVE_RETRIES && (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                    error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT)
+            ) {
+                liveRetries++
+                p.stop()
+                errorView.text = "Connecting…"
+                errorView.visibility = View.VISIBLE
+                progress.visibility = View.VISIBLE
+                playerView.removeCallbacks(retryLive)
+                playerView.postDelayed(retryLive, 1_500L * liveRetries)
+                return
+            }
             val fallback = fallbackUrl
             if (isLive && !triedFallback && fallback != null) {
                 // Some servers don't serve HLS: retry the channel once as MPEG-TS.
@@ -788,6 +807,7 @@ class PlayerActivity : AppCompatActivity() {
         val list = Session.zapList
         if (list.isEmpty()) return finish()
         channelIndex = Math.floorMod(channelIndex + step, list.size)
+        playerView.removeCallbacks(retryLive)
         // Drop the old stream now (one connection), so the next one can start straight away.
         player?.stop()
         errorView.visibility = View.GONE
@@ -796,8 +816,10 @@ class PlayerActivity : AppCompatActivity() {
         playerView.postDelayed(startZap, 350)
     }
 
-    private fun playChannel(index: Int, banner: Boolean = true) {
+    private fun playChannel(index: Int, banner: Boolean = true, retry: Boolean = false) {
         playerView.removeCallbacks(startZap)
+        playerView.removeCallbacks(retryLive)
+        if (!retry) liveRetries = 0
         val list = Session.zapList
         if (list.isEmpty()) return finish()
         channelIndex = ((index % list.size) + list.size) % list.size
@@ -820,6 +842,9 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun playUrl(url: String, mimeType: String? = null) {
         val p = player ?: return
+        // A new channel gets a fresh video decoder: TV decoders (MediaTek) reused across a
+        // picture-size change keep playing sound but show a black picture.
+        if (isLive) p.stop()
         currentUrl = url
         p.setMediaItem(mediaItem(url, mimeType))
         p.prepare()
@@ -979,6 +1004,12 @@ class PlayerActivity : AppCompatActivity() {
             wasMini = true
             // Only the picture in the corner.
             clearForMini()
+            // The app itself came up underneath (not the TV's home screen): no corner inside the
+            // app, back to full screen.
+            playerView.postDelayed({
+                val screen = MiniPlayerBar.appScreen?.get()
+                if (wasMini && !isFinishing && screen != null && !screen.isFinishing) expandMini(screen)
+            }, 300)
         } else {
             wasMini = false
             if (!isFinishing) restoredFromMini = true
@@ -2130,7 +2161,7 @@ class PlayerActivity : AppCompatActivity() {
         numberEntry.text = numberBuffer
         numberEntry.visibility = View.VISIBLE
         numberEntry.removeCallbacks(commitNumber)
-        numberEntry.postDelayed(commitNumber, 1_500)
+        numberEntry.postDelayed(commitNumber, 2_000)
     }
 
     private fun commitChannelNumber() {
@@ -2192,6 +2223,7 @@ class PlayerActivity : AppCompatActivity() {
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
         if (::playerView.isInitialized) playerView.removeCallbacks(retryVod)
         if (::playerView.isInitialized) playerView.removeCallbacks(startZap)
+        if (::playerView.isInitialized) playerView.removeCallbacks(retryLive)
         if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()
     }

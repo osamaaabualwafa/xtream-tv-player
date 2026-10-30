@@ -9,12 +9,18 @@ import android.app.Activity
  */
 object MiniPlayerBar {
 
+    /** One of the app's own screens is on screen (between its onResume and onPause). */
+    var appScreen: java.lang.ref.WeakReference<Activity>? = null
+        private set
+
     /** Call in onResume of the app's screens. */
     fun attach(activity: Activity) {
+        appScreen = java.lang.ref.WeakReference(activity)
         if (PlayerActivity.miniTitle() != null) PlayerActivity.expandMini(activity)
     }
 
-    /** Call in onPause (nothing to undo at the moment). */
-    @Suppress("UNUSED_PARAMETER")
-    fun detach(activity: Activity) {}
+    /** Call in onPause. */
+    fun detach(activity: Activity) {
+        if (appScreen?.get() === activity) appScreen = null
+    }
 }

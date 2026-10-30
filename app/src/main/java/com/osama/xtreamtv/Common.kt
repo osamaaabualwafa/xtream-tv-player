@@ -608,13 +608,31 @@ val scaleOnFocus = View.OnFocusChangeListener { v, hasFocus ->
     if (hasFocus) {
         for (i in 0 until parent.childCount) {
             val c = parent.getChildAt(i)
-            c.animate().alpha(if (c === v) 1f else 0.72f).setDuration(140).start()
+            dimCard(c, c !== v)
         }
     } else {
         parent.post {
-            if (!parent.hasFocus()) for (i in 0 until parent.childCount) parent.getChildAt(i).animate().alpha(1f).setDuration(140).start()
+            if (!parent.hasFocus()) for (i in 0 until parent.childCount) dimCard(parent.getChildAt(i), false)
         }
     }
+}
+
+/**
+ * Dims a card with a dark overlay rather than see-through alpha: a see-through card is drawn
+ * twice (into its own layer, then onto the screen) on every frame while a grid scrolls, which
+ * TV graphics chips can't keep up with. The overlay looks the same and costs nothing.
+ */
+fun dimCard(card: View, dim: Boolean) {
+    if (android.os.Build.VERSION.SDK_INT < 23) {
+        card.animate().alpha(if (dim) 0.72f else 1f).setDuration(140).start()
+        return
+    }
+    if (card.alpha != 1f) card.alpha = 1f
+    val shade = (card.foreground as? android.graphics.drawable.ColorDrawable)
+        ?: android.graphics.drawable.ColorDrawable(0xFF000000.toInt()).also { it.alpha = 0; card.foreground = it }
+    val target = if (dim) 72 else 0
+    if (shade.alpha == target) return
+    android.animation.ObjectAnimator.ofInt(shade, "alpha", shade.alpha, target).setDuration(140).start()
 }
 
 /** Simple list of focusable rows with a title and optional subtitle. */
@@ -623,6 +641,8 @@ class TextAdapter<T>(
     private val bind: (VH, T) -> Unit,
     private val onClick: (Int, T) -> Unit,
     private val onLongClick: ((Int, T) -> Unit)? = null,
+    /** Called when a row gets the highlight. */
+    private val onFocus: ((Int, T) -> Unit)? = null,
 ) : RecyclerView.Adapter<TextAdapter.VH>() {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -654,6 +674,12 @@ class TextAdapter<T>(
     override fun onBindViewHolder(holder: VH, position: Int) {
         bind(holder, items[position])
         holder.itemView.isActivated = position == activeIndex
+        onFocus?.let { focus ->
+            holder.itemView.setOnFocusChangeListener { _, hasFocus ->
+                val p = holder.bindingAdapterPosition
+                if (hasFocus && p != RecyclerView.NO_POSITION) focus(p, items[p])
+            }
+        }
         holder.itemView.setOnClickListener {
             val p = holder.bindingAdapterPosition
             if (p != RecyclerView.NO_POSITION) onClick(p, items[p])
@@ -668,6 +694,9 @@ class TextAdapter<T>(
         }
     }
 }
+
+/** Poster / logo placeholder while loading: a faint flat tint (static, so nothing redraws). */
+private val PLACEHOLDER_TINT = android.graphics.drawable.ColorDrawable(0x14FFFFFF)
 
 /** Channels as rows (grid=false) or movies/series as posters (grid=true). */
 class ItemAdapter(
@@ -750,7 +779,10 @@ class ItemAdapter(
         }
         holder.itemView.findViewById<View?>(R.id.live_badge)?.visibility = if (item.type == ContentType.LIVE) View.VISIBLE else View.GONE
         // Recycled rows may still be dimmed from the focus effect.
-        if (!holder.itemView.hasFocus()) holder.itemView.alpha = 1f
+        if (!holder.itemView.hasFocus()) {
+            holder.itemView.alpha = 1f
+            (holder.itemView.foreground as? android.graphics.drawable.ColorDrawable)?.alpha = 0
+        }
         holder.itemView.findViewById<View?>(R.id.new_badge)?.visibility = if (item.id in newIds) View.VISIBLE else View.GONE
         onBindExtra?.invoke(holder, item)
         val focusCallback = onFocusItem
@@ -763,8 +795,10 @@ class ItemAdapter(
         }
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
         holder.image.load(item.image) {
-            crossfade(true)
-            placeholder(ShimmerDrawable())
+            // Short fade over a still placeholder: a moving shimmer on every card still loading,
+            // plus long fades, keep the whole grid redrawing while it scrolls.
+            crossfade(120)
+            placeholder(PLACEHOLDER_TINT)
             error(R.drawable.placeholder)
             fallback(R.drawable.placeholder)
         }
@@ -799,6 +833,15 @@ fun centerOnFocus(parent: RecyclerView, child: View, immediate: Boolean): Boolea
 }
 
 class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyclerview.widget.GridLayoutManager(context, spanCount) {
+    /** Down on the last row stays there (instead of jumping into the category list). */
+    override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
+        if (direction != View.FOCUS_DOWN) return null
+        val item = findContainingItemView(focused) ?: return null
+        val pos = getPosition(item)
+        val lastRowStart = ((itemCount - 1) / spanCount) * spanCount
+        return if (pos >= lastRowStart) focused else null
+    }
+
     override fun requestChildRectangleOnScreen(
         parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
     ): Boolean = centerOnFocus(parent, child, immediate)
@@ -808,6 +851,9 @@ class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyc
 fun RecyclerView.tuneForTv() {
     setHasFixedSize(true)
     setItemViewCacheSize(24)
+    // A new category replaces every card at once: keep enough spare cards to fill the screen
+    // again, instead of building ~25 new ones (that took ~0.4 s on a TV, a visible stall).
+    recycledViewPool.setMaxRecycledViews(0, 64)
     (itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.supportsChangeAnimations = false
 }
 
@@ -830,8 +876,9 @@ class RowLayoutManager(context: android.content.Context, orientation: Int = HORI
         if (direction != forward && direction != backward) return null
         val item = findContainingItemView(focused) ?: return null
         val next = getPosition(item) + if (direction == forward) 1 else -1
-        // List ends: let Up/Down (Left/Right for a list) leave normally; along the row, stay.
-        if (next < 0 || next >= itemCount) return if (orientation == HORIZONTAL) focused else null
+        // Ends: along a row, stay. A list's last item stays too (Down would jump to whatever is
+        // nearest, often another list); Up from its first item leaves normally (search, tabs).
+        if (next < 0 || next >= itemCount) return if (orientation == HORIZONTAL || next >= itemCount) focused else null
         findViewByPosition(next)?.let { return it }
         scrollToPosition(next)
         return focused

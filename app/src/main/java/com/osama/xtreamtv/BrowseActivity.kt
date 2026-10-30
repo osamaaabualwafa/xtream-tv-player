@@ -62,6 +62,11 @@ class BrowseActivity : AppCompatActivity() {
     private var allItems: List<StreamItem> = emptyList()
     private var currentCategory: Category? = null
     private var loadJob: Job? = null
+    private var focusedCategory: Category? = null
+    private val selectFocused = Runnable {
+        val cat = focusedCategory
+        if (cat != null && cat != currentCategory && categoriesView.hasFocus()) selectCategory(cat)
+    }
 
     /** Items per category id (plus CAT_ALL / CAT_FAV / CAT_CONTINUE), shown next to each category. */
     private var counts: Map<String, Int> = emptyMap()
@@ -116,6 +121,15 @@ class BrowseActivity : AppCompatActivity() {
                 }
             },
             onLongClick = { _, cat -> categoryOptions(cat) },
+            // Moving through the categories shows each one's items (after a short pause, so
+            // scrolling quickly past many categories doesn't load each of them).
+            onFocus = { _, cat ->
+                categoriesView.removeCallbacks(selectFocused)
+                focusedCategory = cat
+                if (cat.id != CAT_HIDDEN) categoryAdapter.activeIndex = categoryAdapter.items.indexOf(cat)
+                warmPosters(cat)
+                if (cat.id != CAT_HIDDEN && cat != currentCategory) categoriesView.postDelayed(selectFocused, 180)
+            },
         )
         // Long category lists glide like the posters (the highlight stays near the middle).
         categoriesView.layoutManager = RowLayoutManager(
@@ -455,6 +469,8 @@ class BrowseActivity : AppCompatActivity() {
 
     private fun selectCategory(category: Category) {
         currentCategory = category
+        // The strip described the old category's item: blank it (keeping its space) until one is highlighted.
+        findViewById<View>(R.id.info_strip).visibility = View.INVISIBLE
         categoryAdapter.activeIndex = categoryAdapter.items.indexOf(category)
         showCategoryTitle(category, counts[category.id])
         loadJob?.cancel()
@@ -463,6 +479,15 @@ class BrowseActivity : AppCompatActivity() {
             showLoading(false)
             allItems = localItems(category.id)
             showCategoryTitle(category, allItems.size)
+            applyFilter()
+            return
+        }
+        // Already on the device (most categories once the full list is in): show it at once,
+        // without a loading pause or an empty grid in between.
+        cachedStreams(if (category.id == CAT_ALL) null else category.id)?.let { cached ->
+            showLoading(false)
+            allItems = cached
+            showCategoryTitle(category, cached.size)
             applyFilter()
             return
         }
@@ -501,11 +526,28 @@ class BrowseActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val all = loadStreams(null)
+                // Every category's list in one pass, in the background: moving through the
+                // categories is then a lookup, not a search through tens of thousands of items.
+                val byCategory = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val lists = HashMap<String, ArrayList<StreamItem>>()
+                    for (item in all) for (id in item.categoryIds) lists.getOrPut(id) { ArrayList() }.add(item)
+                    lists
+                }
+                for ((id, list) in byCategory) Session.streamCache.putIfAbsent("${type.name}:$id", list)
                 val map = HashMap<String, Int>()
-                for (item in all) for (id in item.categoryIds) map[id] = (map[id] ?: 0) + 1
+                for ((id, list) in byCategory) map[id] = list.size
                 map[CAT_ALL] = all.size
                 counts = map
                 refreshLocalCounts()
+                // Categories the full list doesn't mention (like "recently added"): ask the server
+                // for each one, a few at a time, so every category shows its count.
+                val missing = serverCategories.filter { it.id !in map }
+                for (cat in missing) {
+                    val n = try { loadStreams(cat.id).size } catch (e: CancellationException) { throw e } catch (e: Exception) { continue }
+                    counts = HashMap(counts).apply { put(cat.id, n) }
+                    categoryAdapter.items.indexOfFirst { it.id == cat.id }.takeIf { it >= 0 }?.let { categoryAdapter.notifyItemChanged(it, "count") }
+                    if (currentCategory?.id == cat.id) showCategoryTitle(cat, n)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -523,6 +565,40 @@ class BrowseActivity : AppCompatActivity() {
         counts = map
         categoryAdapter.notifyItemRangeChanged(0, categoryAdapter.itemCount, "counts")
         currentCategory?.let { if (counts[it.id] != null && it.id != CAT_FAV && it.id != CAT_CONTINUE) showCategoryTitle(it, counts[it.id]) }
+    }
+
+    /** Poster size seen in this grid (for loading pictures ahead at the right size). */
+    private var posterW = 0
+    private var posterH = 0
+
+    /**
+     * A category just got the highlight: start its first screen of posters now, so they are
+     * ready (in memory) when the grid switches to it a moment later.
+     */
+    private fun warmPosters(cat: Category) {
+        if (type == ContentType.LIVE || cat.id == CAT_HIDDEN) return
+        if (posterW <= 0) {
+            itemsView.getChildAt(0)?.findViewById<View>(R.id.image)?.let { posterW = it.width; posterH = it.height }
+        }
+        if (posterW <= 0 || posterH <= 0) return
+        val list = when (cat.id) {
+            CAT_FAV, CAT_CONTINUE -> localItems(cat.id)
+            else -> cachedStreams(if (cat.id == CAT_ALL) null else cat.id)
+        } ?: return
+        val loader = coil.Coil.imageLoader(this)
+        for (item in list.take(18)) {
+            val url = item.image ?: continue
+            loader.enqueue(coil.request.ImageRequest.Builder(this).data(url).size(posterW, posterH).build())
+        }
+    }
+
+    /** The list from memory when we have it (no network), else null. */
+    private fun cachedStreams(categoryId: String?): List<StreamItem>? {
+        val key = "${type.name}:${categoryId ?: CAT_ALL}"
+        Session.streamCache[key]?.let { return it }
+        if (categoryId == null) return null
+        val all = Session.streamCache["${type.name}:$CAT_ALL"] ?: return null
+        return all.filter { categoryId in it.categoryIds }.takeIf { it.isNotEmpty() }?.also { Session.streamCache[key] = it }
     }
 
     private suspend fun loadStreams(categoryId: String?): List<StreamItem> {

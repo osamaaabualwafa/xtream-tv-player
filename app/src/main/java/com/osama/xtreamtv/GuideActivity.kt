@@ -72,7 +72,11 @@ class GuideActivity : AppCompatActivity() {
 
         val channelAdapter = ItemAdapter(
             grid = false,
-            onClick = { index, _ -> selectChannel(index, focusPrograms = true) },
+            // OK again on the shown channel with no guide (or one that failed to load): watch it.
+            onClick = { index, _ ->
+                if (index == selected && programAdapter.items.isEmpty() && progress.visibility != View.VISIBLE) playLive()
+                else selectChannel(index, focusPrograms = true)
+            },
             onLongClick = null,
         )
         channelAdapter.favorites = Prefs(this).favoriteIds(ContentType.LIVE)
@@ -116,7 +120,7 @@ class GuideActivity : AppCompatActivity() {
                 progress.visibility = View.GONE
                 programAdapter.submit(list)
                 if (list.isEmpty()) {
-                    message.text = "No programme guide for this channel."
+                    message.text = "No programme guide for this channel.\nPress OK again to watch it."
                     message.visibility = View.VISIBLE
                     return@launch
                 }
@@ -130,7 +134,7 @@ class GuideActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 progress.visibility = View.GONE
-                message.text = "Couldn't load the guide.\n${e.message ?: ""}"
+                message.text = "Couldn't load the guide.\nPress OK again to watch the channel."
                 message.visibility = View.VISIBLE
             }
         }
