@@ -116,6 +116,29 @@ class Prefs(context: Context) {
         get() = global.getString("sub_lang", null)
         set(value) = global.edit().putString("sub_lang", value).apply()
 
+    /** Subtitle size index: 0 small, 1 medium, 2 large, 3 extra large. */
+    var subtitleSize: Int
+        get() = global.getInt("sub_size", 1)
+        set(value) = global.edit().putInt("sub_size", value).apply()
+
+    /** Dark box behind subtitles for readability. */
+    var subtitleBackground: Boolean
+        get() = global.getBoolean("sub_bg", false)
+        set(value) = global.edit().putBoolean("sub_bg", value).apply()
+
+    /** Picture size index: 0 fit, 1 zoom, 2 stretch. */
+    var pictureSize: Int
+        get() = global.getInt("picture_size", 0)
+        set(value) = global.edit().putInt("picture_size", value).apply()
+
+    fun isWatched(key: String): Boolean = sp.getStringSet("watched", emptySet())?.contains(key) == true
+
+    fun setWatched(key: String, watched: Boolean) {
+        val set = HashSet(sp.getStringSet("watched", emptySet()) ?: emptySet())
+        if (watched) set.add(key) else set.remove(key)
+        sp.edit().putStringSet("watched", set).apply()
+    }
+
     /** Learned per provider: movies/episodes are HLS playlists despite their .mkv/.mp4 names. */
     var vodIsHls: Boolean
         get() = sp.getBoolean("vod_hls", false)
@@ -221,12 +244,15 @@ fun watchEntryFromJson(o: JSONObject): WatchEntry? {
 
 fun StreamItem.toJson(): JSONObject = JSONObject()
     .put("type", type.name).put("id", id).put("name", name).put("image", image)
-    .put("cat", categoryId).put("ext", ext).put("num", num).put("rating", rating)
+    .put("cat", categoryId).put("ext", ext).put("num", num).put("rating", rating).put("arch", archiveDays)
 
 fun streamItemFromJson(o: JSONObject): StreamItem? {
     val type = try { ContentType.valueOf(o.str("type") ?: return null) } catch (e: IllegalArgumentException) { return null }
     val id = o.str("id") ?: return null
-    return StreamItem(type, id, o.str("name") ?: id, o.str("image"), o.str("cat"), o.str("ext"), o.str("num"), o.str("rating"))
+    return StreamItem(
+        type, id, o.str("name") ?: id, o.str("image"), o.str("cat"), o.str("ext"), o.str("num"), o.str("rating"),
+        archiveDays = o.int("arch") ?: 0,
+    )
 }
 
 /** In-memory state shared between screens; rebuilt from Prefs after process death. */
@@ -248,6 +274,8 @@ object Session {
     var zapList: List<StreamItem> = emptyList()
     var zapTitle: String? = null
     var seriesQueue: SeriesQueue? = null
+    /** Set by the TV guide when opened from the live player: channel index to switch to. */
+    var pendingChannel: Int? = null
     val streamCache = HashMap<String, List<StreamItem>>()
     val categoryCache = HashMap<ContentType, List<Category>>()
 

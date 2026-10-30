@@ -93,7 +93,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="◀  Channel list     ▲ ▼  Change channel"
+                android:text="◀  Channels     ▲ ▼  Change channel     ▶  Options     0–9  Channel number"
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
         </LinearLayout>
@@ -169,6 +169,25 @@
             android:textSize="16sp"
             android:textStyle="bold" />
     </LinearLayout>
+
+    <!-- Live: channel number being typed on the remote. -->
+    <TextView
+        android:id="@+id/number_entry"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="40dp"
+        android:background="@drawable/bg_panel"
+        android:minWidth="140dp"
+        android:gravity="center"
+        android:paddingLeft="28dp"
+        android:paddingTop="10dp"
+        android:paddingRight="28dp"
+        android:paddingBottom="10dp"
+        android:textColor="@color/text"
+        android:textSize="48sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <!-- Remote play/pause feedback. -->
     <TextView
@@ -287,7 +306,7 @@
             android:id="@+id/btn_tracks"
             style="@style/TvButton"
             android:layout_marginRight="12dp"
-            android:text="Audio &amp; subtitles"
+            android:text="Settings"
             android:visibility="gone" />
 
         <Button

@@ -30,6 +30,8 @@ data class StreamItem(
     val rating: String?,
     /** Extra line shown instead of the rating, e.g. resume progress. */
     val note: String? = null,
+    /** Live channels: days of catch-up (tv_archive) the server keeps; 0 = none. */
+    val archiveDays: Int = 0,
 )
 
 data class UserInfo(
@@ -42,6 +44,23 @@ data class UserInfo(
 )
 
 data class EpgEntry(val title: String, val description: String, val start: Long?, val end: Long?)
+
+/** One programme in the full guide. [startText] is the server-local "yyyy-MM-dd HH:mm:ss". */
+data class GuideEntry(
+    val title: String,
+    val description: String,
+    val start: Long,
+    val end: Long,
+    val startText: String?,
+    val hasArchive: Boolean,
+) {
+    /** "2026-10-30 20:00:00" -> "2026-10-30:20-00", the form timeshift URLs use. */
+    fun timeshiftStart(): String {
+        val text = startText?.trim()
+        if (text != null && text.length >= 16) return text.substring(0, 10) + ":" + text.substring(11, 16).replace(':', '-')
+        return java.text.SimpleDateFormat("yyyy-MM-dd:HH-mm", java.util.Locale.US).format(java.util.Date(start * 1000))
+    }
+}
 
 data class VodInfo(
     val name: String?,
@@ -174,6 +193,19 @@ class XtreamApi(val account: Account) {
 
     fun episodeUrl(episodeId: String, ext: String) = "$base/series/$user/$pass/$episodeId.$ext"
 
+    /** Catch-up: [start] is "yyyy-MM-dd:HH-mm" in the server's time, [minutes] the programme length. */
+    fun timeshiftUrl(streamId: String, start: String, minutes: Int) = "$base/timeshift/$user/$pass/$minutes/$start/$streamId.ts"
+
+    /** Full guide for one channel (past and upcoming), oldest first. */
+    suspend fun fullEpg(streamId: String): List<GuideEntry> {
+        val root = call("action" to "get_simple_data_table", "stream_id" to streamId) as? JSONObject ?: return emptyList()
+        return objects(root.optJSONArray("epg_listings")).mapNotNull { o ->
+            val start = o.long("start_timestamp") ?: return@mapNotNull null
+            val end = o.long("stop_timestamp") ?: o.long("end_timestamp") ?: return@mapNotNull null
+            GuideEntry(decodeBase64(o.str("title")), decodeBase64(o.str("description")), start, end, o.str("start"), o.int("has_archive") == 1)
+        }.distinctBy { it.start }.sortedBy { it.start }
+    }
+
     suspend fun userInfo(): UserInfo {
         val root = call() as? JSONObject ?: throw IOException("This doesn't look like an Xtream Codes server")
         val u = root.optJSONObject("user_info") ?: throw IOException("Wrong username or password")
@@ -216,7 +248,10 @@ class XtreamApi(val account: Account) {
 
     private fun parseItem(type: ContentType, o: JSONObject): StreamItem? = when (type) {
         ContentType.LIVE -> o.str("stream_id")?.let { id ->
-            StreamItem(type, id, o.str("name") ?: "Channel $id", o.str("stream_icon"), o.str("category_id"), null, o.str("num"), null)
+            StreamItem(
+                type, id, o.str("name") ?: "Channel $id", o.str("stream_icon"), o.str("category_id"), null, o.str("num"), null,
+                archiveDays = if (o.int("tv_archive") == 1) o.int("tv_archive_duration")?.coerceAtLeast(1) ?: 1 else 0,
+            )
         }
         ContentType.MOVIE -> o.str("stream_id")?.let { id ->
             StreamItem(type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"))

@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.graphics.Color
 import android.os.Build
+import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -25,13 +27,15 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.DefaultTrackNameProvider
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
@@ -57,16 +61,40 @@ class PlayerActivity : AppCompatActivity() {
                 .putExtra(EXTRA_LIVE, true)
                 .putExtra(EXTRA_INDEX, index)
 
-        fun vodIntent(context: Context, url: String, title: String, key: String, startMs: Long, entry: WatchEntry): Intent =
+        /** [askResume]: with a saved position, ask "Resume or start over" before playing. */
+        fun vodIntent(
+            context: Context, url: String, title: String, key: String, startMs: Long, entry: WatchEntry?,
+            askResume: Boolean = true,
+        ): Intent =
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_LIVE, false)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_KEY, key)
                 .putExtra(EXTRA_START, startMs)
-                .putExtra(EXTRA_WATCH, entry.toJson().toString())
+                .putExtra(EXTRA_ASK_RESUME, askResume)
+                .apply { if (entry != null) putExtra(EXTRA_WATCH, entry.toJson().toString()) }
+
+        /** A past programme from the TV guide (server timeshift). */
+        fun catchupIntent(context: Context, url: String, title: String): Intent =
+            Intent(context, PlayerActivity::class.java)
+                .putExtra(EXTRA_LIVE, false)
+                .putExtra(EXTRA_URL, url)
+                .putExtra(EXTRA_TITLE, title)
+                .putExtra(EXTRA_KEY, "catchup")
+                .putExtra(EXTRA_CATCHUP, true)
+                .putExtra(EXTRA_ASK_RESUME, false)
 
         private const val EXTRA_WATCH = "watch"
+        private const val EXTRA_ASK_RESUME = "ask_resume"
+        private const val EXTRA_CATCHUP = "catchup"
+        private val SUBTITLE_SIZES = listOf("Small" to 0.8f, "Medium" to 1.0f, "Large" to 1.3f, "Extra large" to 1.6f)
+        private val PICTURE_SIZES = listOf(
+            "Fit" to AspectRatioFrameLayout.RESIZE_MODE_FIT,
+            "Zoom (fill screen)" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+            "Stretch" to AspectRatioFrameLayout.RESIZE_MODE_FILL,
+        )
+        private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
         private const val NEXT_PROMPT_MS = 30_000L
         private val PARSE_ERRORS = setOf(
@@ -109,6 +137,29 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var seekBackText: TextView
     private lateinit var seekForwardTime: TextView
     private lateinit var seekBackTime: TextView
+    private lateinit var numberEntry: TextView
+
+    // Resume prompt, catch-up, sleep timer, speed.
+    private var askResume = true
+    private var resumeAsked = false
+    private var isCatchup = false
+    private var sleepAtEnd = false
+    private var sleepAt = 0L
+    private var speed = 1f
+    private val sleepNow = Runnable {
+        player?.playWhenReady = false
+        Toast.makeText(this, "Sleep timer: playback stopped", Toast.LENGTH_LONG).show()
+        finish()
+    }
+
+    // Live: channel number entry, last channel, pause.
+    private var numberBuffer = ""
+    private val commitNumber = Runnable { commitChannelNumber() }
+    private var currentChannel: StreamItem? = null
+    private var currentList: List<StreamItem> = emptyList()
+    private var currentListTitle: String? = null
+    private var lastChannel: Triple<List<StreamItem>, StreamItem, String?>? = null
+    private var liveResumedAt = 0L
 
     // "Next episode in Ns" prompt near the end of an episode.
     private enum class CardAction { NONE, NEXT_EPISODE }
@@ -200,6 +251,9 @@ class PlayerActivity : AppCompatActivity() {
         seekBackText = findViewById(R.id.seek_back_text)
         seekForwardTime = findViewById(R.id.seek_forward_time)
         seekBackTime = findViewById(R.id.seek_back_time)
+        numberEntry = findViewById(R.id.number_entry)
+        applySubtitleStyle()
+        playerView.resizeMode = PICTURE_SIZES[prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)].second
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -216,7 +270,10 @@ class PlayerActivity : AppCompatActivity() {
             watchEntry = intent.getStringExtra(EXTRA_WATCH)?.let {
                 try { watchEntryFromJson(JSONObject(it)) } catch (e: Exception) { null }
             }
-            if (prefs.vodIsHls) vodMimeType = MimeTypes.APPLICATION_M3U8
+            isCatchup = intent.getBooleanExtra(EXTRA_CATCHUP, false)
+            askResume = intent.getBooleanExtra(EXTRA_ASK_RESUME, true)
+            // Catch-up streams are plain MPEG-TS; the HLS guess only applies to movies/episodes.
+            if (prefs.vodIsHls && !isCatchup) vodMimeType = MimeTypes.APPLICATION_M3U8
             playerView.useController = true
             playerView.controllerShowTimeoutMs = 5_000
             // Pausing (e.g. the remote play/pause button) shows a small icon, not the full controls.
@@ -248,6 +305,11 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         if (!::playerView.isInitialized) return
+        // Back from the TV guide with a channel picked.
+        Session.pendingChannel?.let { index ->
+            Session.pendingChannel = null
+            if (isLive) channelIndex = index.coerceIn(0, (Session.zapList.size - 1).coerceAtLeast(0))
+        }
         initPlayer()
         if (!isLive) {
             playerView.postDelayed(autoSave, 30_000)
@@ -298,7 +360,30 @@ class PlayerActivity : AppCompatActivity() {
         p.setMediaItem(mediaItem(vodUrl, vodMimeType))
         if (startPosition > 0) p.seekTo(startPosition)
         p.prepare()
-        p.playWhenReady = true
+        p.setPlaybackSpeed(speed)
+        if (askResume && !resumeAsked && startPosition > 5_000) {
+            resumeAsked = true
+            p.playWhenReady = false
+            askResumeOrRestart()
+        } else {
+            p.playWhenReady = true
+        }
+    }
+
+    private fun askResumeOrRestart() {
+        val pos = startPosition
+        AlertDialog.Builder(this)
+            .setTitle(vodTitle)
+            .setItems(arrayOf("▶   Resume from ${formatDuration(pos)}", "↺   Start from the beginning")) { _, which ->
+                val p = player ?: return@setItems
+                if (which == 1) {
+                    p.seekTo(0)
+                    startPosition = 0
+                }
+                p.playWhenReady = true
+            }
+            .setOnCancelListener { player?.playWhenReady = true }
+            .show()
     }
 
     private fun mediaItem(url: String, mimeType: String?): MediaItem =
@@ -314,12 +399,14 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun saveVodPosition(p: Player) {
+        if (isCatchup) return
         val pos = p.currentPosition
         val duration = p.duration
         // "Finished" = last minute, or last 5% for short videos.
         if (duration != C.TIME_UNSET && duration > 0 && pos > duration - minOf(60_000L, duration / 20)) {
             // Watched to the end: start from the beginning next time and drop it from Continue watching.
             prefs.removeProgress(resumeKey)
+            prefs.setWatched(resumeKey, true)
             startPosition = 0
         } else if (pos > 5_000) {
             prefs.savePosition(resumeKey, pos)
@@ -336,18 +423,23 @@ class PlayerActivity : AppCompatActivity() {
             progress.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
             if (state == Player.STATE_READY) errorView.visibility = View.GONE
             if (state == Player.STATE_ENDED && !isLive) {
-                prefs.removeProgress(resumeKey)
-                // Series: carry on with the next episode, like a TV binge.
-                if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) else finish()
+                if (!isCatchup) {
+                    prefs.removeProgress(resumeKey)
+                    prefs.setWatched(resumeKey, true)
+                }
+                // Series: carry on with the next episode, like a TV binge (unless the sleep timer says stop).
+                if (hasNextEpisode && !sleepAtEnd) playEpisodeAt(episodeIndex + 1) else finish()
             }
-        }
-
-        override fun onTracksChanged(tracks: Tracks) {
-            if (!isLive) updateTracksButton(tracks)
         }
 
         override fun onPlayerError(error: PlaybackException) {
             val p = player ?: return
+            // A live stream paused for a while often drops its connection: tune in again instead of failing.
+            if (isLive && liveResumedAt > 0 && SystemClock.uptimeMillis() - liveResumedAt < 60_000) {
+                liveResumedAt = 0
+                playChannel(channelIndex)
+                return
+            }
             if (isLive && error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                 p.seekToDefaultPosition()
                 p.prepare()
@@ -446,6 +538,13 @@ class PlayerActivity : AppCompatActivity() {
         if (list.isEmpty()) return finish()
         channelIndex = ((index % list.size) + list.size) % list.size
         val channel = list[channelIndex]
+        // Remember where we came from for "Last channel".
+        val previous = currentChannel
+        if (previous != null && previous.id != channel.id) lastChannel = Triple(currentList, previous, currentListTitle)
+        currentChannel = channel
+        currentList = list
+        currentListTitle = Session.zapTitle
+        playFlash.visibility = View.GONE
         val hls = hlsAllowed()
         fallbackUrl = if (hls) api.liveUrl(channel.id, "ts") else null
         triedFallback = false
@@ -601,11 +700,44 @@ class PlayerActivity : AppCompatActivity() {
                     }
                 }
             }
+            // Menu on a movie (no episode list) opens Settings.
+            if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) showSettings()
+                return true
+            }
             // Let PlayerView show its controller and handle D-pad/media keys first.
             if (playerView.dispatchKeyEvent(event)) return true
             return super.dispatchKeyEvent(event)
         }
         if (channelsPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+        // Number keys: type a channel number.
+        val digit = when (event.keyCode) {
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> event.keyCode - KeyEvent.KEYCODE_0
+            in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9 -> event.keyCode - KeyEvent.KEYCODE_NUMPAD_0
+            else -> -1
+        }
+        if (digit >= 0) {
+            if (event.action == KeyEvent.ACTION_DOWN) typeChannelDigit(digit)
+            return true
+        }
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_SPACE -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) toggleLivePause(event.keyCode)
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) showLiveOptions()
+                return true
+            }
+            KeyEvent.KEYCODE_LAST_CHANNEL, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) switchToLastChannel()
+                return true
+            }
+            KeyEvent.KEYCODE_GUIDE -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) openGuide()
+                return true
+            }
+        }
         if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
             if (event.action == KeyEvent.ACTION_DOWN) openChannels()
             return true
@@ -648,7 +780,8 @@ class PlayerActivity : AppCompatActivity() {
         btnNext.onFocusChangeListener = keepVisible
         btnEpisodes.setOnClickListener { openEpisodes() }
         btnTracks.onFocusChangeListener = keepVisible
-        btnTracks.setOnClickListener { showTrackPicker() }
+        btnTracks.visibility = View.VISIBLE
+        btnTracks.setOnClickListener { showSettings() }
         btnNext.setOnClickListener { if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) }
         // Up from the player controls reaches the top bar; Down comes back.
         btnEpisodes.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
@@ -662,6 +795,7 @@ class PlayerActivity : AppCompatActivity() {
                 closeEpisodes()
                 if (index != episodeIndex) playEpisodeAt(index)
             },
+            onLongClick = { index, ep -> toggleWatched(index, ep) },
         )
         episodesList.layoutManager = LinearLayoutManager(this)
         episodesList.adapter = episodeAdapter
@@ -723,10 +857,21 @@ class PlayerActivity : AppCompatActivity() {
             when {
                 playing -> "▶ Now playing"
                 pos > 0 -> "Resume ${formatDuration(pos)}"
+                prefs.isWatched("ep_${ep.id}") -> "✓ Watched"
                 else -> null
             },
             ep.duration,
         ).joinToString("   ·   ")
+    }
+
+    /** Long-press in the Episodes panel: mark as watched / not watched. */
+    private fun toggleWatched(index: Int, ep: Episode) {
+        val key = "ep_${ep.id}"
+        val watched = !prefs.isWatched(key)
+        prefs.setWatched(key, watched)
+        if (watched && index != episodeIndex) prefs.removeProgress(key)
+        Toast.makeText(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT).show()
+        episodeAdapter.notifyItemChanged(index, "watched")
     }
 
     private fun playEpisodeAt(index: Int) {
@@ -740,6 +885,8 @@ class PlayerActivity : AppCompatActivity() {
         playerTitle.text = vodTitle
         watchEntry = WatchEntry(resumeKey, ContentType.SERIES, ep.id, ep.ext, seriesName, label, seriesCover, seriesId = seriesId)
         startPosition = prefs.position(resumeKey)
+        askResume = true
+        resumeAsked = false
         probed = false
         errorView.visibility = View.GONE
         updateEpisodeButtons()
@@ -818,13 +965,6 @@ class PlayerActivity : AppCompatActivity() {
         p.trackSelectionParameters = builder.build()
     }
 
-    /** Shown only when there is something to choose: several audio tracks or any subtitles. */
-    private fun updateTracksButton(tracks: Tracks) {
-        val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.sumOf { g -> (0 until g.length).count { g.isTrackSupported(it) } }
-        val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.sumOf { g -> (0 until g.length).count { g.isTrackSupported(it) } }
-        btnTracks.visibility = if (audio > 1 || text > 0) View.VISIBLE else View.GONE
-    }
-
     private fun showTrackPicker() {
         val p = player ?: return
         val names = DefaultTrackNameProvider(resources)
@@ -891,14 +1031,14 @@ class PlayerActivity : AppCompatActivity() {
         playFlash.animate().alpha(0f).setDuration(200).withEndAction { playFlash.visibility = View.GONE }.start()
     }
 
-    /** Brief ▶ / ❚❚ in the middle of the screen; stays up while paused so the state is obvious. */
+    /** Brief ▶ / ❚❚ in the middle of the screen; fades out either way so nothing stays on the picture. */
     private fun showPlayPauseFlash(playing: Boolean) {
         playFlash.text = if (playing) "▶" else "❚❚"
         playFlash.animate().cancel()
         playFlash.alpha = 1f
         playFlash.visibility = View.VISIBLE
         playFlash.removeCallbacks(hidePlayFlash)
-        if (playing) playFlash.postDelayed(hidePlayFlash, 700)
+        playFlash.postDelayed(hidePlayFlash, 800)
     }
 
     private var seekTotal = 0L
@@ -975,7 +1115,7 @@ class PlayerActivity : AppCompatActivity() {
         val pos = p.currentPosition
         val duration = p.duration
         val remaining = if (duration != C.TIME_UNSET && duration > 0) duration - pos else Long.MAX_VALUE
-        if (hasNextEpisode && !nextDismissed && remaining <= NEXT_PROMPT_MS && p.playbackState == Player.STATE_READY) {
+        if (hasNextEpisode && !nextDismissed && !sleepAtEnd && remaining <= NEXT_PROMPT_MS && p.playbackState == Player.STATE_READY) {
             val next = episodes[episodeIndex + 1]
             showCard(
                 CardAction.NEXT_EPISODE,
@@ -1046,8 +1186,248 @@ class PlayerActivity : AppCompatActivity() {
         playerView.requestFocus()
     }
 
+    // ---- Settings menu (movies/episodes) and options menu (live) ----
+
+    private fun showMenu(title: String, items: List<Pair<String, () -> Unit>>) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
+            .show()
+    }
+
+    private fun showSettings() {
+        showMenu(
+            "Settings",
+            listOf(
+                "Audio and subtitles" to { showTrackPicker() },
+                "Subtitle size:  ${SUBTITLE_SIZES[prefs.subtitleSize.coerceIn(0, 3)].first}" to { pickSubtitleSize() },
+                "Subtitle background:  ${if (prefs.subtitleBackground) "On" else "Off"}" to {
+                    prefs.subtitleBackground = !prefs.subtitleBackground
+                    applySubtitleStyle()
+                },
+                "Speed:  ${speedLabel(speed)}" to { pickSpeed() },
+                "Picture size:  ${pictureLabel()}" to { pickPictureSize() },
+                "Sleep timer:  ${sleepLabel()}" to { pickSleepTimer() },
+                "Stream info" to { showStreamInfo() },
+            ),
+        )
+    }
+
+    private fun showLiveOptions() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items += "TV guide" to { openGuide() }
+        lastChannel?.let { items += "Last channel:  ${it.second.name}" to { switchToLastChannel() } }
+        items += "Jump to live" to { playChannel(channelIndex) }
+        items += "Picture size:  ${pictureLabel()}" to { pickPictureSize() }
+        items += "Sleep timer:  ${sleepLabel()}" to { pickSleepTimer() }
+        items += "Stream info" to { showStreamInfo() }
+        showMenu(currentChannel?.name ?: "Options", items)
+    }
+
+    private fun applySubtitleStyle() {
+        val sv = playerView.subtitleView ?: return
+        val bg = prefs.subtitleBackground
+        sv.setApplyEmbeddedFontSizes(false)
+        sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * SUBTITLE_SIZES[prefs.subtitleSize.coerceIn(0, 3)].second)
+        sv.setStyle(
+            CaptionStyleCompat(
+                Color.WHITE,
+                if (bg) 0xB3000000.toInt() else Color.TRANSPARENT,
+                Color.TRANSPARENT,
+                if (bg) CaptionStyleCompat.EDGE_TYPE_NONE else CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                Color.BLACK,
+                null,
+            ),
+        )
+    }
+
+    private fun pickSubtitleSize() {
+        AlertDialog.Builder(this)
+            .setTitle("Subtitle size")
+            .setSingleChoiceItems(SUBTITLE_SIZES.map { it.first }.toTypedArray(), prefs.subtitleSize.coerceIn(0, 3)) { d, which ->
+                prefs.subtitleSize = which
+                applySubtitleStyle()
+                d.dismiss()
+            }
+            .show()
+    }
+
+    private fun speedLabel(s: Float): String {
+        val text = if (s % 1f == 0f) s.toInt().toString() else s.toString()
+        return if (s == 1f) "${text}× (normal)" else "$text×"
+    }
+
+    private fun pickSpeed() {
+        AlertDialog.Builder(this)
+            .setTitle("Playback speed")
+            .setSingleChoiceItems(SPEEDS.map { speedLabel(it) }.toTypedArray(), SPEEDS.indexOf(speed).coerceAtLeast(0)) { d, which ->
+                speed = SPEEDS[which]
+                player?.setPlaybackSpeed(speed)
+                d.dismiss()
+            }
+            .show()
+    }
+
+    private fun pictureLabel() = PICTURE_SIZES[prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)].first
+
+    private fun pickPictureSize() {
+        AlertDialog.Builder(this)
+            .setTitle("Picture size")
+            .setSingleChoiceItems(PICTURE_SIZES.map { it.first }.toTypedArray(), prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)) { d, which ->
+                prefs.pictureSize = which
+                playerView.resizeMode = PICTURE_SIZES[which].second
+                d.dismiss()
+            }
+            .show()
+    }
+
+    private fun sleepLabel(): String = when {
+        sleepAtEnd -> if (episodes.isNotEmpty()) "End of this episode" else "End of this video"
+        sleepAt > 0 -> "${((sleepAt - SystemClock.uptimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min left"
+        else -> "Off"
+    }
+
+    private fun pickSleepTimer() {
+        val options = ArrayList<Pair<String, () -> Unit>>()
+        options += "Off" to { setSleepTimer(0) }
+        for (m in listOf(30, 60, 90, 120)) options += "$m minutes" to { setSleepTimer(m) }
+        if (!isLive) {
+            options += (if (episodes.isNotEmpty()) "End of this episode" else "End of this video") to {
+                setSleepTimer(0)
+                sleepAtEnd = true
+                Toast.makeText(this, "Playback will stop at the end", Toast.LENGTH_SHORT).show()
+            }
+        }
+        showMenu("Sleep timer", options)
+    }
+
+    private fun setSleepTimer(minutes: Int) {
+        playerView.removeCallbacks(sleepNow)
+        sleepAtEnd = false
+        sleepAt = 0
+        if (minutes > 0) {
+            sleepAt = SystemClock.uptimeMillis() + minutes * 60_000L
+            playerView.postDelayed(sleepNow, minutes * 60_000L)
+            Toast.makeText(this, "Playback will stop in $minutes minutes", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Sleep timer off", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Resolution, codecs and bitrate: handy when a channel stutters. Never shows the URL (it has the login in it). */
+    private fun showStreamInfo() {
+        val p = player ?: return
+        val v = p.videoFormat
+        val a = p.audioFormat
+        val size = p.videoSize
+        val lines = ArrayList<String>()
+        if (size.width > 0) {
+            val fps = v?.frameRate?.takeIf { it > 0 }?.let { "  ·  ${Math.round(it)} fps" } ?: ""
+            lines += "Resolution:  ${size.width} × ${size.height}$fps"
+        }
+        v?.let { f ->
+            val codec = f.codecs ?: f.sampleMimeType?.substringAfter('/') ?: "unknown"
+            val rate = listOf(f.bitrate, f.averageBitrate, f.peakBitrate).firstOrNull { it > 0 }
+            lines += "Video:  $codec" + (rate?.let { "  ·  ${it / 1000} kbps" } ?: "")
+        }
+        a?.let { f ->
+            val codec = f.codecs ?: f.sampleMimeType?.substringAfter('/') ?: "unknown"
+            val parts = listOfNotNull(
+                codec,
+                f.channelCount.takeIf { it > 0 }?.let { "$it channels" },
+                f.sampleRate.takeIf { it > 0 }?.let { "${it / 1000} kHz" },
+                f.language,
+            )
+            lines += "Audio:  " + parts.joinToString("  ·  ")
+        }
+        val format = when {
+            currentUrl.contains(".m3u8") || vodMimeType == MimeTypes.APPLICATION_M3U8 -> "HLS"
+            currentUrl.endsWith(".ts") -> "MPEG-TS"
+            else -> currentUrl.substringAfterLast('.', "").uppercase().ifEmpty { "unknown" }
+        }
+        lines += "Stream:  $format"
+        lines += "Buffered:  ${p.totalBufferedDuration / 1000} s ahead"
+        AlertDialog.Builder(this)
+            .setTitle("Stream info")
+            .setMessage(lines.joinToString("\n"))
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    // ---- Live: pause, channel numbers, last channel, guide ----
+
+    private fun toggleLivePause(keyCode: Int) {
+        val p = player ?: return
+        val play = when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> true
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> false
+            else -> !p.playWhenReady
+        }
+        p.playWhenReady = play
+        if (play) liveResumedAt = SystemClock.uptimeMillis()
+        showPlayPauseFlash(play)
+    }
+
+    private fun typeChannelDigit(digit: Int) {
+        numberBuffer = (numberBuffer + digit).takeLast(4)
+        numberEntry.text = numberBuffer
+        numberEntry.visibility = View.VISIBLE
+        numberEntry.removeCallbacks(commitNumber)
+        numberEntry.postDelayed(commitNumber, 1_500)
+    }
+
+    private fun commitChannelNumber() {
+        val typed = numberBuffer
+        numberBuffer = ""
+        numberEntry.visibility = View.GONE
+        if (typed.isEmpty()) return
+        val target = typed.trimStart('0').ifEmpty { "0" }
+        val matches = { list: List<StreamItem> -> list.indexOfFirst { it.num?.trimStart('0') == target } }
+        val here = matches(Session.zapList)
+        if (here >= 0) {
+            playChannel(here)
+            return
+        }
+        // Not in this category: look through all channels.
+        lifecycleScope.launch {
+            val all = Session.streamCache["LIVE:__all__"] ?: try {
+                api.streams(ContentType.LIVE, null).also { Session.streamCache["LIVE:__all__"] = it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            val index = all?.let(matches) ?: -1
+            if (all != null && index >= 0) {
+                Session.zapList = all
+                Session.zapTitle = "All channels"
+                playChannel(index)
+            } else {
+                Toast.makeText(this@PlayerActivity, "There's no channel $typed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun switchToLastChannel() {
+        val (list, channel, title) = lastChannel ?: run {
+            Toast.makeText(this, "No previous channel yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val index = list.indexOfFirst { it.id == channel.id }
+        if (index < 0) return
+        Session.zapList = list
+        Session.zapTitle = title
+        playChannel(index)
+    }
+
+    private fun openGuide() {
+        startActivity(GuideActivity.intent(this, channelIndex, fromPlayer = true))
+    }
+
     override fun onDestroy() {
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)
+        if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
+        if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()
     }
 }

@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -142,6 +143,7 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun setupMovie() {
         playButton.setOnClickListener { playMovie(0L) }
+        // Resume was an explicit choice here, so the player doesn't ask again.
         resumeButton.setOnClickListener { playMovie(prefs.position(movieKey())) }
         updateResumeButton()
         playButton.requestFocus()
@@ -186,7 +188,7 @@ class DetailsActivity : AppCompatActivity() {
     private fun playMovie(startMs: Long) {
         val name = title.text.toString()
         val entry = WatchEntry(movieKey(), ContentType.MOVIE, item.id, ext, name, null, posterUrl)
-        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(item.id, ext), name, movieKey(), startMs, entry))
+        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(item.id, ext), name, movieKey(), startMs, entry, askResume = false))
     }
 
     // ---- Series ----
@@ -207,6 +209,15 @@ class DetailsActivity : AppCompatActivity() {
             R.layout.item_episode,
             bind = { vh, ep -> bindEpisode(vh, ep) },
             onClick = { _, ep -> playEpisode(ep) },
+            onLongClick = { index, ep ->
+                // Long-press: mark as watched / not watched.
+                val key = episodeKey(ep)
+                val watched = !prefs.isWatched(key)
+                prefs.setWatched(key, watched)
+                if (watched) prefs.removeProgress(key)
+                Toast.makeText(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT).show()
+                episodeAdapter.notifyItemChanged(index, "watched")
+            },
         )
         episodesView.layoutManager = LinearLayoutManager(this)
         episodesView.adapter = episodeAdapter
@@ -255,7 +266,11 @@ class DetailsActivity : AppCompatActivity() {
         vh.title.text = prefix + ep.title
         val pos = prefs.position(episodeKey(ep))
         vh.subtitle?.text = listOfNotNull(
-            if (pos > 0) "▶ Resume ${formatDuration(pos)}" else null,
+            when {
+                pos > 0 -> "▶ Resume ${formatDuration(pos)}"
+                prefs.isWatched(episodeKey(ep)) -> "✓ Watched"
+                else -> null
+            },
             ep.duration,
             ep.plot,
         ).joinToString("   ·   ")

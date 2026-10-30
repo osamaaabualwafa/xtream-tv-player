@@ -87,6 +87,16 @@ class BrowseActivity : AppCompatActivity() {
         itemsView.adapter = itemAdapter
 
         search.doAfterTextChanged { applyFilter() }
+        if (live) {
+            val guide = findViewById<View>(R.id.tv_guide)
+            guide.visibility = View.VISIBLE
+            guide.setOnClickListener {
+                if (itemAdapter.items.isEmpty()) return@setOnClickListener
+                Session.zapList = itemAdapter.items
+                Session.zapTitle = currentCategory?.name
+                startActivity(GuideActivity.intent(this, 0, fromPlayer = false))
+            }
+        }
         // The keyboard's search key closes it and jumps to the results, so D-pad users aren't stuck in the box.
         search.setOnEditorActionListener { v, _, _ ->
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0)
