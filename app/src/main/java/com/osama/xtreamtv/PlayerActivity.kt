@@ -3,9 +3,11 @@ package com.osama.xtreamtv
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.os.SystemClock
 import android.util.Log
+import android.os.Build
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
@@ -100,6 +102,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var actionCard: View
     private lateinit var actionText: TextView
     private lateinit var actionButton: TextView
+    private lateinit var seekPill: TextView
 
     // "Next episode in Ns" prompt near the end of an episode.
     private enum class CardAction { NONE, NEXT_EPISODE }
@@ -184,6 +187,7 @@ class PlayerActivity : AppCompatActivity() {
         actionCard = findViewById(R.id.action_card)
         actionText = findViewById(R.id.action_text)
         actionButton = findViewById(R.id.action_button)
+        seekPill = findViewById(R.id.seek_pill)
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -491,6 +495,13 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!isLive) {
+            // Some TVs deliver the mouse back button as a Back key from the mouse: treat it as −5 s.
+            if (::playerView.isInitialized && event.keyCode == KeyEvent.KEYCODE_BACK &&
+                event.isFromSource(InputDevice.SOURCE_MOUSE) && episodesPanel.visibility != View.VISIBLE
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) quickSeek(-5_000L)
+                return true
+            }
             if (!::playerView.isInitialized || event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
             // The OK that answered a prompt must not also "click" play/pause when it is released.
             if (swallowOkRelease && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
@@ -519,14 +530,19 @@ class PlayerActivity : AppCompatActivity() {
                 if (event.action == KeyEvent.ACTION_DOWN) firstTopButton()?.requestFocus()
                 return true
             }
-            // Left/Right seek (faster when pressed repeatedly) unless a player button has focus.
-            if ((event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) &&
-                currentFocus?.id !in controlIds
-            ) {
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    val step = seekStep()
-                    seekBy(if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) step else -step)
-                }
+            // Right = +10 s, Left = −5 s without opening the controls (unless a player button has focus).
+            val seekDelta = when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (currentFocus?.id in controlIds) 0L else 10_000L
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (currentFocus?.id in controlIds) 0L else -5_000L
+                // Remote ⏩/⏪ buttons (remotes send different codes for them).
+                KeyEvent.KEYCODE_FORWARD, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD, KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> 10_000L
+                KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
+                KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> -5_000L
+                else -> 0L
+            }
+            if (seekDelta != 0L) {
+                if (event.action == KeyEvent.ACTION_DOWN) quickSeek(seekDelta)
                 return true
             }
             // OK answers the "Next episode" prompt while the controls are hidden.
@@ -839,30 +855,47 @@ class PlayerActivity : AppCompatActivity() {
             .show()
     }
 
-    // ---- D-pad seeking ----
+    // ---- Quick seek: arrows / mouse side buttons, with a small pill instead of the full controls ----
 
-    private var seekStreak = 0
-    private var lastSeekAt = 0L
-
-    /** 10 s per press, growing to 30 s, 1 min and 2 min when pressed in quick succession. */
-    private fun seekStep(): Long {
-        val now = SystemClock.uptimeMillis()
-        seekStreak = if (now - lastSeekAt < 700) seekStreak + 1 else 0
-        lastSeekAt = now
-        return when {
-            seekStreak < 3 -> 10_000L
-            seekStreak < 8 -> 30_000L
-            seekStreak < 15 -> 60_000L
-            else -> 120_000L
-        }
+    private var seekTotal = 0L
+    private val hideSeekPill = Runnable {
+        seekPill.visibility = View.GONE
+        seekTotal = 0
     }
 
-    private fun seekBy(deltaMs: Long) {
+    private fun quickSeek(deltaMs: Long) {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
-        playerView.showController()
+        val target = (p.currentPosition + deltaMs).coerceIn(0, max)
+        p.seekTo(target)
+        // Presses in the same direction add up ("+30s"); changing direction starts again.
+        seekTotal = if (seekPill.visibility == View.VISIBLE && (seekTotal > 0) == (deltaMs > 0)) seekTotal + deltaMs else deltaMs
+        val amount = "${kotlin.math.abs(seekTotal) / 1000}s"
+        val where = if (duration != C.TIME_UNSET && duration > 0) "${formatDuration(target)} / ${formatDuration(duration)}" else formatDuration(target)
+        seekPill.text = (if (seekTotal > 0) "⏩  +$amount" else "⏪  −$amount") + "     $where"
+        seekPill.visibility = View.VISIBLE
+        seekPill.removeCallbacks(hideSeekPill)
+        seekPill.postDelayed(hideSeekPill, 1_500)
+    }
+
+    /** Mouse side buttons: back = −5 s, forward = +10 s (handled before Android turns "back" into Back). */
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        if (!isLive && ::playerView.isInitialized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            (ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || ev.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE) &&
+            episodesPanel.visibility != View.VISIBLE
+        ) {
+            val delta = when (ev.actionButton) {
+                MotionEvent.BUTTON_BACK -> -5_000L
+                MotionEvent.BUTTON_FORWARD -> 10_000L
+                else -> 0L
+            }
+            if (delta != 0L) {
+                if (ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) quickSeek(delta)
+                return true
+            }
+        }
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     private fun firstTopButton(): View? =
