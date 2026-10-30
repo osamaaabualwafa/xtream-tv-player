@@ -16,25 +16,90 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class Prefs(context: Context) {
-    private val sp = context.applicationContext.getSharedPreferences("xtream", Context.MODE_PRIVATE)
+/** One saved Xtream login. Each playlist keeps its own favorites, progress and settings. */
+data class Playlist(val id: String, val name: String, val base: String, val username: String, val password: String) {
+    fun toAccount() = Account(base, username, password)
 
-    var account: Account?
-        get() {
-            val base = sp.getString("base", null) ?: return null
-            val user = sp.getString("user", null) ?: return null
-            val pass = sp.getString("pass", null) ?: return null
-            return Account(base, user, pass)
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id).put("name", name).put("base", base).put("user", username).put("pass", password)
+}
+
+fun playlistFromJson(o: JSONObject): Playlist? {
+    val id = o.str("id") ?: return null
+    val base = o.str("base") ?: return null
+    val user = o.str("user") ?: return null
+    return Playlist(id, o.str("name") ?: base.substringAfter("://"), base, user, o.optString("pass", ""))
+}
+
+class Prefs(context: Context) {
+    private val app = context.applicationContext
+    private val global = app.getSharedPreferences("xtream", Context.MODE_PRIVATE)
+
+    companion object {
+        // The single login from before playlists existed keeps its data in the original file.
+        private const val LEGACY_ID = "legacy"
+        private val DATA_PREFIXES = listOf("favorites_", "continue", "pos_", "vod_hls", "formats")
+    }
+
+    /** Per-playlist storage for the active playlist. */
+    private val sp get() = dataFile(activeId)
+
+    private fun dataFile(id: String?) =
+        if (id == null || id == LEGACY_ID) global else app.getSharedPreferences("playlist_$id", Context.MODE_PRIVATE)
+
+    fun playlists(): List<Playlist> {
+        migrateLegacyLogin()
+        val text = global.getString("playlists", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::playlistFromJson) }
+        } catch (e: Exception) {
+            emptyList()
         }
-        set(value) {
-            val e = sp.edit()
-            if (value == null) {
-                e.remove("base").remove("user").remove("pass")
-            } else {
-                e.putString("base", value.base).putString("user", value.username).putString("pass", value.password)
-            }
+    }
+
+    fun savePlaylist(p: Playlist) {
+        val list = playlists().toMutableList()
+        val i = list.indexOfFirst { it.id == p.id }
+        if (i >= 0) list[i] = p else list.add(p)
+        writePlaylists(list)
+    }
+
+    fun deletePlaylist(id: String) {
+        writePlaylists(playlists().filter { it.id != id })
+        if (activeId == id) activeId = null
+        if (id == LEGACY_ID) {
+            val e = global.edit()
+            global.all.keys.filter { k -> DATA_PREFIXES.any { k.startsWith(it) } }.forEach { e.remove(it) }
             e.apply()
+        } else {
+            dataFile(id).edit().clear().apply()
         }
+    }
+
+    var activeId: String?
+        get() = global.getString("active", null)
+        set(value) = global.edit().putString("active", value).apply()
+
+    val activePlaylist: Playlist? get() = activeId?.let { id -> playlists().firstOrNull { it.id == id } }
+
+    val account: Account? get() = activePlaylist?.toAccount()
+
+    private fun writePlaylists(list: List<Playlist>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it.toJson()) }
+        global.edit().putString("playlists", arr.toString()).apply()
+    }
+
+    private fun migrateLegacyLogin() {
+        if (global.contains("playlists")) return
+        val base = global.getString("base", null)
+        val user = global.getString("user", null)
+        val pass = global.getString("pass", null)
+        if (base == null || user == null || pass == null) return
+        writePlaylists(listOf(Playlist(LEGACY_ID, base.substringAfter("://"), base, user, pass)))
+        global.edit().putString("active", LEGACY_ID).remove("base").remove("user").remove("pass").apply()
+    }
 
     /** Comma-separated allowed_output_formats from the last login. */
     var formats: String
@@ -202,7 +267,7 @@ fun formatDuration(ms: Long): String {
 }
 
 fun Activity.goToLogin() {
-    startActivity(Intent(this, LoginActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    startActivity(Intent(this, PlaylistsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     finish()
 }
 
@@ -217,6 +282,7 @@ class TextAdapter<T>(
     private val layout: Int,
     private val bind: (VH, T) -> Unit,
     private val onClick: (Int, T) -> Unit,
+    private val onLongClick: ((Int, T) -> Unit)? = null,
 ) : RecyclerView.Adapter<TextAdapter.VH>() {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -250,6 +316,14 @@ class TextAdapter<T>(
         holder.itemView.setOnClickListener {
             val p = holder.bindingAdapterPosition
             if (p != RecyclerView.NO_POSITION) onClick(p, items[p])
+        }
+        val longClick = onLongClick
+        if (longClick != null) {
+            holder.itemView.setOnLongClickListener {
+                val p = holder.bindingAdapterPosition
+                if (p != RecyclerView.NO_POSITION) longClick(p, items[p])
+                true
+            }
         }
     }
 }

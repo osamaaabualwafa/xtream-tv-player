@@ -58,6 +58,6 @@
         <Button
             android:id="@+id/logout"
             style="@style/TvButton"
-            android:text="Log out" />
+            android:text="Playlists" />
     </LinearLayout>
 </LinearLayout>

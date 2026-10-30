@@ -17,9 +17,10 @@
             android:padding="24dp">
 
             <TextView
+                android:id="@+id/heading"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Xtream TV"
+                android:text="Add playlist"
                 android:textColor="@color/text"
                 android:textSize="32sp"
                 android:textStyle="bold" />
@@ -31,6 +32,13 @@
                 android:text="Sign in with your Xtream Codes account"
                 android:textColor="@color/text_secondary"
                 android:textSize="15sp" />
+
+            <EditText
+                android:id="@+id/name"
+                style="@style/TvInput"
+                android:layout_marginBottom="12dp"
+                android:hint="Playlist name (optional)"
+                android:inputType="textCapWords" />
 
             <EditText
                 android:id="@+id/server"

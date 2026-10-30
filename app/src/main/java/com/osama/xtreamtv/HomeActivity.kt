@@ -33,9 +33,9 @@ class HomeActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tile_live).requestFocus()
 
         findViewById<TextView>(R.id.logout).setOnClickListener {
-            Prefs(this).account = null
             Session.clear()
-            goToLogin()
+            startActivity(PlaylistsActivity.manageIntent(this))
+            finish()
         }
 
         showAccount(api)
@@ -59,13 +59,14 @@ class HomeActivity : AppCompatActivity() {
     private fun showAccount(api: XtreamApi) {
         val info = Session.userInfo
         val host = api.account.base.substringAfter("://")
+        val playlistName = Prefs(this).activePlaylist?.name ?: host
         if (info == null) {
-            accountView.text = "${api.account.username} @ $host"
+            accountView.text = "$playlistName  ·  ${api.account.username} @ $host"
             return
         }
         val expiry = info.expDate?.let { formatDate(it) } ?: "Unlimited"
         val connections = "${info.activeCons ?: "0"} / ${info.maxConnections ?: "?"}"
-        accountView.text = "${api.account.username} @ $host\n" +
+        accountView.text = "$playlistName  ·  ${api.account.username} @ $host\n" +
             "Status: ${info.status ?: "Unknown"}   ·   Expires: $expiry   ·   Connections: $connections"
     }
 }

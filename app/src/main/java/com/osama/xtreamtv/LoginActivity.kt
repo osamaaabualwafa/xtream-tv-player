@@ -1,5 +1,6 @@
 package com.osama.xtreamtv
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -13,18 +14,33 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+/** Add a new playlist, or edit one (EXTRA_PLAYLIST_ID). */
 class LoginActivity : AppCompatActivity() {
 
+    companion object {
+        private const val EXTRA_PLAYLIST_ID = "playlist_id"
+
+        fun addIntent(context: Context) = Intent(context, LoginActivity::class.java)
+
+        fun editIntent(context: Context, playlistId: String) =
+            Intent(context, LoginActivity::class.java).putExtra(EXTRA_PLAYLIST_ID, playlistId)
+    }
+
+    private lateinit var prefs: Prefs
+    private lateinit var name: EditText
     private lateinit var server: EditText
     private lateinit var username: EditText
     private lateinit var password: EditText
     private lateinit var loginButton: Button
     private lateinit var progress: ProgressBar
     private lateinit var error: TextView
+    private var editing: Playlist? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = Prefs(this)
         setContentView(R.layout.activity_login)
+        name = findViewById(R.id.name)
         server = findViewById(R.id.server)
         username = findViewById(R.id.username)
         password = findViewById(R.id.password)
@@ -42,15 +58,17 @@ class LoginActivity : AppCompatActivity() {
             }
         }
 
-        val saved = Prefs(this).account
-        if (saved != null) {
-            server.setText(saved.base)
-            username.setText(saved.username)
-            password.setText(saved.password)
-            login(saved, auto = true)
-        } else {
-            server.requestFocus()
+        val editId = intent.getStringExtra(EXTRA_PLAYLIST_ID)
+        editing = editId?.let { id -> prefs.playlists().firstOrNull { it.id == id } }
+        editing?.let { p ->
+            findViewById<TextView>(R.id.heading).text = "Edit playlist"
+            name.setText(p.name)
+            server.setText(p.base)
+            username.setText(p.username)
+            password.setText(p.password)
+            loginButton.text = "Save"
         }
+        name.requestFocus()
     }
 
     private fun submit() {
@@ -69,15 +87,20 @@ class LoginActivity : AppCompatActivity() {
             showError("Enter your username and password")
             return
         }
-        login(Account(parsed.base, user, pass), auto = false)
+        val displayName = name.text.toString().trim().ifEmpty { parsed.base.substringAfter("://") }
+        // Re-adding the same login updates it instead of creating a duplicate.
+        val id = editing?.id
+            ?: prefs.playlists().firstOrNull { it.base == parsed.base && it.username == user }?.id
+            ?: System.currentTimeMillis().toString(36)
+        login(Playlist(id, displayName, parsed.base, user, pass))
     }
 
-    private fun login(account: Account, auto: Boolean) {
+    private fun login(playlist: Playlist) {
         setBusy(true)
         error.visibility = View.GONE
         lifecycleScope.launch {
             try {
-                val api = XtreamApi(account)
+                val api = XtreamApi(playlist.toAccount())
                 val info = api.userInfo()
                 val problem = accountProblem(info)
                 if (problem != null) {
@@ -85,25 +108,27 @@ class LoginActivity : AppCompatActivity() {
                     showError(problem)
                     return@launch
                 }
-                val prefs = Prefs(this@LoginActivity)
-                prefs.account = account
+                prefs.savePlaylist(playlist)
+                prefs.activeId = playlist.id
                 prefs.formats = info.formats.joinToString(",")
                 Session.start(api, info)
-                startActivity(Intent(this@LoginActivity, HomeActivity::class.java))
+                startActivity(
+                    Intent(this@LoginActivity, HomeActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                )
                 finish()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 setBusy(false)
-                val reason = e.message ?: e.javaClass.simpleName
-                showError(if (auto) "Couldn't reconnect: $reason" else "Login failed: $reason")
+                showError("Login failed: ${e.message ?: e.javaClass.simpleName}")
             }
         }
     }
 
     private fun setBusy(busy: Boolean) {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
-        loginButton.text = if (busy) "" else "Log in"
+        loginButton.text = if (busy) "" else if (editing != null) "Save" else "Log in"
         loginButton.isEnabled = !busy
         if (!busy) loginButton.requestFocus()
     }
