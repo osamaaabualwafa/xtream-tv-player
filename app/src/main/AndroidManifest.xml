@@ -21,7 +21,7 @@
             android:banner="@drawable/banner"
             android:exported="true"
             android:screenOrientation="landscape"
-            android:windowSoftInputMode="adjustPan">
+            android:windowSoftInputMode="adjustPan|stateAlwaysHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

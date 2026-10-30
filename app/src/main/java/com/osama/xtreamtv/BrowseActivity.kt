@@ -94,7 +94,7 @@ class BrowseActivity : AppCompatActivity() {
         super.onResume()
         if (type == ContentType.LIVE) {
             itemAdapter.favorites = prefs.favorites()
-            itemAdapter.notifyDataSetChanged()
+            itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "favorites")
         }
     }
 

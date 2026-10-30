@@ -19,6 +19,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
 import coil.load
 import kotlinx.coroutines.CancellationException
@@ -130,6 +131,13 @@ class PlayerActivity : AppCompatActivity() {
         if (::playerView.isInitialized) initPlayer()
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Save here, not only in onStop: the previous screen resumes before this one stops.
+        val p = player
+        if (p != null && !isLive) saveVodPosition(p)
+    }
+
     override fun onStop() {
         super.onStop()
         releasePlayer()
@@ -142,8 +150,11 @@ class PlayerActivity : AppCompatActivity() {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(30_000)
+        // Live: retry a failing URL only once so the .ts fallback / error shows quickly.
+        val sources = DefaultMediaSourceFactory(http)
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (isLive) 1 else 3))
         val p = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(http))
+            .setMediaSourceFactory(sources)
             .build()
         p.addListener(playerListener)
         player = p
@@ -171,7 +182,8 @@ class PlayerActivity : AppCompatActivity() {
     private fun saveVodPosition(p: Player) {
         val pos = p.currentPosition
         val duration = p.duration
-        if (duration != C.TIME_UNSET && duration > 0 && pos > duration - 60_000) {
+        // "Finished" = last minute, or last 5% for short videos.
+        if (duration != C.TIME_UNSET && duration > 0 && pos > duration - minOf(60_000L, duration / 20)) {
             // Watched to the end: start from the beginning next time.
             prefs.savePosition(resumeKey, 0)
             startPosition = 0
@@ -210,6 +222,7 @@ class PlayerActivity : AppCompatActivity() {
             val hint = if (isLive) "\n\nPress Up/Down to change channel." else ""
             errorView.text = "$what\n${describe(error)}$hint"
             errorView.visibility = View.VISIBLE
+            if (!isLive) playerView.hideController()
         }
     }
 

@@ -82,7 +82,8 @@ class DetailsActivity : AppCompatActivity() {
         if (type == ContentType.MOVIE) {
             updateResumeButton()
         } else if (::episodeAdapter.isInitialized) {
-            episodeAdapter.notifyDataSetChanged()
+            // A payload rebinds rows in place, so the focused episode keeps focus.
+            episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount, "progress")
         }
     }
 
