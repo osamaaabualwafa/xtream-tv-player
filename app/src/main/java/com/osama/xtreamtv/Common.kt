@@ -10,6 +10,8 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -39,20 +41,54 @@ class Prefs(context: Context) {
         get() = sp.getString("formats", "") ?: ""
         set(value) = sp.edit().putString("formats", value).apply()
 
-    fun favorites(): Set<String> = HashSet(sp.getStringSet("fav_live", emptySet()) ?: emptySet())
+    /** Learned per provider: movies/episodes are HLS playlists despite their .mkv/.mp4 names. */
+    var vodIsHls: Boolean
+        get() = sp.getBoolean("vod_hls", false)
+        set(value) = sp.edit().putBoolean("vod_hls", value).apply()
 
-    /** Returns true when the channel is now a favorite. */
-    fun toggleFavorite(id: String): Boolean {
-        val set = favorites().toMutableSet()
-        val added = if (set.contains(id)) {
-            set.remove(id)
-            false
-        } else {
-            set.add(id)
-            true
-        }
-        sp.edit().putStringSet("fav_live", set).apply()
+    // Favorites keep the whole item so the list shows without downloading the full catalogue.
+    fun favorites(type: ContentType): List<StreamItem> = readList("favorites_${type.name}").mapNotNull { streamItemFromJson(it) }
+
+    fun favoriteIds(type: ContentType): Set<String> = favorites(type).mapTo(HashSet()) { it.id }
+
+    /** Returns true when the item is now a favorite. */
+    fun toggleFavorite(item: StreamItem): Boolean {
+        val list = favorites(item.type).toMutableList()
+        val existing = list.indexOfFirst { it.id == item.id }
+        val added = existing < 0
+        if (added) list.add(0, item.copy(note = null)) else list.removeAt(existing)
+        writeList("favorites_${item.type.name}", list.map { it.toJson() })
         return added
+    }
+
+    fun continueWatching(type: ContentType): List<WatchEntry> =
+        readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.type == type }.sortedByDescending { it.updated }
+
+    fun saveProgress(entry: WatchEntry) {
+        val all = readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.key != entry.key }
+        writeList("continue", (listOf(entry) + all).take(40).map { it.toJson() })
+    }
+
+    fun removeProgress(key: String) {
+        val all = readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.key != key }
+        writeList("continue", all.map { it.toJson() })
+        savePosition(key, 0)
+    }
+
+    private fun readList(key: String): List<JSONObject> {
+        val text = sp.getString(key, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun writeList(key: String, items: List<JSONObject>) {
+        val arr = JSONArray()
+        items.forEach { arr.put(it) }
+        sp.edit().putString(key, arr.toString()).apply()
     }
 
     fun position(key: String): Long = sp.getLong("pos_$key", 0L)
@@ -62,6 +98,54 @@ class Prefs(context: Context) {
         if (positionMs > 0) e.putLong("pos_$key", positionMs) else e.remove("pos_$key")
         e.apply()
     }
+}
+
+/** A partly watched movie (type MOVIE) or episode (type SERIES) for "Continue watching". */
+data class WatchEntry(
+    val key: String,
+    val type: ContentType,
+    val id: String,
+    val ext: String?,
+    val title: String,
+    val subtitle: String?,
+    val image: String?,
+    val position: Long = 0,
+    val duration: Long = 0,
+    val updated: Long = 0,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("key", key).put("type", type.name).put("id", id).put("ext", ext)
+        .put("title", title).put("subtitle", subtitle).put("image", image)
+        .put("position", position).put("duration", duration).put("updated", updated)
+
+    fun progressText(): String =
+        if (duration > 0) "▶ ${formatDuration(position)} / ${formatDuration(duration)}" else "▶ ${formatDuration(position)}"
+}
+
+fun watchEntryFromJson(o: JSONObject): WatchEntry? {
+    val type = try { ContentType.valueOf(o.str("type") ?: return null) } catch (e: IllegalArgumentException) { return null }
+    return WatchEntry(
+        key = o.str("key") ?: return null,
+        type = type,
+        id = o.str("id") ?: return null,
+        ext = o.str("ext"),
+        title = o.str("title") ?: "",
+        subtitle = o.str("subtitle"),
+        image = o.str("image"),
+        position = o.long("position") ?: 0,
+        duration = o.long("duration") ?: 0,
+        updated = o.long("updated") ?: 0,
+    )
+}
+
+fun StreamItem.toJson(): JSONObject = JSONObject()
+    .put("type", type.name).put("id", id).put("name", name).put("image", image)
+    .put("cat", categoryId).put("ext", ext).put("num", num).put("rating", rating)
+
+fun streamItemFromJson(o: JSONObject): StreamItem? {
+    val type = try { ContentType.valueOf(o.str("type") ?: return null) } catch (e: IllegalArgumentException) { return null }
+    val id = o.str("id") ?: return null
+    return StreamItem(type, id, o.str("name") ?: id, o.str("image"), o.str("cat"), o.str("ext"), o.str("num"), o.str("rating"))
 }
 
 /** In-memory state shared between screens; rebuilt from Prefs after process death. */
@@ -205,7 +289,7 @@ class ItemAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
         holder.title.text = item.name
-        holder.subtitle.text = if (grid) item.rating?.let { "★ $it" } ?: "" else item.num ?: ""
+        holder.subtitle.text = item.note ?: if (grid) item.rating?.let { "★ $it" } ?: "" else item.num ?: ""
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
         holder.image.load(item.image) {
             crossfade(false)

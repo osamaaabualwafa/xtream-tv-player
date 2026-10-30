@@ -3,6 +3,7 @@ package com.osama.xtreamtv
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -23,6 +24,7 @@ class BrowseActivity : AppCompatActivity() {
         const val EXTRA_TYPE = "type"
         private const val CAT_ALL = "__all__"
         private const val CAT_FAV = "__fav__"
+        private const val CAT_CONTINUE = "__continue__"
     }
 
     private lateinit var type: ContentType
@@ -76,26 +78,40 @@ class BrowseActivity : AppCompatActivity() {
         categoriesView.adapter = categoryAdapter
 
         val live = type == ContentType.LIVE
-        val favoriteToggle: (Int, StreamItem) -> Unit = { _, item -> toggleFavorite(item) }
         itemAdapter = ItemAdapter(
             grid = !live,
             onClick = { index, item -> open(index, item) },
-            onLongClick = if (live) favoriteToggle else null,
+            onLongClick = { _, item -> onLongPress(item) },
         )
         itemsView.layoutManager = if (live) LinearLayoutManager(this) else GridLayoutManager(this, 5)
         itemsView.adapter = itemAdapter
 
         search.doAfterTextChanged { applyFilter() }
+        // The keyboard's search key closes it and jumps to the results, so D-pad users aren't stuck in the box.
+        search.setOnEditorActionListener { v, _, _ ->
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0)
+            itemsView.post { (itemsView.layoutManager?.findViewByPosition(0) ?: itemsView).requestFocus() }
+            true
+        }
 
         loadCategories()
     }
 
     override fun onResume() {
         super.onResume()
-        if (type == ContentType.LIVE) {
-            itemAdapter.favorites = prefs.favorites()
-            itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "favorites")
+        if (!::itemAdapter.isInitialized) return
+        itemAdapter.favorites = prefs.favoriteIds(type)
+        // Favorites and progress change on other screens: refresh the local lists in place.
+        val cat = currentCategory
+        if (cat != null && (cat.id == CAT_FAV || cat.id == CAT_CONTINUE)) {
+            val fresh = localItems(cat.id)
+            if (fresh != allItems) {
+                allItems = fresh
+                applyFilter(scrollToTop = false)
+                return
+            }
         }
+        itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "refresh")
     }
 
     private fun loadCategories() {
@@ -104,14 +120,21 @@ class BrowseActivity : AppCompatActivity() {
             try {
                 val cats = Session.categoryCache[type] ?: api.categories(type).also { Session.categoryCache[type] = it }
                 val list = ArrayList<Category>()
+                if (type != ContentType.LIVE) list.add(Category(CAT_CONTINUE, "▶ Continue watching"))
+                list.add(Category(CAT_FAV, "★ Favorites"))
                 list.add(Category(CAT_ALL, "All"))
-                if (type == ContentType.LIVE) list.add(Category(CAT_FAV, "★ Favorites"))
                 list.addAll(cats)
                 categoryAdapter.submit(list)
-                // Start on the first real category: "All" can be tens of thousands of items.
-                val firstIndex = if (cats.isEmpty()) 0 else list.size - cats.size
+                // Open "Continue watching" when there is something to resume, otherwise the
+                // first real category ("All" can be tens of thousands of items).
+                val firstIndex = when {
+                    type != ContentType.LIVE && prefs.continueWatching(type).isNotEmpty() -> 0
+                    cats.isEmpty() -> list.indexOfFirst { it.id == CAT_ALL }
+                    else -> list.size - cats.size
+                }
                 selectCategory(list[firstIndex])
-                categoriesView.scrollToPosition(firstIndex)
+                // No scrollToPosition: it would pin this row to the top and hide
+                // Continue watching / Favorites above it.
                 categoriesView.post {
                     categoriesView.findViewHolderForAdapterPosition(firstIndex)?.itemView?.requestFocus()
                 }
@@ -124,24 +147,42 @@ class BrowseActivity : AppCompatActivity() {
         }
     }
 
+    /** Lists stored on the device (no network). */
+    private fun localItems(categoryId: String): List<StreamItem> = when (categoryId) {
+        CAT_FAV -> prefs.favorites(type)
+        CAT_CONTINUE -> prefs.continueWatching(type).map { e ->
+            StreamItem(
+                type = type,
+                id = e.key,
+                name = listOfNotNull(e.title, e.subtitle).joinToString("  ·  "),
+                image = e.image,
+                categoryId = null,
+                ext = e.ext,
+                num = null,
+                rating = null,
+                note = e.progressText(),
+            )
+        }
+        else -> emptyList()
+    }
+
     private fun selectCategory(category: Category) {
         currentCategory = category
         categoryAdapter.activeIndex = categoryAdapter.items.indexOf(category)
         categoryTitle.text = category.name
         loadJob?.cancel()
+        message.visibility = View.GONE
+        if (category.id == CAT_FAV || category.id == CAT_CONTINUE) {
+            showLoading(false)
+            allItems = localItems(category.id)
+            applyFilter()
+            return
+        }
         loadJob = lifecycleScope.launch {
             showLoading(true)
-            message.visibility = View.GONE
             itemAdapter.submit(emptyList())
             try {
-                allItems = when (category.id) {
-                    CAT_ALL -> loadStreams(null)
-                    CAT_FAV -> {
-                        val favs = prefs.favorites()
-                        loadStreams(null).filter { it.id in favs }
-                    }
-                    else -> loadStreams(category.id)
-                }
+                allItems = loadStreams(if (category.id == CAT_ALL) null else category.id)
                 showLoading(false)
                 applyFilter()
             } catch (e: CancellationException) {
@@ -166,49 +207,63 @@ class BrowseActivity : AppCompatActivity() {
         return api.streams(type, categoryId).also { Session.streamCache[key] = it }
     }
 
-    private fun applyFilter() {
+    private fun applyFilter(scrollToTop: Boolean = true) {
         val query = search.text.toString().trim()
         val list = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
-        itemAdapter.favorites = if (type == ContentType.LIVE) prefs.favorites() else emptySet()
+        itemAdapter.favorites = prefs.favoriteIds(type)
         itemAdapter.submit(list)
-        itemsView.scrollToPosition(0)
+        if (scrollToTop) itemsView.scrollToPosition(0)
+        val catId = currentCategory?.id
         when {
             progress.visibility == View.VISIBLE -> message.visibility = View.GONE
-            list.isEmpty() && currentCategory?.id == CAT_FAV && query.isEmpty() ->
-                showMessage("No favorites yet.\nLong-press OK on a channel to add it.")
+            list.isEmpty() && catId == CAT_FAV && query.isEmpty() ->
+                showMessage("No favorites yet.\nLong-press OK on an item to add it.")
+            list.isEmpty() && catId == CAT_CONTINUE && query.isEmpty() ->
+                showMessage("Nothing to continue yet.\nStart watching something and it will appear here.")
             list.isEmpty() -> showMessage(if (query.isEmpty()) "Nothing here." else "No results for \"$query\".")
             else -> message.visibility = View.GONE
         }
     }
 
     private fun open(index: Int, item: StreamItem) {
+        if (currentCategory?.id == CAT_CONTINUE) {
+            resume(item.id)
+            return
+        }
         when (item.type) {
             ContentType.LIVE -> {
                 Session.zapList = itemAdapter.items
                 startActivity(PlayerActivity.liveIntent(this, index))
             }
-            ContentType.MOVIE, ContentType.SERIES -> startActivity(
-                Intent(this, DetailsActivity::class.java)
-                    .putExtra(DetailsActivity.EXTRA_TYPE, item.type.name)
-                    .putExtra(DetailsActivity.EXTRA_ID, item.id)
-                    .putExtra(DetailsActivity.EXTRA_NAME, item.name)
-                    .putExtra(DetailsActivity.EXTRA_IMAGE, item.image)
-                    .putExtra(DetailsActivity.EXTRA_EXT, item.ext)
-                    .putExtra(DetailsActivity.EXTRA_RATING, item.rating)
-            )
+            ContentType.MOVIE, ContentType.SERIES -> startActivity(DetailsActivity.intent(this, item))
         }
     }
 
-    private fun toggleFavorite(item: StreamItem) {
-        val added = prefs.toggleFavorite(item.id)
+    /** Continue-watching items play straight away from where they stopped. */
+    private fun resume(key: String) {
+        val entry = prefs.continueWatching(type).firstOrNull { it.key == key } ?: return
+        val url = if (entry.type == ContentType.MOVIE) api.movieUrl(entry.id, entry.ext) else api.episodeUrl(entry.id, entry.ext ?: "mp4")
+        val title = listOfNotNull(entry.title, entry.subtitle).joinToString("  ·  ")
+        startActivity(PlayerActivity.vodIntent(this, url, title, entry.key, entry.position, entry))
+    }
+
+    private fun onLongPress(item: StreamItem) {
+        if (currentCategory?.id == CAT_CONTINUE) {
+            prefs.removeProgress(item.id)
+            Toast.makeText(this, "Removed from Continue watching", Toast.LENGTH_SHORT).show()
+            allItems = localItems(CAT_CONTINUE)
+            applyFilter(scrollToTop = false)
+            return
+        }
+        val added = prefs.toggleFavorite(item)
         Toast.makeText(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT).show()
         if (!added && currentCategory?.id == CAT_FAV) {
-            allItems = allItems.filter { it.id != item.id }
-            applyFilter()
+            allItems = localItems(CAT_FAV)
+            applyFilter(scrollToTop = false)
         } else {
-            itemAdapter.favorites = prefs.favorites()
+            itemAdapter.favorites = prefs.favoriteIds(type)
             val pos = itemAdapter.items.indexOf(item)
-            if (pos >= 0) itemAdapter.notifyItemChanged(pos)
+            if (pos >= 0) itemAdapter.notifyItemChanged(pos, "favorite")
         }
     }
 

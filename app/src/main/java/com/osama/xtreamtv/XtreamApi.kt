@@ -28,6 +28,8 @@ data class StreamItem(
     val ext: String?,
     val num: String?,
     val rating: String?,
+    /** Extra line shown instead of the rating, e.g. resume progress. */
+    val note: String? = null,
 )
 
 data class UserInfo(
@@ -86,6 +88,15 @@ internal fun JSONObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toI
 
 internal fun JSONObject.long(key: String): Long? = str(key)?.toDoubleOrNull()?.toLong()
 
+/** Panels send "0" for unrated items (treated as no rating) and values like "7.491" (shown as "7.5"). */
+internal fun JSONObject.rating(key: String): String? {
+    val raw = str(key) ?: return null
+    val value = raw.toDoubleOrNull() ?: return raw
+    if (value <= 0.0) return null
+    val rounded = Math.round(value * 10) / 10.0
+    return if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
+}
+
 /**
  * Accepts "host:port", with or without scheme/trailing slash, or a pasted
  * get.php / player_api.php link carrying username and password.
@@ -104,6 +115,51 @@ fun parseServerInput(raw: String): ServerInput? {
     val user = try { uri.getQueryParameter("username") } catch (e: Exception) { null }
     val pass = try { uri.getQueryParameter("password") } catch (e: Exception) { null }
     return ServerInput("$scheme://$host$port$path", user, pass)
+}
+
+/** What a stream URL really returns: status, content type and the first bytes. */
+data class StreamProbe(val code: Int, val contentType: String?, val head: String) {
+    val isHls: Boolean
+        get() = head.trimStart('﻿', ' ', '\r', '\n').startsWith("#EXTM3U") ||
+            contentType?.contains("mpegurl", ignoreCase = true) == true
+    val isHtml: Boolean
+        get() = contentType?.contains("html", ignoreCase = true) == true || head.trimStart().startsWith("<")
+
+    /** Safe to log: URLs (which carry credentials) are removed. */
+    fun summary(): String {
+        val start = head.take(60).replace(Regex("https?://\\S+"), "<url>").replace(Regex("\\s+"), " ")
+        return "HTTP $code, type=$contentType, starts=\"$start\""
+    }
+}
+
+suspend fun probeStream(start: String): StreamProbe? = withContext(Dispatchers.IO) {
+    try {
+        var url = URL(start)
+        for (hop in 0 until 6) {
+            val conn = url.openConnection() as HttpURLConnection
+            try {
+                conn.instanceFollowRedirects = false
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 15_000
+                conn.setRequestProperty("User-Agent", USER_AGENT)
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    url = URL(url, conn.getHeaderField("Location") ?: return@withContext StreamProbe(code, null, ""))
+                    continue
+                }
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val bytes = ByteArray(512)
+                val n = stream?.use { s -> s.read(bytes).coerceAtLeast(0) } ?: 0
+                val head = String(bytes, 0, n, Charsets.ISO_8859_1).map { c -> if (c.code in 32..126 || c == '\n' || c == '\r') c else '.' }.joinToString("")
+                return@withContext StreamProbe(code, conn.contentType, head)
+            } finally {
+                conn.disconnect()
+            }
+        }
+        null
+    } catch (e: Exception) {
+        null
+    }
 }
 
 class XtreamApi(val account: Account) {
@@ -163,10 +219,10 @@ class XtreamApi(val account: Account) {
             StreamItem(type, id, o.str("name") ?: "Channel $id", o.str("stream_icon"), o.str("category_id"), null, o.str("num"), null)
         }
         ContentType.MOVIE -> o.str("stream_id")?.let { id ->
-            StreamItem(type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.str("rating"))
+            StreamItem(type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"))
         }
         ContentType.SERIES -> o.str("series_id")?.let { id ->
-            StreamItem(type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.str("rating"))
+            StreamItem(type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.rating("rating"))
         }
     }
 
@@ -178,7 +234,7 @@ class XtreamApi(val account: Account) {
         return VodInfo(
             name = data.str("name") ?: info.str("name"),
             plot = info.str("plot") ?: info.str("description"),
-            rating = info.str("rating"),
+            rating = info.rating("rating"),
             genre = info.str("genre"),
             releaseDate = info.str("releasedate") ?: info.str("release_date"),
             duration = info.str("duration"),
@@ -234,7 +290,7 @@ class XtreamApi(val account: Account) {
         return SeriesInfo(
             plot = info.str("plot"),
             genre = info.str("genre"),
-            rating = info.str("rating"),
+            rating = info.rating("rating"),
             releaseDate = info.str("releaseDate") ?: info.str("release_date"),
             cover = info.str("cover"),
             seasons = seasons,

@@ -67,6 +67,11 @@
                 style="@style/TvButton"
                 android:layout_marginLeft="12dp"
                 android:visibility="gone" />
+
+            <Button
+                android:id="@+id/favorite"
+                style="@style/TvButton"
+                android:layout_marginLeft="12dp" />
         </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView

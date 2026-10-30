@@ -1,5 +1,7 @@
 package com.osama.xtreamtv
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -17,20 +19,32 @@ import kotlinx.coroutines.launch
 class DetailsActivity : AppCompatActivity() {
 
     companion object {
-        const val EXTRA_TYPE = "type"
-        const val EXTRA_ID = "id"
-        const val EXTRA_NAME = "name"
-        const val EXTRA_IMAGE = "image"
-        const val EXTRA_EXT = "ext"
-        const val EXTRA_RATING = "rating"
+        private const val EXTRA_TYPE = "type"
+        private const val EXTRA_ID = "id"
+        private const val EXTRA_NAME = "name"
+        private const val EXTRA_IMAGE = "image"
+        private const val EXTRA_EXT = "ext"
+        private const val EXTRA_RATING = "rating"
+        private const val EXTRA_CATEGORY = "category"
+
+        fun intent(context: Context, item: StreamItem): Intent =
+            Intent(context, DetailsActivity::class.java)
+                .putExtra(EXTRA_TYPE, item.type.name)
+                .putExtra(EXTRA_ID, item.id)
+                .putExtra(EXTRA_NAME, item.name)
+                .putExtra(EXTRA_IMAGE, item.image)
+                .putExtra(EXTRA_EXT, item.ext)
+                .putExtra(EXTRA_RATING, item.rating)
+                .putExtra(EXTRA_CATEGORY, item.categoryId)
+
+        private val EPISODE_TAG = Regex("(?i)\\bS\\d+\\s*E\\d+|\\bE\\d+\\b")
     }
 
     private lateinit var api: XtreamApi
     private lateinit var prefs: Prefs
-    private lateinit var type: ContentType
-    private lateinit var itemId: String
-    private lateinit var name: String
+    private lateinit var item: StreamItem
     private var ext: String? = null
+    private var posterUrl: String? = null
 
     private lateinit var poster: ImageView
     private lateinit var title: TextView
@@ -39,6 +53,7 @@ class DetailsActivity : AppCompatActivity() {
     private lateinit var buttons: View
     private lateinit var playButton: Button
     private lateinit var resumeButton: Button
+    private lateinit var favoriteButton: Button
     private lateinit var seasonsView: RecyclerView
     private lateinit var episodesView: RecyclerView
     private lateinit var progress: ProgressBar
@@ -48,14 +63,26 @@ class DetailsActivity : AppCompatActivity() {
     private lateinit var episodeAdapter: TextAdapter<Episode>
     private var seasons: Map<Int, List<Episode>> = emptyMap()
 
+    private val isMovie get() = item.type == ContentType.MOVIE
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
-        type = if (intent.getStringExtra(EXTRA_TYPE) == ContentType.SERIES.name) ContentType.SERIES else ContentType.MOVIE
-        itemId = intent.getStringExtra(EXTRA_ID) ?: return finish()
-        name = intent.getStringExtra(EXTRA_NAME) ?: ""
-        ext = intent.getStringExtra(EXTRA_EXT)
+        val type = if (intent.getStringExtra(EXTRA_TYPE) == ContentType.SERIES.name) ContentType.SERIES else ContentType.MOVIE
+        val id = intent.getStringExtra(EXTRA_ID) ?: return finish()
+        item = StreamItem(
+            type = type,
+            id = id,
+            name = intent.getStringExtra(EXTRA_NAME) ?: "",
+            image = intent.getStringExtra(EXTRA_IMAGE),
+            categoryId = intent.getStringExtra(EXTRA_CATEGORY),
+            ext = intent.getStringExtra(EXTRA_EXT),
+            num = null,
+            rating = intent.getStringExtra(EXTRA_RATING),
+        )
+        ext = item.ext
+        posterUrl = item.image
         setContentView(R.layout.activity_details)
 
         poster = findViewById(R.id.poster)
@@ -65,21 +92,30 @@ class DetailsActivity : AppCompatActivity() {
         buttons = findViewById(R.id.buttons)
         playButton = findViewById(R.id.play)
         resumeButton = findViewById(R.id.resume)
+        favoriteButton = findViewById(R.id.favorite)
         seasonsView = findViewById(R.id.seasons)
         episodesView = findViewById(R.id.episodes)
         progress = findViewById(R.id.progress)
         message = findViewById(R.id.message)
 
-        title.text = name
-        meta.text = intent.getStringExtra(EXTRA_RATING)?.let { "★ $it" } ?: ""
-        loadPoster(intent.getStringExtra(EXTRA_IMAGE))
+        title.text = item.name
+        meta.text = item.rating?.let { "★ $it" } ?: ""
+        loadPoster(item.image)
 
-        if (type == ContentType.MOVIE) setupMovie() else setupSeries()
+        buttons.visibility = View.VISIBLE
+        favoriteButton.setOnClickListener {
+            prefs.toggleFavorite(item)
+            updateFavoriteButton()
+        }
+        updateFavoriteButton()
+
+        if (isMovie) setupMovie() else setupSeries()
     }
 
     override fun onResume() {
         super.onResume()
-        if (type == ContentType.MOVIE) {
+        if (!::item.isInitialized || !::resumeButton.isInitialized) return
+        if (isMovie) {
             updateResumeButton()
         } else if (::episodeAdapter.isInitialized) {
             // A payload rebinds rows in place, so the focused episode keeps focus.
@@ -87,8 +123,14 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateFavoriteButton() {
+        val fav = item.id in prefs.favoriteIds(item.type)
+        favoriteButton.text = if (fav) "★  Favorite" else "☆  Add to favorites"
+    }
+
     private fun loadPoster(url: String?) {
         if (url.isNullOrBlank()) return
+        posterUrl = url
         poster.load(url) {
             crossfade(true)
             placeholder(R.drawable.placeholder)
@@ -98,10 +140,9 @@ class DetailsActivity : AppCompatActivity() {
 
     // ---- Movies ----
 
-    private fun movieKey() = "movie_$itemId"
+    private fun movieKey() = "movie_${item.id}"
 
     private fun setupMovie() {
-        buttons.visibility = View.VISIBLE
         playButton.setOnClickListener { playMovie(0L) }
         resumeButton.setOnClickListener { playMovie(prefs.position(movieKey())) }
         updateResumeButton()
@@ -110,7 +151,7 @@ class DetailsActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
-                val info = api.vodInfo(itemId)
+                val info = api.vodInfo(item.id)
                 info.name?.let { title.text = it }
                 if (info.ext != null) ext = info.ext
                 meta.text = listOfNotNull(
@@ -135,7 +176,6 @@ class DetailsActivity : AppCompatActivity() {
     }
 
     private fun updateResumeButton() {
-        if (type != ContentType.MOVIE || !::resumeButton.isInitialized) return
         val pos = prefs.position(movieKey())
         if (pos > 0) {
             resumeButton.text = "Resume from ${formatDuration(pos)}"
@@ -146,12 +186,17 @@ class DetailsActivity : AppCompatActivity() {
     }
 
     private fun playMovie(startMs: Long) {
-        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(itemId, ext), title.text.toString(), movieKey(), startMs))
+        val name = title.text.toString()
+        val entry = WatchEntry(movieKey(), ContentType.MOVIE, item.id, ext, name, null, posterUrl)
+        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(item.id, ext), name, movieKey(), startMs, entry))
     }
 
     // ---- Series ----
 
     private fun setupSeries() {
+        playButton.visibility = View.GONE
+        plot.maxLines = 3
+
         seasonAdapter = TextAdapter(
             R.layout.item_season,
             bind = { vh, season -> vh.title.text = if (season == 0) "Extras" else "Season $season" },
@@ -171,7 +216,7 @@ class DetailsActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
-                val info = api.seriesInfo(itemId)
+                val info = api.seriesInfo(item.id)
                 meta.text = listOfNotNull(
                     info.rating?.let { "★ $it" },
                     info.releaseDate?.take(4),
@@ -207,7 +252,8 @@ class DetailsActivity : AppCompatActivity() {
     private fun episodeKey(ep: Episode) = "ep_${ep.id}"
 
     private fun bindEpisode(vh: TextAdapter.VH, ep: Episode) {
-        val prefix = ep.number?.let { "E$it  ·  " } ?: ""
+        // Many panels already put "S01 E02" in the title; don't repeat the number.
+        val prefix = if (ep.number != null && !EPISODE_TAG.containsMatchIn(ep.title)) "E${ep.number}  ·  " else ""
         vh.title.text = prefix + ep.title
         val pos = prefs.position(episodeKey(ep))
         vh.subtitle?.text = listOfNotNull(
@@ -218,9 +264,11 @@ class DetailsActivity : AppCompatActivity() {
     }
 
     private fun playEpisode(ep: Episode) {
-        val label = "$name  ·  S${ep.season} E${ep.number ?: "?"}  ${ep.title}"
+        val episodeLabel = if (EPISODE_TAG.containsMatchIn(ep.title)) ep.title else "S${ep.season} E${ep.number ?: "?"}  ${ep.title}"
+        val seriesName = title.text.toString()
         val key = episodeKey(ep)
-        startActivity(PlayerActivity.vodIntent(this, api.episodeUrl(ep.id, ep.ext), label, key, prefs.position(key)))
+        val entry = WatchEntry(key, ContentType.SERIES, ep.id, ep.ext, seriesName, episodeLabel, posterUrl)
+        startActivity(PlayerActivity.vodIntent(this, api.episodeUrl(ep.id, ep.ext), "$seriesName  ·  $episodeLabel", key, prefs.position(key), entry))
     }
 
     private fun showMessage(text: String) {
