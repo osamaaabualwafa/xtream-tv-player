@@ -25,7 +25,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
 
     companion object {
         /** Wait this long on a channel before opening its stream (1-connection accounts). */
-        private const val DELAY_MS = 1_500L
+        private const val DELAY_MS = 800L
         const val WIDTH_DP = 336
         const val HEIGHT_DP = 189
     }
@@ -134,7 +134,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
 
     private fun createPlayer(): ExoPlayer {
         val http = DefaultHttpDataSource.Factory().setUserAgent(USER_AGENT).setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(5_000).setReadTimeoutMs(8_000)
+            .setConnectTimeoutMs(2_000).setReadTimeoutMs(6_000)
         // Start on the first half second of video instead of waiting for a full buffer.
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(1_500, 4_000, 400, 800)
@@ -144,7 +144,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
             setParameters(buildUponParameters().setMaxVideoSizeSd().setForceLowestBitrate(true))
         }
         return ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(http))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(http).setLoadErrorHandlingPolicy(PlaybackTuning.QuickRetry(3, openRetries = 1)))
             .setLoadControl(loadControl)
             .setTrackSelector(tracks)
             .build().also { p ->
@@ -163,8 +163,11 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
                 override fun onPlayerError(error: PlaybackException) {
                     p.stop()
                     // The server is often still letting go of the previous channel: try again shortly.
+                    // A stream server that does not answer was already retried (QuickRetry).
+                    val unreachable = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                     val item = currentItem
-                    if (item != null && retries < 3) {
+                    if (item != null && retries < 3 && !unreachable) {
                         retries++
                         status.text = "Connecting…"
                         val again = Runnable { play(item) }

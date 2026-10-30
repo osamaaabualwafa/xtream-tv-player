@@ -31,7 +31,6 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.DefaultTrackNameProvider
@@ -415,11 +414,12 @@ class PlayerActivity : AppCompatActivity() {
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
+            .setConnectTimeoutMs(4_000)
             .setReadTimeoutMs(30_000)
         // Live: retry a failing URL only once so the .ts fallback / error shows quickly.
+        // A stream server that does not answer is retried at once (see QuickRetry).
         val sources = DefaultMediaSourceFactory(http)
-            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (isLive) 1 else 3))
+            .setLoadErrorHandlingPolicy(PlaybackTuning.QuickRetry(if (isLive) 1 else 3))
         // Settings > Player: decoder and buffer size.
         val p = ExoPlayer.Builder(this, PlaybackTuning.renderers(this, prefs.decoderMode == 1))
             .setMediaSourceFactory(sources)

@@ -10,6 +10,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.common.C
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 
 /**
  * Settings > Player: decoder choice, buffer size, and matching the TV's refresh rate to the
@@ -17,6 +21,28 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
  */
 @UnstableApi
 object PlaybackTuning {
+
+    /**
+     * The server sends each stream on to one of several stream servers, and some of them may not
+     * answer. When a connection cannot be opened, ask again at once (the server usually picks
+     * another one) instead of waiting seconds between tries, up to [openRetries] times, then give up; other
+     * errors keep [minRetries].
+     */
+    class QuickRetry(private val minRetries: Int, private val openRetries: Int = 2) : DefaultLoadErrorHandlingPolicy(minRetries) {
+        private fun cannotConnect(info: LoadErrorHandlingPolicy.LoadErrorInfo): Boolean {
+            val e = info.exception
+            return e is HttpDataSource.HttpDataSourceException && e.type == HttpDataSource.HttpDataSourceException.TYPE_OPEN &&
+                e !is HttpDataSource.InvalidResponseCodeException
+        }
+
+        override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+            if (cannotConnect(info)) return if (info.errorCount <= openRetries) 100 else C.TIME_UNSET
+            val delay = super.getRetryDelayMsFor(info)
+            return if (delay == C.TIME_UNSET) delay else minOf(delay, 1_000)
+        }
+
+        override fun getMinimumLoadableRetryCount(dataType: Int) = maxOf(minRetries, openRetries)
+    }
 
     val DECODER_NAMES = listOf("Automatic (hardware)", "Prefer software")
     val BUFFER_NAMES = listOf("Small (starts fastest)", "Normal", "Large (for unstable connections)")
