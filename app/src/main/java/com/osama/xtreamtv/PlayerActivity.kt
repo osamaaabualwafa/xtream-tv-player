@@ -28,7 +28,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -88,6 +87,8 @@ class PlayerActivity : AppCompatActivity() {
                 .putExtra(EXTRA_ASK_RESUME, false)
 
         private const val EXTRA_WATCH = "watch"
+        /** Only "come back to full screen": never a new player of its own. */
+        private const val EXTRA_EXPAND = "expand"
         private const val EXTRA_ASK_RESUME = "ask_resume"
         private const val EXTRA_CATCHUP = "catchup"
         private val SUBTITLE_SIZES = listOf("Small" to 0.8f, "Medium" to 1.0f, "Large" to 1.3f, "Extra large" to 1.6f)
@@ -100,6 +101,29 @@ class PlayerActivity : AppCompatActivity() {
         const val SUBTITLES_OFF = "off"
         /** The player on screen (full or mini); a new video closes the old one first. */
         private var current: java.lang.ref.WeakReference<PlayerActivity>? = null
+
+        /** What the mini player is playing, or null when there is no mini player. */
+        fun miniTitle(): String? {
+            val p = current?.get() ?: return null
+            if (!p.wasMini || p.isFinishing) return null
+            return if (p.isLive) p.currentChannel?.name ?: "Live TV" else p.vodTitle
+        }
+
+        /**
+         * Mini player back to full screen: the corner player starts itself again (brought to the
+         * front of its own task), which the TV answers by expanding it.
+         */
+        @Suppress("UNUSED_PARAMETER")
+        fun expandMini(context: Context) {
+            val p = current?.get()?.takeIf { it.wasMini } ?: return
+            p.startActivity(
+                Intent(p, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT).putExtra(EXTRA_EXPAND, true),
+            )
+        }
+
+        fun closeMini() {
+            current?.get()?.takeIf { it.wasMini }?.finish()
+        }
         private const val VOD_RETRIES = 5
         private const val STILL_WATCHING_AFTER = 3
         private val PARSE_ERRORS = setOf(
@@ -241,11 +265,14 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A "full screen" request that didn't reach the corner player: leave that one alone.
+        if (intent.getBooleanExtra(EXTRA_EXPAND, false)) return finish()
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
         // A mini player still running elsewhere: close it (one stream at a time).
         current?.get()?.takeIf { it !== this }?.finish()
         current = java.lang.ref.WeakReference(this)
+        originTaskId = taskId
         Appearance.apply(this)
         setContentView(R.layout.activity_player)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -362,7 +389,9 @@ class PlayerActivity : AppCompatActivity() {
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
                     !isLive && cardAction != CardAction.NONE && !controlsShown() -> dismissCard()
                     !isLive && controlsShown() -> controls.hide()
-                    else -> if (!enterMiniPlayer()) finish()
+                    // Back from the corner to full screen: close and show the app underneath.
+                    restoredFromMini -> closeToApp()
+                    else -> finish()
                 }
             }
         })
@@ -414,11 +443,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun initPlayer() {
         if (player != null) return
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(4_000)
-            .setReadTimeoutMs(30_000)
+        val http = PlaybackTuning.http(connectTimeoutMs = 4_000, readTimeoutMs = 30_000)
         // Live: retry a failing URL only once so the .ts fallback / error shows quickly.
         // A stream server that does not answer is retried at once (see QuickRetry).
         val sources = DefaultMediaSourceFactory(http)
@@ -431,6 +456,12 @@ class PlayerActivity : AppCompatActivity() {
         p.addListener(playerListener)
         applyTrackPreferences(p)
         player = p
+        mediaSession = try {
+            // A mini player may still be closing: each player gets its own session id.
+            androidx.media3.session.MediaSession.Builder(this, p).setId("player-${System.identityHashCode(this)}").build()
+        } catch (e: Exception) {
+            null
+        }
         playerView.player = if (isLive) p else EpisodeAwarePlayer(p)
 
         if (isLive) playChannel(channelIndex) else startVod()
@@ -496,8 +527,20 @@ class PlayerActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    /** With the title, which the TV shows for the mini player ("now playing"). */
     private fun mediaItem(url: String, mimeType: String?): MediaItem =
-        MediaItem.Builder().setUri(url).apply { if (mimeType != null) setMimeType(mimeType) }.build()
+        MediaItem.Builder().setUri(url)
+            .apply { if (mimeType != null) setMimeType(mimeType) }
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(if (isLive) currentChannel?.name ?: "" else vodTitle)
+                    .setDisplayTitle(if (isLive) currentChannel?.name ?: "" else vodTitle)
+                    .build(),
+            )
+            .build()
+
+    /** Tells the TV what is playing (title in the mini player's corner box). */
+    private var mediaSession: androidx.media3.session.MediaSession? = null
 
     /** Settings > Player > Match frame rate: once per stream, when the frame rate is known. */
     private var frameRateFor: String? = null
@@ -562,6 +605,8 @@ class PlayerActivity : AppCompatActivity() {
         fpsProbe = null
         if (!isLive) saveVodPosition(p)
         p.removeListener(playerListener)
+        mediaSession?.release()
+        mediaSession = null
         p.release()
         player = null
         playerView.player = null
@@ -591,12 +636,12 @@ class PlayerActivity : AppCompatActivity() {
         override fun onIsPlayingChanged(isPlaying: Boolean) = scheduleScreensaver()
 
         override fun onPlaybackStateChanged(state: Int) {
-            progress.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
+            progress.visibility = if (state == Player.STATE_BUFFERING && !isInPictureInPictureModeCompat()) View.VISIBLE else View.GONE
             if (state == Player.STATE_READY) {
                 errorView.visibility = View.GONE
                 vodRetries = 0
                 // Show what's playing for a few seconds when a movie or episode starts.
-                if (!isLive && !titleShown) {
+                if (!isLive && !titleShown && !isInPictureInPictureModeCompat()) {
                     titleShown = true
                     controls.showTitleOnly()
                 }
@@ -870,17 +915,62 @@ class PlayerActivity : AppCompatActivity() {
 
     private var wasMini = false
 
-    /** Back with nothing open: keep playing in a corner (Settings > Player). False if not possible. */
+    /** The remote's Home button while a video plays: keep it playing in a corner (Settings > Player). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!isFinishing && !leavingForApp) enterMiniPlayer()
+    }
+
+    /** This player is opening the app's own screens (not the user leaving): no corner. */
+    private var leavingForApp = false
+
+    /** Into the corner (Settings > Player). False if not possible. */
     private fun enterMiniPlayer(): Boolean {
         if (!prefs.miniPlayer || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
-        if (player?.isPlaying != true) return false
+        // Playing, or about to (buffering counts): not when paused.
+        if (player?.playWhenReady != true) return false
+        // Clear the picture first so the shrink shows only the video.
+        clearForMini()
         return try {
-            val params = android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
-            enterPictureInPictureMode(params)
+            enterPictureInPictureMode(miniParams())
         } catch (e: Exception) {
             false
         }
+    }
+
+    /** The corner window takes the video's shape, and the shrink starts from where the picture is. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+    private fun miniParams(): android.app.PictureInPictureParams {
+        val size = player?.videoSize
+        // Android allows 1:2.39 to 2.39:1.
+        val ratio = if (size != null && size.width > 0 && size.height > 0) {
+            val r = size.width * size.pixelWidthHeightRatio / size.height
+            android.util.Rational((r.coerceIn(1f / 2.39f, 2.39f) * 1000).toInt(), 1000)
+        } else {
+            android.util.Rational(16, 9)
+        }
+        val hint = android.graphics.Rect()
+        playerView.videoSurfaceView?.getGlobalVisibleRect(hint)
+        return android.app.PictureInPictureParams.Builder()
+            .setAspectRatio(ratio)
+            .apply { if (!hint.isEmpty) setSourceRectHint(hint) }
+            .build()
+    }
+
+    /** Everything over the video goes, at once (no fades running during the shrink). */
+    private fun clearForMini() {
+        if (::controls.isInitialized && !isLive) controls.hideNow()
+        closePanels(refocus = false)
+        if (::overlay.isInitialized) overlay.visibility = View.GONE
+        hideScreensaver()
+        channelsPanel.visibility = View.GONE
+        hideCard()
+        progress.visibility = View.GONE
+        playFlash.visibility = View.GONE
+        seekForward.visibility = View.GONE
+        seekBack.visibility = View.GONE
+        numberEntry.visibility = View.GONE
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
@@ -888,16 +978,48 @@ class PlayerActivity : AppCompatActivity() {
         if (isInPictureInPictureMode) {
             wasMini = true
             // Only the picture in the corner.
-            if (::controls.isInitialized && !isLive) controls.hide()
-            closePanels(refocus = false)
-            if (::overlay.isInitialized) overlay.visibility = View.GONE
-            hideScreensaver()
-            channelsPanel.visibility = View.GONE
-            actionCard.visibility = View.GONE
+            clearForMini()
         } else {
             wasMini = false
+            if (!isFinishing) restoredFromMini = true
             playerView.requestFocus()
         }
+    }
+
+    /** The task this player was opened in (before the corner window moved it to its own). */
+    private var originTaskId = -1
+
+    /** Opened again from the corner (the app icon or the corner itself): Back now closes it. */
+    private var restoredFromMini = false
+
+    /**
+     * The mini player lives in its own task, so finishing it alone would land on the TV's home
+     * screen. Bring the app's own screens (the details page underneath) back instead.
+     */
+    private fun closeToApp() {
+        leavingForApp = true
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        // The task the video started in (page, list, Home underneath): it leaves that task
+        // when it goes into the corner, so go back to it by its id.
+        if (originTaskId != -1 && originTaskId != taskId) {
+            try {
+                am.moveTaskToFront(originTaskId, 0)
+                finish()
+                return
+            } catch (e: Exception) {
+                // Gone (the app was closed meanwhile): open the app normally below.
+            }
+        }
+        // No such task any more: open the app normally.
+        val launch = packageManager.getLeanbackLaunchIntentForPackage(packageName)
+            ?: packageManager.getLaunchIntentForPackage(packageName)
+        launch?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        try {
+            if (launch != null) startActivity(launch)
+        } catch (e: Exception) {
+            // Nothing to bring back: just close.
+        }
+        finish()
     }
 
     // ---- Screensaver when paused ----
@@ -1230,7 +1352,7 @@ class PlayerActivity : AppCompatActivity() {
             },
             onLongClick = { _, ep -> toggleWatched(episodes.indexOfFirst { it.id == ep.id }, ep) },
         )
-        episodesList.layoutManager = RowLayoutManager(this, if (shelf) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL)
+        episodesList.layoutManager = RowLayoutManager(this, if (shelf) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, center = true)
         episodesList.adapter = episodeAdapter
         seasonAdapter = TextAdapter(
             R.layout.item_category_chip,
@@ -1672,7 +1794,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun updateEpisodePrompts() {
         val p = player
         if (p == null || watchEntry?.type != ContentType.SERIES || errorView.visibility == View.VISIBLE ||
-            episodesPanel.visibility == View.VISIBLE
+            episodesPanel.visibility == View.VISIBLE || isInPictureInPictureModeCompat()
         ) {
             hideCard()
             return
@@ -1728,7 +1850,7 @@ class PlayerActivity : AppCompatActivity() {
             },
             onLongClick = null,
         )
-        channelsList.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
+        channelsList.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL, center = true)
         channelsList.adapter = channelAdapter
     }
 
@@ -2056,12 +2178,14 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun openGuide() {
-        startActivity(GuideActivity.intent(this, channelIndex, fromPlayer = true))
+        // Our own screen, not the user leaving: no mini player for this.
+        startActivity(GuideActivity.intent(this, channelIndex, fromPlayer = true).addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION))
     }
 
     override fun onDestroy() {
         PlaybackTuning.restoreFrameRate(this)
         if (current?.get() === this) current = null
+        wasMini = false
         if (::playerView.isInitialized) playerView.removeCallbacks(showScreensaver)
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)
         if (::controls.isInitialized) controls.release()

@@ -117,7 +117,11 @@ class BrowseActivity : AppCompatActivity() {
             },
             onLongClick = { _, cat -> categoryOptions(cat) },
         )
-        categoriesView.layoutManager = RowLayoutManager(this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL)
+        // Long category lists glide like the posters (the highlight stays near the middle).
+        categoriesView.layoutManager = RowLayoutManager(
+            this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, center = true,
+        )
+        categoriesView.tuneForTv()
         categoriesView.adapter = categoryAdapter
 
         val live = type == ContentType.LIVE
@@ -131,11 +135,12 @@ class BrowseActivity : AppCompatActivity() {
             onBindExtra = if (live) { vh, item -> bindNowPlaying(vh, item) } else null,
         )
         itemsView.layoutManager = when {
-            live -> RowLayoutManager(this, LinearLayoutManager.VERTICAL)
+            live -> RowLayoutManager(this, LinearLayoutManager.VERTICAL, center = true)
             preview -> RowLayoutManager(this)
-            style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> GridLayoutManager(this, 6)
-            else -> GridLayoutManager(this, 8)
+            style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> CenterGridLayoutManager(this, 6)
+            else -> CenterGridLayoutManager(this, 8)
         }
+        itemsView.tuneForTv()
 
         if (!live && style != Appearance.BROWSE_PREVIEW) backdrop = FocusBackdrop.attach(this)
         if (live && prefs.channelPreview) {
@@ -188,12 +193,14 @@ class BrowseActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        MiniPlayerBar.detach(this)
         // Free the stream before the player opens (providers often allow one connection).
         channelPreview?.release()
     }
 
     override fun onResume() {
         super.onResume()
+        MiniPlayerBar.attach(this)
         if (!::itemAdapter.isInitialized) return
         // Back from the player: start the preview of the highlighted channel again.
         currentFocus?.let { itemsView.findContainingViewHolder(it) }?.bindingAdapterPosition
@@ -596,9 +603,7 @@ class BrowseActivity : AppCompatActivity() {
     /** Continue-watching items play straight away from where they stopped. */
     private fun resume(key: String) {
         val entry = prefs.continueWatching(type).firstOrNull { it.key == key } ?: return
-        val url = if (entry.type == ContentType.MOVIE) api.movieUrl(entry.id, entry.ext) else api.episodeUrl(entry.id, entry.ext ?: "mp4")
-        val title = listOfNotNull(entry.title, entry.subtitle).joinToString("  ·  ")
-        startActivity(PlayerActivity.vodIntent(this, url, title, entry.key, entry.position, entry))
+        resumeWatching(entry, api)
     }
 
     private fun onLongPress(item: StreamItem) {

@@ -6,6 +6,7 @@
     android:background="?attr/appBackground">
 
     <ScrollView
+        android:id="@+id/login_scroll"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true">
@@ -52,12 +53,14 @@
                     style="@style/GlassInput"
                     android:layout_marginBottom="12dp"
                     android:hint="Playlist name (optional)"
+                    android:imeOptions="actionNext|flagNoExtractUi"
                     android:inputType="textCapWords" />
 
                 <EditText
                     android:id="@+id/server"
                     style="@style/GlassInput"
                     android:hint="Server (http://host:port) or M3U link"
+                    android:imeOptions="actionNext|flagNoExtractUi"
                     android:inputType="textUri" />
 
                 <EditText
@@ -65,6 +68,7 @@
                     style="@style/GlassInput"
                     android:layout_marginTop="12dp"
                     android:hint="Username"
+                    android:imeOptions="actionNext|flagNoExtractUi"
                     android:inputType="text" />
 
                 <!-- Password with a Show / Hide button at its end. -->

@@ -188,7 +188,7 @@ class SettingsActivity : AppCompatActivity() {
         )
         option("Episodes list", listOf(0 to "Side panel", 1 to "Bottom shelf"), { prefs.episodesStyle }, { prefs.episodesStyle = it })
         option("Player menu", listOf(0 to "Small pop-up", 1 to "Side panel"), { prefs.playerMenuStyle }, { prefs.playerMenuStyle = it })
-        option("Back from the player", listOf(true to "Keep playing in a corner", false to "Close the video"), { prefs.miniPlayer }, { prefs.miniPlayer = it })
+        option("Home button during a video", listOf(true to "Keep playing in a corner", false to "Stop the video"), { prefs.miniPlayer }, { prefs.miniPlayer = it })
         option("Screensaver when paused", listOf(true to "On", false to "Off"), { prefs.pauseScreensaver }, { prefs.pauseScreensaver = it })
         option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
         heading("Picture and sound")
@@ -367,6 +367,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun lookOptions() {
         heading("Screen")
         option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
+        option("Interface size", Look.UI_SIZES, { prefs.uiSize }, { prefs.uiSize = it; recreate() })
         option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
         heading("Effects")
         option("Background follows the poster", listOf(true to "On", false to "Off"), { prefs.backdropFollows }, { prefs.backdropFollows = it })

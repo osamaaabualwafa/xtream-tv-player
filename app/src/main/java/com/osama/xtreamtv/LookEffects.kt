@@ -24,6 +24,11 @@ object Look {
     val BACKGROUND_NAMES = listOf("Glow", "Pure black (OLED)", "Ocean", "Sunset")
     private val BACKGROUND_STYLES = intArrayOf(R.style.Bg_Glow, R.style.Bg_Black, R.style.Bg_Ocean, R.style.Bg_Sunset)
 
+    /** Interface sizes in the order Settings lists them, with the stored value of each. */
+    val UI_SIZES = listOf(3 to "Small", 0 to "Compact", 1 to "Normal", 2 to "Large")
+    /** How many dp fit across the screen for each stored value (more = everything smaller). */
+    private val UI_WIDTHS_DP = intArrayOf(1080, 960, 860, 1200)
+
     val TEXT_SIZE_NAMES = listOf("Small", "Normal", "Large", "Extra large")
     private val TEXT_SCALES = floatArrayOf(0.9f, 1f, 1.12f, 1.25f)
 
@@ -36,11 +41,27 @@ object Look {
     /** In attachBaseContext: the chosen text size on top of the TV's own. */
     fun wrap(base: Context): Context {
         val index = Prefs(base).textSize.coerceIn(0, TEXT_SCALES.size - 1)
-        if (index == 1) return base
         val config = Configuration(base.resources.configuration)
-        config.fontScale = config.fontScale * TEXT_SCALES[index]
-        return base.createConfigurationContext(config)
+        var changed = false
+        if (index != 1) {
+            config.fontScale = config.fontScale * TEXT_SCALES[index]
+            changed = true
+        }
+        // Scale to the screen width, whatever density the TV reports (720p sets, 4K sets), and
+        // to Settings > Look > Interface size.
+        val dm = base.resources.displayMetrics
+        val longSide = maxOf(dm.widthPixels, dm.heightPixels)
+        if (longSide > 0) {
+            val widthDp = UI_WIDTHS_DP[Prefs(base).uiSize.coerceIn(0, UI_WIDTHS_DP.size - 1)]
+            val target = longSide * 160 / widthDp
+            if (Math.abs(target - config.densityDpi) > config.densityDpi / 50) {
+                config.densityDpi = target
+                changed = true
+            }
+        }
+        return if (changed) base.createConfigurationContext(config) else base
     }
+
 }
 
 /** Loading posters: a soft light band moving across instead of a flat grey box. */
@@ -48,6 +69,8 @@ class ShimmerDrawable : Drawable() {
     private val base = Paint().apply { color = 0x14FFFFFF }
     private val band = Paint()
     private val rect = RectF()
+    private val shift = android.graphics.Matrix()
+    private var shaderWidth = -1f
 
     override fun draw(canvas: Canvas) {
         val b = bounds
@@ -55,11 +78,17 @@ class ShimmerDrawable : Drawable() {
         rect.set(b)
         canvas.drawRect(rect, base)
         val w = b.width().toFloat()
+        // Built once per size and slid along: no new objects per frame while lists scroll.
+        if (w != shaderWidth) {
+            shaderWidth = w
+            band.shader = LinearGradient(0f, 0f, w, 0f, intArrayOf(0x00FFFFFF, 0x1FFFFFFF, 0x00FFFFFF), null, Shader.TileMode.CLAMP)
+        }
         val phase = (SystemClock.uptimeMillis() % 1400L) / 1400f
-        val x = b.left - w + phase * 2 * w
-        band.shader = LinearGradient(x, 0f, x + w, 0f, intArrayOf(0x00FFFFFF, 0x1FFFFFFF, 0x00FFFFFF), null, Shader.TileMode.CLAMP)
+        shift.setTranslate(b.left - w + phase * 2 * w, 0f)
+        band.shader.setLocalMatrix(shift)
         canvas.drawRect(rect, band)
-        invalidateSelf()
+        // About 30 frames a second is plenty for a soft light band.
+        scheduleSelf({ invalidateSelf() }, SystemClock.uptimeMillis() + 33)
     }
 
     override fun setAlpha(alpha: Int) {}

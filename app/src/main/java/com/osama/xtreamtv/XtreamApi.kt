@@ -177,31 +177,16 @@ data class StreamProbe(val code: Int, val contentType: String?, val head: String
     }
 }
 
+/** Same connection rules as the player (IPv4 first, redirects followed). */
 suspend fun probeStream(start: String): StreamProbe? = withContext(Dispatchers.IO) {
     try {
-        var url = URL(start)
-        for (hop in 0 until 6) {
-            val conn = url.openConnection() as HttpURLConnection
-            try {
-                conn.instanceFollowRedirects = false
-                conn.connectTimeout = 15_000
-                conn.readTimeout = 15_000
-                conn.setRequestProperty("User-Agent", USER_AGENT)
-                val code = conn.responseCode
-                if (code in 300..399) {
-                    url = URL(url, conn.getHeaderField("Location") ?: return@withContext StreamProbe(code, null, ""))
-                    continue
-                }
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val bytes = ByteArray(512)
-                val n = stream?.use { s -> s.read(bytes).coerceAtLeast(0) } ?: 0
-                val head = String(bytes, 0, n, Charsets.ISO_8859_1).map { c -> if (c.code in 32..126 || c == '\n' || c == '\r') c else '.' }.joinToString("")
-                return@withContext StreamProbe(code, conn.contentType, head)
-            } finally {
-                conn.disconnect()
-            }
+        val request = okhttp3.Request.Builder().url(start).header("User-Agent", USER_AGENT).build()
+        PlaybackTuning.probeClient.newCall(request).execute().use { r ->
+            val bytes = ByteArray(512)
+            val n = r.body?.byteStream()?.read(bytes)?.coerceAtLeast(0) ?: 0
+            val head = String(bytes, 0, n, Charsets.ISO_8859_1).map { c -> if (c.code in 32..126 || c == '\n' || c == '\r') c else '.' }.joinToString("")
+            StreamProbe(r.code, r.header("Content-Type"), head)
         }
-        null
     } catch (e: Exception) {
         null
     }

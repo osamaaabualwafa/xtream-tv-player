@@ -120,8 +120,14 @@ class DetailsActivity : AppCompatActivity() {
         if (isMovie) setupMovie() else setupSeries()
     }
 
+    override fun onPause() {
+        super.onPause()
+        MiniPlayerBar.detach(this)
+    }
+
     override fun onResume() {
         super.onResume()
+        MiniPlayerBar.attach(this)
         if (!::item.isInitialized || !::resumeButton.isInitialized) return
         if (isMovie) {
             updateResumeButton()

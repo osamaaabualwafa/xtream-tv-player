@@ -189,6 +189,14 @@ class VodControls(private val root: View, private val host: Host) {
         root.postDelayed(hideRunnable, TITLE_ONLY_MS)
     }
 
+    /** At once, no fade (going into the mini player: nothing may be left over the picture). */
+    fun hideNow() {
+        hide()
+        root.animate().cancel()
+        root.alpha = 0f
+        root.visibility = View.GONE
+    }
+
     fun hide() {
         if (mode == Mode.HIDDEN) return
         val hadFocus = root.hasFocus()

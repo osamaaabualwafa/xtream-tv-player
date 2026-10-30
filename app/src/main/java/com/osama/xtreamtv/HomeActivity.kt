@@ -94,6 +94,10 @@ class HomeActivity : AppCompatActivity() {
             setOnClickListener { startActivity(Intent(this@HomeActivity, SearchActivity::class.java)) }
         }
         findViewById<View>(R.id.tile_live).requestFocus()
+        // Right on the last tile: stay (Android would otherwise jump to the row below).
+        if (prefs.homeStyle == Appearance.HOME_TILES || prefs.homeStyle == Appearance.HOME_HERO) {
+            findViewById<View>(R.id.tile_search).nextFocusRightId = R.id.tile_search
+        }
         // Up from the tiles reaches the top-bar chips (they sit far to the right).
         if (prefs.homeStyle != Appearance.HOME_SIDE_MENU) {
             findViewById<View>(R.id.tile_live).nextFocusUpId = R.id.playlist_chip
@@ -145,6 +149,7 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        MiniPlayerBar.attach(this)
         if (!::continueAdapter.isInitialized) return
         if (lookKey() != builtLook) {
             recreate()
@@ -170,10 +175,11 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
+        MiniPlayerBar.detach(this)
         findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
     }
@@ -404,9 +410,7 @@ class HomeActivity : AppCompatActivity() {
     private fun resume(key: String) {
         val entry = (prefs.continueWatching(ContentType.MOVIE) + prefs.continueWatching(ContentType.SERIES))
             .firstOrNull { it.key == key } ?: return
-        val url = if (entry.type == ContentType.MOVIE) api.movieUrl(entry.id, entry.ext) else api.episodeUrl(entry.id, entry.ext ?: "mp4")
-        val title = listOfNotNull(entry.title, entry.subtitle).joinToString("  ·  ")
-        startActivity(PlayerActivity.vodIntent(this, url, title, entry.key, entry.position, entry))
+        resumeWatching(entry, api, withList = true)
     }
 
     /** Throw away the lists saved on the device so everything reloads from the server. */

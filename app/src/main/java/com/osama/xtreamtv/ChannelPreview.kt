@@ -11,7 +11,6 @@ import coil.load
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -26,6 +25,8 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
     companion object {
         /** Wait this long on a channel before opening its stream (1-connection accounts). */
         private const val DELAY_MS = 800L
+        /** The server answered a .ts request with an HLS playlist: use HLS from now on. */
+        private var tsIsHls = false
         const val WIDTH_DP = 336
         const val HEIGHT_DP = 189
     }
@@ -122,7 +123,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
         // TS is one continuous stream and starts much faster than HLS (playlist + segments);
         // use it for the preview unless the server only offers HLS.
         val formats = prefs.formats.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-        val hls = prefs.streamType == 1 || (formats.isNotEmpty() && "ts" !in formats)
+        val hls = tsIsHls || prefs.streamType == 1 || (formats.isNotEmpty() && "ts" !in formats)
         val media = MediaItem.Builder()
             .setUri(api.liveUrl(item.id, if (hls) "m3u8" else "ts"))
             .apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
@@ -133,8 +134,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
     }
 
     private fun createPlayer(): ExoPlayer {
-        val http = DefaultHttpDataSource.Factory().setUserAgent(USER_AGENT).setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(2_000).setReadTimeoutMs(6_000)
+        val http = PlaybackTuning.http(connectTimeoutMs = 2_000, readTimeoutMs = 6_000)
         // Start on the first half second of video instead of waiting for a full buffer.
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(1_500, 4_000, 400, 800)
@@ -162,6 +162,12 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
 
                 override fun onPlayerError(error: PlaybackException) {
                     p.stop()
+                    // Not a TS stream (some servers send an HLS playlist): try again as HLS at once.
+                    if (!tsIsHls && error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
+                        tsIsHls = true
+                        currentItem?.let { play(it) }
+                        return
+                    }
                     // The server is often still letting go of the previous channel: try again shortly.
                     // A stream server that does not answer was already retried (QuickRetry).
                     val unreachable = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||

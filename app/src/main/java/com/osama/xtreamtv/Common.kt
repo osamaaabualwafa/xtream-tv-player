@@ -202,7 +202,7 @@ class Prefs(context: Context) {
         get() = global.getInt("player_menu_style", 0)
         set(value) = global.edit().putInt("player_menu_style", value).apply()
 
-    /** Back from the player keeps it playing in a corner (picture-in-picture) instead of closing. */
+    /** The remote's Home button keeps a video playing in a corner (picture-in-picture). */
     var miniPlayer: Boolean
         get() = global.getBoolean("mini_player", true)
         set(value) = global.edit().putBoolean("mini_player", value).apply()
@@ -232,6 +232,11 @@ class Prefs(context: Context) {
         get() = global.getInt("background_style", 0)
         set(value) = global.edit().putInt("background_style", value).apply()
 
+    /** Interface size: 0 compact, 1 normal, 2 large, 3 small (everything, not just text). */
+    var uiSize: Int
+        get() = global.getInt("ui_size", 0)
+        set(value) = global.edit().putInt("ui_size", value).apply()
+
     /** 0 small, 1 normal, 2 large, 3 extra large. */
     var textSize: Int
         get() = global.getInt("text_size", 1)
@@ -239,7 +244,7 @@ class Prefs(context: Context) {
 
     /** Background takes the colours of the highlighted poster. */
     var backdropFollows: Boolean
-        get() = global.getBoolean("backdrop_follows", true)
+        get() = global.getBoolean("backdrop_follows", false)
         set(value) = global.edit().putBoolean("backdrop_follows", value).apply()
 
     /** Highlighted poster rises with a glow, the others dim. */
@@ -249,7 +254,7 @@ class Prefs(context: Context) {
 
     /** Rotating banner at the top of Home. */
     var featuredBanner: Boolean
-        get() = global.getBoolean("featured_banner", true)
+        get() = global.getBoolean("featured_banner", false)
         set(value) = global.edit().putBoolean("featured_banner", value).apply()
 
     /** Live stream type: 0 automatic (what the server offers), 1 HLS (m3u8), 2 MPEG-TS. */
@@ -514,6 +519,26 @@ fun countLabel(type: ContentType, n: Int): String {
     return "$number $noun"
 }
 
+/**
+ * Continue watching: play from where it stopped, with the movie's (or series') page underneath,
+ * so Back from the player lands there instead of on the screen the item was picked from.
+ * [withList]: also the Movies / Series screen under that page (picked from Home), so Back goes
+ * player → page → all movies or series → Home.
+ */
+fun Activity.resumeWatching(entry: WatchEntry, api: XtreamApi, withList: Boolean = false) {
+    val url = if (entry.type == ContentType.MOVIE) api.movieUrl(entry.id, entry.ext) else api.episodeUrl(entry.id, entry.ext ?: "mp4")
+    val title = listOfNotNull(entry.title, entry.subtitle).joinToString("  ·  ")
+    val player = PlayerActivity.vodIntent(this, url, title, entry.key, entry.position, entry)
+    val pageId = if (entry.type == ContentType.MOVIE) entry.id else entry.seriesId
+    if (pageId == null) {
+        startActivity(player)
+        return
+    }
+    val page = DetailsActivity.intent(this, StreamItem(entry.type, pageId, entry.title, entry.image, null, entry.ext, null, null))
+    val list = Intent(this, BrowseActivity::class.java).putExtra(BrowseActivity.EXTRA_TYPE, entry.type.name)
+    startActivities(if (withList) arrayOf(list, page, player) else arrayOf(page, player))
+}
+
 /** Long-press on a Continue watching card: ask first, so a long OK press can't wipe progress by accident. */
 fun confirmRemoveProgress(activity: Activity, prefs: Prefs, item: StreamItem, onRemoved: () -> Unit) {
     androidx.appcompat.app.AlertDialog.Builder(activity)
@@ -682,6 +707,23 @@ class ItemAdapter(
 
     override fun getItemCount() = items.size
 
+    /** Pictures already asked for (so scrolling back and forth doesn't ask again). */
+    private val prefetched = HashSet<String>()
+
+    /** Start the picture two rows ahead now, at the size it will be shown. */
+    private fun prefetchAhead(holder: VH, position: Int) {
+        val w = holder.image.width
+        val h = holder.image.height
+        if (w <= 0 || h <= 0) return
+        val ahead = if (grid) 12 else 8
+        val url = items.getOrNull(position + ahead)?.image ?: return
+        if (url.isBlank() || !prefetched.add(url)) return
+        val context = holder.image.context
+        coil.Coil.imageLoader(context).enqueue(
+            coil.request.ImageRequest.Builder(context).data(url).size(w, h).build(),
+        )
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val view = LayoutInflater.from(parent.context)
             .inflate(layout ?: if (grid) R.layout.item_poster else R.layout.item_channel, parent, false)
@@ -726,6 +768,7 @@ class ItemAdapter(
             error(R.drawable.placeholder)
             fallback(R.drawable.placeholder)
         }
+        prefetchAhead(holder, position)
         holder.itemView.setOnClickListener {
             val p = holder.bindingAdapterPosition
             if (p != RecyclerView.NO_POSITION) onClick(p, items[p])
@@ -744,12 +787,42 @@ class ItemAdapter(
 }
 
 /**
+ * Vertical lists and grids on TV: keep the highlighted row a little above the middle and glide
+ * there, instead of scrolling in jumps only when the highlight reaches the bottom edge (new rows
+ * then also appear before they are needed).
+ */
+fun centerOnFocus(parent: RecyclerView, child: View, immediate: Boolean): Boolean {
+    val dy = (child.top + child.height / 2) - (parent.height * 9 / 20)
+    if (Math.abs(dy) < 4) return false
+    if (immediate) parent.scrollBy(0, dy) else parent.smoothScrollBy(0, dy)
+    return true
+}
+
+class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyclerview.widget.GridLayoutManager(context, spanCount) {
+    override fun requestChildRectangleOnScreen(
+        parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
+    ): Boolean = centerOnFocus(parent, child, immediate)
+}
+
+/** Smooth list settings for TV lists and grids. */
+fun RecyclerView.tuneForTv() {
+    setHasFixedSize(true)
+    setItemViewCacheSize(24)
+    (itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.supportsChangeAnimations = false
+}
+
+/**
  * Row (or list) for the remote: holding Left/Right (Up/Down for a list) keeps the highlight in
  * the row and scrolls it, instead of jumping out to whatever is nearest when the next item isn't
  * on screen yet. At the ends the highlight stays put.
  */
-class RowLayoutManager(context: android.content.Context, orientation: Int = HORIZONTAL) :
+class RowLayoutManager(context: android.content.Context, orientation: Int = HORIZONTAL, private val center: Boolean = false) :
     LinearLayoutManager(context, orientation, false) {
+
+    override fun requestChildRectangleOnScreen(
+        parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
+    ): Boolean = if (center && orientation == VERTICAL) centerOnFocus(parent, child, immediate)
+    else super.requestChildRectangleOnScreen(parent, child, rect, immediate, focusedChildVisible)
 
     override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
         val forward = if (orientation == HORIZONTAL) View.FOCUS_RIGHT else View.FOCUS_DOWN

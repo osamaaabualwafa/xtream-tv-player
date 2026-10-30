@@ -111,7 +111,7 @@
         <!-- Big tiles; Live TV is the widest. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="190dp"
+            android:layout_height="140dp"
             android:layout_marginTop="22dp"
             android:clipChildren="false"
             android:orientation="horizontal">
@@ -124,7 +124,7 @@
 
                 <ImageView style="@style/HomeTileIcon" android:src="@drawable/ic_home_live" />
 
-                <TextView style="@style/HomeTileName" android:textSize="26sp" android:text="Live TV" />
+                <TextView style="@style/HomeTileName" android:textSize="22sp" android:text="Live TV" />
 
                 <TextView android:id="@+id/tile_live_count" style="@style/HomeTileCount" />
             </LinearLayout>

@@ -188,8 +188,14 @@ class SearchActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        MiniPlayerBar.attach(this)
+    }
+
     override fun onPause() {
         super.onPause()
+        MiniPlayerBar.detach(this)
         if (listening) stopListening()
     }
 
@@ -355,7 +361,7 @@ class SearchActivity : AppCompatActivity() {
                 channelList.submit(items)
             } else {
                 if (results.adapter !== posterGrid) {
-                    results.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 8)
+                    results.layoutManager = CenterGridLayoutManager(this, 8)
                     results.adapter = posterGrid
                 }
                 posterGrid.submit(items)

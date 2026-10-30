@@ -44,6 +44,36 @@ object PlaybackTuning {
         override fun getMinimumLoadableRetryCount(dataType: Int) = maxOf(minRetries, openRetries)
     }
 
+    /**
+     * Video connections: IPv4 first. Some providers answer IPv6 with "blocked" while the same
+     * server streams fine over IPv4, and TVs on an IPv6 network would otherwise always pick IPv6.
+     * OkHttp falls back to the next address (IPv6 too) when one can't be reached.
+     */
+    private val ipv4First = object : okhttp3.Dns {
+        override fun lookup(hostname: String): List<java.net.InetAddress> =
+            okhttp3.Dns.SYSTEM.lookup(hostname).sortedBy { it is java.net.Inet6Address }
+    }
+
+    private val baseClient by lazy {
+        okhttp3.OkHttpClient.Builder().dns(ipv4First).followRedirects(true).followSslRedirects(true).build()
+    }
+
+    /** For looking at what a stream URL really returns. */
+    val probeClient: okhttp3.OkHttpClient by lazy {
+        baseClient.newBuilder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    fun http(connectTimeoutMs: Long, readTimeoutMs: Long): androidx.media3.datasource.DataSource.Factory =
+        androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            baseClient.newBuilder()
+                .connectTimeout(connectTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(readTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build(),
+        ).setUserAgent(USER_AGENT)
+
     val DECODER_NAMES = listOf("Automatic (hardware)", "Prefer software")
     val BUFFER_NAMES = listOf("Small (starts fastest)", "Normal", "Large (for unstable connections)")
 

@@ -52,6 +52,38 @@ class LoginActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         error = findViewById(R.id.error)
 
+        // Keyboard up (the screen shrinks above it): the ScrollView keeps the focused field in
+        // view; when a field is picked, bring it near the top once so the next one shows too.
+        val scroll = findViewById<android.widget.ScrollView>(R.id.login_scroll)
+        val inner = scroll.getChildAt(0)
+        fun fieldToTop() {
+            val v = currentFocus as? EditText ?: return
+            val field = IntArray(2).also { v.getLocationOnScreen(it) }
+            val area = IntArray(2).also { scroll.getLocationOnScreen(it) }
+            // Field near the top of what is visible, with a little space above it.
+            scroll.smoothScrollTo(0, scroll.scrollY + field[1] - area[1] - (resources.displayMetrics.density * 24).toInt())
+        }
+        // Keyboard open = the screen above it gets shorter. Then give the form room below the
+        // card (so it can scroll that far) and jump once to the field; also when moving between
+        // fields. Keyboard closed: back to the centred card.
+        val baseBottom = inner.paddingBottom
+        var keyboardOpen = false
+        fun setKeyboard(open: Boolean) {
+            if (open == keyboardOpen) return
+            keyboardOpen = open
+            inner.setPadding(inner.paddingLeft, inner.paddingTop, inner.paddingRight, if (open) baseBottom + scroll.height else baseBottom)
+            // After Android's own scroll to the field has finished, or it would undo this one.
+            if (open) scroll.postDelayed({ fieldToTop() }, 250)
+        }
+        scroll.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val h = bottom - top
+            if (h > 0) scroll.post { setKeyboard(h < scroll.rootView.height * 3 / 4) }
+        }
+        val toTop = View.OnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && keyboardOpen) scroll.postDelayed({ fieldToTop() }, 250)
+        }
+        listOf(name, server, username, password).forEach { it.onFocusChangeListener = toTop }
+
         loginButton.setOnClickListener { submit() }
         password.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {

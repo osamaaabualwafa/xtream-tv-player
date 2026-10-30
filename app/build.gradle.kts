@@ -4,7 +4,9 @@ plugins {
 }
 
 // CI run number becomes the version code so each new APK installs over the previous one.
-val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+// CI: the Actions run number. Local builds for a TV: ./gradlew assembleRelease -PbuildNumber=N
+val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+    ?: (findProperty("buildNumber") as String?)?.toIntOrNull() ?: 1
 
 android {
     namespace = "com.osama.xtreamtv"
@@ -67,6 +69,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+    // Video over OkHttp so IPv4 can be tried first (see PlaybackTuning.http).
+    implementation("androidx.media3:media3-datasource-okhttp:$media3")
+    // "Now playing" for the TV (the mini player's title, remote media keys).
+    implementation("androidx.media3:media3-session:$media3")
     implementation("io.coil-kt:coil:2.7.0")
     implementation("androidx.tvprovider:tvprovider:1.0.0")
 }
