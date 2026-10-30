@@ -130,7 +130,9 @@ class Prefs(context: Context) {
         readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.type == type }.sortedByDescending { it.updated }
 
     fun saveProgress(entry: WatchEntry) {
-        val all = readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.key != entry.key }
+        // One entry per series: the episode watched last replaces the others.
+        val all = readList("continue").mapNotNull { watchEntryFromJson(it) }
+            .filter { it.key != entry.key && (entry.seriesId == null || it.seriesId != entry.seriesId) }
         writeList("continue", (listOf(entry) + all).take(40).map { it.toJson() })
     }
 
@@ -177,11 +179,14 @@ data class WatchEntry(
     val position: Long = 0,
     val duration: Long = 0,
     val updated: Long = 0,
+    /** For episodes: lets the player offer next/previous and the episode list. */
+    val seriesId: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("key", key).put("type", type.name).put("id", id).put("ext", ext)
         .put("title", title).put("subtitle", subtitle).put("image", image)
         .put("position", position).put("duration", duration).put("updated", updated)
+        .put("series", seriesId)
 
     fun progressText(): String =
         if (duration > 0) "▶ ${formatDuration(position)} / ${formatDuration(duration)}" else "▶ ${formatDuration(position)}"
@@ -200,6 +205,7 @@ fun watchEntryFromJson(o: JSONObject): WatchEntry? {
         position = o.long("position") ?: 0,
         duration = o.long("duration") ?: 0,
         updated = o.long("updated") ?: 0,
+        seriesId = o.str("series"),
     )
 }
 
@@ -214,10 +220,23 @@ fun streamItemFromJson(o: JSONObject): StreamItem? {
 }
 
 /** In-memory state shared between screens; rebuilt from Prefs after process death. */
+/** All episodes of a series in play order, handed from the details screen to the player. */
+data class SeriesQueue(val seriesId: String, val name: String, val cover: String?, val episodes: List<Episode>)
+
+private val EPISODE_TAG = Regex("""(?i)\bS\d+\s*E\d+|\bE\d+\b""")
+
+/** Many panels already put "S01 E02" in the title. */
+fun Episode.hasNumberInTitle(): Boolean = EPISODE_TAG.containsMatchIn(title)
+
+fun Episode.label(): String = if (hasNumberInTitle()) title else "S$season E${number ?: "?"}  $title"
+
+fun SeriesInfo.playOrder(): List<Episode> = seasons.values.flatten()
+
 object Session {
     private var api: XtreamApi? = null
     var userInfo: UserInfo? = null
     var zapList: List<StreamItem> = emptyList()
+    var seriesQueue: SeriesQueue? = null
     val streamCache = HashMap<String, List<StreamItem>>()
     val categoryCache = HashMap<ContentType, List<Category>>()
 
@@ -237,6 +256,7 @@ object Session {
         api = null
         userInfo = null
         zapList = emptyList()
+        seriesQueue = null
         streamCache.clear()
         categoryCache.clear()
     }

@@ -14,6 +14,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -23,6 +24,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.PlayerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -73,6 +76,14 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var overlayName: TextView
     private lateinit var overlayNow: TextView
     private lateinit var overlayNext: TextView
+    private lateinit var topBar: View
+    private lateinit var playerTitle: TextView
+    private lateinit var btnEpisodes: View
+    private lateinit var btnNext: View
+    private lateinit var episodesPanel: View
+    private lateinit var episodesSeries: TextView
+    private lateinit var episodesList: RecyclerView
+    private lateinit var episodeAdapter: TextAdapter<Episode>
 
     private var player: ExoPlayer? = null
     private var isLive = false
@@ -87,12 +98,33 @@ class PlayerActivity : AppCompatActivity() {
     private var epgJob: Job? = null
     private val hideOverlay = Runnable { overlay.visibility = View.GONE }
 
+    // Save progress regularly too, so a crash or power cut doesn't lose the place.
+    private val autoSave = object : Runnable {
+        override fun run() {
+            val p = player
+            if (p != null && !isLive && p.isPlaying) saveVodPosition(p)
+            playerView.postDelayed(this, 30_000)
+        }
+    }
+
+    /** The controller's own "fully visible" flag is unreliable on some TVs; the top bar mirrors it. */
+    private fun controlsShown() = playerView.isControllerFullyVisible || topBar.visibility == View.VISIBLE
+
     // VOD state
     private var vodUrl = ""
     private var vodTitle = ""
     private var resumeKey = ""
     private var startPosition = 0L
     private var watchEntry: WatchEntry? = null
+
+    // Episode queue (series only): enables next/previous and the episode list.
+    private var episodes: List<Episode> = emptyList()
+    private var episodeIndex = -1
+    private var seriesId: String? = null
+    private var seriesName = ""
+    private var seriesCover: String? = null
+    private val hasNextEpisode get() = episodes.isNotEmpty() && episodeIndex < episodes.size - 1
+    private val hasPreviousEpisode get() = episodes.isNotEmpty() && episodeIndex > 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,6 +141,13 @@ class PlayerActivity : AppCompatActivity() {
         overlayName = findViewById(R.id.overlay_name)
         overlayNow = findViewById(R.id.overlay_now)
         overlayNext = findViewById(R.id.overlay_next)
+        topBar = findViewById(R.id.top_bar)
+        playerTitle = findViewById(R.id.player_title)
+        btnEpisodes = findViewById(R.id.btn_episodes)
+        btnNext = findViewById(R.id.btn_next)
+        episodesPanel = findViewById(R.id.episodes_panel)
+        episodesSeries = findViewById(R.id.episodes_series)
+        episodesList = findViewById(R.id.episodes_list)
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -126,15 +165,17 @@ class PlayerActivity : AppCompatActivity() {
             }
             if (prefs.vodIsHls) vodMimeType = MimeTypes.APPLICATION_M3U8
             playerView.useController = true
-            playerView.controllerShowTimeoutMs = 4_000
+            playerView.controllerShowTimeoutMs = 5_000
             playerView.requestFocus()
+            setupVodChrome()
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    episodesPanel.visibility == View.VISIBLE -> closeEpisodes()
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
-                    !isLive && playerView.isControllerFullyVisible -> playerView.hideController()
+                    !isLive && controlsShown() -> playerView.hideController()
                     else -> finish()
                 }
             }
@@ -148,7 +189,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (::playerView.isInitialized) initPlayer()
+        if (!::playerView.isInitialized) return
+        initPlayer()
+        if (!isLive) playerView.postDelayed(autoSave, 30_000)
     }
 
     override fun onPause() {
@@ -160,6 +203,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        if (::playerView.isInitialized) playerView.removeCallbacks(autoSave)
         releasePlayer()
     }
 
@@ -178,7 +222,7 @@ class PlayerActivity : AppCompatActivity() {
             .build()
         p.addListener(playerListener)
         player = p
-        playerView.player = p
+        playerView.player = if (isLive) p else EpisodeAwarePlayer(p)
 
         if (isLive) playChannel(channelIndex) else startVod()
     }
@@ -228,7 +272,8 @@ class PlayerActivity : AppCompatActivity() {
             if (state == Player.STATE_READY) errorView.visibility = View.GONE
             if (state == Player.STATE_ENDED && !isLive) {
                 prefs.removeProgress(resumeKey)
-                finish()
+                // Series: carry on with the next episode, like a TV binge.
+                if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) else finish()
             }
         }
 
@@ -395,8 +440,47 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!isLive) {
+            if (!::playerView.isInitialized || event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+            // The episode list and the top bar are normal focusable views: plain D-pad navigation.
+            if (episodesPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+            if (topBar.hasFocus()) {
+                playerView.showController()
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        val playPause = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
+                        if (playPause?.requestFocus() != true) playerView.requestFocus()
+                    }
+                    return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+            // Up from the player controls jumps to the top bar (the controller ignores nextFocusUp).
+            // The seek bar keeps its own Up handling.
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && controlsShown() &&
+                playerView.hasFocus() && currentFocus?.id != androidx.media3.ui.R.id.exo_progress &&
+                btnEpisodes.visibility == View.VISIBLE
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) btnEpisodes.requestFocus()
+                return true
+            }
+            if (episodes.isNotEmpty() && event.action == KeyEvent.ACTION_DOWN) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_CHANNEL_UP -> {
+                        if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                        if (hasPreviousEpisode) playEpisodeAt(episodeIndex - 1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_GUIDE -> {
+                        openEpisodes()
+                        return true
+                    }
+                }
+            }
             // Let PlayerView show its controller and handle D-pad/media keys first.
-            if (::playerView.isInitialized && event.keyCode != KeyEvent.KEYCODE_BACK && playerView.dispatchKeyEvent(event)) return true
+            if (playerView.dispatchKeyEvent(event)) return true
             return super.dispatchKeyEvent(event)
         }
         val handled = when (event.keyCode) {
@@ -414,6 +498,180 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
         return true
+    }
+
+    // ---- Movies & episodes: title bar, next/previous, episode list ----
+
+    private val controlIds = listOf(
+        androidx.media3.ui.R.id.exo_play_pause,
+        androidx.media3.ui.R.id.exo_prev,
+        androidx.media3.ui.R.id.exo_next,
+        androidx.media3.ui.R.id.exo_rew,
+        androidx.media3.ui.R.id.exo_ffwd,
+    )
+
+    private fun setupVodChrome() {
+        playerTitle.text = vodTitle
+        playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+            topBar.visibility = if (episodesPanel.visibility == View.VISIBLE) View.GONE else visibility
+        })
+        // Keep the controls up while the user is in the top bar.
+        val keepVisible = View.OnFocusChangeListener { _, hasFocus -> if (hasFocus) playerView.showController() }
+        btnEpisodes.onFocusChangeListener = keepVisible
+        btnNext.onFocusChangeListener = keepVisible
+        btnEpisodes.setOnClickListener { openEpisodes() }
+        btnNext.setOnClickListener { if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) }
+        // Up from the player controls reaches the top bar; Down comes back.
+        btnEpisodes.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
+        btnNext.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
+        controlIds.mapNotNull { playerView.findViewById<View>(it) }.forEach { it.nextFocusUpId = R.id.btn_episodes }
+
+        episodeAdapter = TextAdapter(
+            R.layout.item_episode,
+            bind = { vh, ep -> bindEpisodeRow(vh, ep) },
+            onClick = { index, _ ->
+                closeEpisodes()
+                if (index != episodeIndex) playEpisodeAt(index)
+            },
+        )
+        episodesList.layoutManager = LinearLayoutManager(this)
+        episodesList.adapter = episodeAdapter
+
+        updateEpisodeButtons()
+        loadEpisodeQueue()
+    }
+
+    /** Episodes started from the series page bring the list along; Continue watching loads it. */
+    private fun loadEpisodeQueue() {
+        val entry = watchEntry ?: return
+        val sid = entry.seriesId ?: return
+        val queue = Session.seriesQueue
+        if (queue != null && queue.seriesId == sid) {
+            applyQueue(queue, entry.id)
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val info = api.seriesInfo(sid)
+                val q = SeriesQueue(sid, entry.title, entry.image ?: info.cover, info.playOrder())
+                Session.seriesQueue = q
+                applyQueue(q, entry.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // No list: the episode still plays, just without next/previous.
+            }
+        }
+    }
+
+    private fun applyQueue(queue: SeriesQueue, currentEpisodeId: String) {
+        val index = queue.episodes.indexOfFirst { it.id == currentEpisodeId }
+        if (index < 0) return
+        episodes = queue.episodes
+        episodeIndex = index
+        seriesId = queue.seriesId
+        seriesName = queue.name
+        seriesCover = queue.cover
+        episodesSeries.text = queue.name
+        episodeAdapter.submit(episodes)
+        updateEpisodeButtons()
+    }
+
+    private fun updateEpisodeButtons() {
+        val hasList = episodes.isNotEmpty()
+        btnEpisodes.visibility = if (hasList) View.VISIBLE else View.GONE
+        btnNext.visibility = if (hasNextEpisode) View.VISIBLE else View.GONE
+        // The controller's previous/next buttons mean previous/next episode; movies don't show them.
+        playerView.setShowPreviousButton(hasList)
+        playerView.setShowNextButton(hasList)
+    }
+
+    private fun bindEpisodeRow(vh: TextAdapter.VH, ep: Episode) {
+        vh.title.text = ep.label()
+        val playing = episodes.getOrNull(episodeIndex)?.id == ep.id
+        val pos = prefs.position("ep_${ep.id}")
+        vh.subtitle?.text = listOfNotNull(
+            when {
+                playing -> "▶ Now playing"
+                pos > 0 -> "Resume ${formatDuration(pos)}"
+                else -> null
+            },
+            ep.duration,
+        ).joinToString("   ·   ")
+    }
+
+    private fun playEpisodeAt(index: Int) {
+        val ep = episodes.getOrNull(index) ?: return
+        player?.let { saveVodPosition(it) }
+        episodeIndex = index
+        val label = ep.label()
+        resumeKey = "ep_${ep.id}"
+        vodUrl = api.episodeUrl(ep.id, ep.ext)
+        vodTitle = "$seriesName  ·  $label"
+        playerTitle.text = vodTitle
+        watchEntry = WatchEntry(resumeKey, ContentType.SERIES, ep.id, ep.ext, seriesName, label, seriesCover, seriesId = seriesId)
+        startPosition = prefs.position(resumeKey)
+        probed = false
+        errorView.visibility = View.GONE
+        updateEpisodeButtons()
+        startVod()
+        playerView.showController()
+    }
+
+    private fun openEpisodes() {
+        if (episodes.isEmpty()) return
+        playerView.hideController()
+        playerView.useController = false
+        topBar.visibility = View.GONE
+        episodesPanel.visibility = View.VISIBLE
+        episodeAdapter.activeIndex = episodeIndex
+        episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount, "progress")
+        episodesList.scrollToPosition(episodeIndex)
+        episodesList.post { episodesList.findViewHolderForAdapterPosition(episodeIndex)?.itemView?.requestFocus() }
+    }
+
+    private fun closeEpisodes() {
+        episodesPanel.visibility = View.GONE
+        playerView.useController = true
+        playerView.requestFocus()
+    }
+
+    /** Lets the standard controller (and remote media keys) step through the episode list. */
+    private inner class EpisodeAwarePlayer(player: Player) : ForwardingPlayer(player) {
+        private val episodeCommands = intArrayOf(
+            Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+        )
+
+        override fun isCommandAvailable(command: Int): Boolean = when (command) {
+            Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ->
+                if (episodes.isNotEmpty()) hasNextEpisode else super.isCommandAvailable(command)
+            Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ->
+                if (episodes.isNotEmpty()) hasPreviousEpisode else super.isCommandAvailable(command)
+            else -> super.isCommandAvailable(command)
+        }
+
+        override fun getAvailableCommands(): Player.Commands {
+            val builder = super.getAvailableCommands().buildUpon()
+            for (c in episodeCommands) if (isCommandAvailable(c)) builder.add(c) else builder.remove(c)
+            return builder.build()
+        }
+
+        override fun hasNextMediaItem(): Boolean = if (episodes.isNotEmpty()) hasNextEpisode else super.hasNextMediaItem()
+
+        override fun hasPreviousMediaItem(): Boolean = if (episodes.isNotEmpty()) hasPreviousEpisode else super.hasPreviousMediaItem()
+
+        override fun seekToNext() {
+            if (episodes.isEmpty()) super.seekToNext() else if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
+        }
+
+        override fun seekToNextMediaItem() = seekToNext()
+
+        override fun seekToPrevious() {
+            if (episodes.isEmpty()) super.seekToPrevious() else if (hasPreviousEpisode) playEpisodeAt(episodeIndex - 1)
+        }
+
+        override fun seekToPreviousMediaItem() = seekToPrevious()
     }
 
     override fun onDestroy() {

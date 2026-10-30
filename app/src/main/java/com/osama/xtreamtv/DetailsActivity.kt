@@ -36,8 +36,6 @@ class DetailsActivity : AppCompatActivity() {
                 .putExtra(EXTRA_EXT, item.ext)
                 .putExtra(EXTRA_RATING, item.rating)
                 .putExtra(EXTRA_CATEGORY, item.categoryId)
-
-        private val EPISODE_TAG = Regex("(?i)\\bS\\d+\\s*E\\d+|\\bE\\d+\\b")
     }
 
     private lateinit var api: XtreamApi
@@ -253,7 +251,7 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun bindEpisode(vh: TextAdapter.VH, ep: Episode) {
         // Many panels already put "S01 E02" in the title; don't repeat the number.
-        val prefix = if (ep.number != null && !EPISODE_TAG.containsMatchIn(ep.title)) "E${ep.number}  ·  " else ""
+        val prefix = if (ep.number != null && !ep.hasNumberInTitle()) "E${ep.number}  ·  " else ""
         vh.title.text = prefix + ep.title
         val pos = prefs.position(episodeKey(ep))
         vh.subtitle?.text = listOfNotNull(
@@ -264,10 +262,12 @@ class DetailsActivity : AppCompatActivity() {
     }
 
     private fun playEpisode(ep: Episode) {
-        val episodeLabel = if (EPISODE_TAG.containsMatchIn(ep.title)) ep.title else "S${ep.season} E${ep.number ?: "?"}  ${ep.title}"
+        val episodeLabel = ep.label()
         val seriesName = title.text.toString()
         val key = episodeKey(ep)
-        val entry = WatchEntry(key, ContentType.SERIES, ep.id, ep.ext, seriesName, episodeLabel, posterUrl)
+        // The player uses this for next/previous episode and its episode list.
+        Session.seriesQueue = SeriesQueue(item.id, seriesName, posterUrl, seasons.values.flatten())
+        val entry = WatchEntry(key, ContentType.SERIES, ep.id, ep.ext, seriesName, episodeLabel, posterUrl, seriesId = item.id)
         startActivity(PlayerActivity.vodIntent(this, api.episodeUrl(ep.id, ep.ext), "$seriesName  ·  $episodeLabel", key, prefs.position(key), entry))
     }
 
