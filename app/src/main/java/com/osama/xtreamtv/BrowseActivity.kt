@@ -131,7 +131,7 @@ class BrowseActivity : AppCompatActivity() {
             onBindExtra = if (live) { vh, item -> bindNowPlaying(vh, item) } else null,
         )
         itemsView.layoutManager = when {
-            live -> LinearLayoutManager(this)
+            live -> RowLayoutManager(this, LinearLayoutManager.VERTICAL)
             preview -> RowLayoutManager(this)
             style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> GridLayoutManager(this, 6)
             else -> GridLayoutManager(this, 8)
@@ -195,6 +195,9 @@ class BrowseActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!::itemAdapter.isInitialized) return
+        // Back from the player: start the preview of the highlighted channel again.
+        currentFocus?.let { itemsView.findContainingViewHolder(it) }?.bindingAdapterPosition
+            ?.let { itemAdapter.items.getOrNull(it) }?.let { channelPreview?.focus(it) }
         if (counts.isNotEmpty()) refreshLocalCounts()
         itemAdapter.favorites = prefs.favoriteIds(type)
         // Favorites and progress change on other screens: refresh the local lists in place.
@@ -236,7 +239,16 @@ class BrowseActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val list = try {
                 epgSlots.acquire()
-                try { api.shortEpg(item.id) } finally { epgSlots.release() }
+                try {
+                    // Scrolled past while waiting its turn: skip it (it loads again if it comes back).
+                    if (!nearScreen(item.id)) {
+                        epgLoading.remove(item.id)
+                        return@launch
+                    }
+                    api.shortEpg(item.id)
+                } finally {
+                    epgSlots.release()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -245,9 +257,16 @@ class BrowseActivity : AppCompatActivity() {
             epg[item.id] = list
             epgLoading.remove(item.id)
             if (list.isNotEmpty()) {
-                itemAdapter.items.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }?.let { itemAdapter.notifyItemChanged(it) }
+                itemAdapter.items.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }?.let { itemAdapter.notifyItemChanged(it, "epg") }
             }
         }
+    }
+
+    /** The row is on screen or close to it. */
+    private fun nearScreen(id: String): Boolean {
+        val lm = itemsView.layoutManager as? LinearLayoutManager ?: return true
+        val pos = itemAdapter.items.indexOfFirst { it.id == id }
+        return pos >= 0 && pos in lm.findFirstVisibleItemPosition() - 4..lm.findLastVisibleItemPosition() + 4
     }
 
     private fun openPanel() {

@@ -397,6 +397,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Leaving with the resume card up: it would stay on screen over the playing video.
+        resumeDialog?.takeIf { it.isShowing }?.dismiss()
+        resumeDialog = null
         // The mini player was closed (or the TV went to its home screen): stop for good.
         if (wasMini) {
             wasMini = false
@@ -435,6 +438,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun startVod() {
         val p = player ?: return
+        cancelPendingSeek()
         currentUrl = vodUrl
         // Settings > Player > "Start from the beginning" (an explicit Resume button still resumes).
         if (askResume && !resumeAsked && startPosition > 5_000 && prefs.resumeMode == 2) startPosition = 0
@@ -452,9 +456,12 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /** Glass card: resume from the saved spot or start over. */
+    private var resumeDialog: android.app.Dialog? = null
+
     private fun askResumeOrRestart() {
         val pos = startPosition
         val dialog = android.app.Dialog(this)
+        resumeDialog = dialog
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val view = layoutInflater.inflate(R.layout.dialog_resume, null)
         dialog.setContentView(view)
@@ -548,6 +555,9 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun releasePlayer() {
         val p = player ?: return
+        // A jump still waiting: save the place it was going to.
+        if (seekTarget >= 0) p.seekTo(seekTarget)
+        cancelPendingSeek()
         fpsProbe?.let { (p as? ExoPlayer)?.clearVideoFrameMetadataListener(it) }
         fpsProbe = null
         if (!isLive) saveVodPosition(p)
@@ -726,7 +736,23 @@ class PlayerActivity : AppCompatActivity() {
     private fun forwardMs() = prefs.seekForwardSeconds * 1000L
     private fun backMs() = prefs.seekBackSeconds * 1000L
 
-    private fun playChannel(index: Int) {
+    /** Up / Down zapping: the banner follows every press, the stream starts once you stop. */
+    private val startZap = Runnable { playChannel(channelIndex, banner = false) }
+
+    private fun zapBy(step: Int) {
+        val list = Session.zapList
+        if (list.isEmpty()) return finish()
+        channelIndex = Math.floorMod(channelIndex + step, list.size)
+        // Drop the old stream now (one connection), so the next one can start straight away.
+        player?.stop()
+        errorView.visibility = View.GONE
+        showOverlay(list[channelIndex])
+        playerView.removeCallbacks(startZap)
+        playerView.postDelayed(startZap, 350)
+    }
+
+    private fun playChannel(index: Int, banner: Boolean = true) {
+        playerView.removeCallbacks(startZap)
         val list = Session.zapList
         if (list.isEmpty()) return finish()
         channelIndex = ((index % list.size) + list.size) % list.size
@@ -744,7 +770,7 @@ class PlayerActivity : AppCompatActivity() {
         probed = false
         errorView.visibility = View.GONE
         playUrl(api.liveUrl(channel.id, if (hls) "m3u8" else "ts"))
-        showOverlay(channel)
+        if (banner) showOverlay(channel)
     }
 
     private fun playUrl(url: String, mimeType: String? = null) {
@@ -774,6 +800,8 @@ class PlayerActivity : AppCompatActivity() {
         epgJob?.cancel()
         epgJob = lifecycleScope.launch {
             try {
+                // Zapping fast: only ask for the guide of the channel you stop on.
+                kotlinx.coroutines.delay(300)
                 val epg = api.shortEpg(channel.id)
                 val now = epg.getOrNull(0)
                 val next = epg.getOrNull(1)
@@ -1110,8 +1138,8 @@ class PlayerActivity : AppCompatActivity() {
         if (!handled) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> playChannel(channelIndex + 1)
-                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> playChannel(channelIndex - 1)
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> zapBy(1)
+                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> zapBy(-1)
                 else -> if (event.repeatCount == 0) toggleOverlay()
             }
         }
@@ -1122,6 +1150,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private val controlsHost = object : VodControls.Host {
         override val player: Player? get() = this@PlayerActivity.player
+        override fun positionMs() = seekPosition()
         override fun seekBy(deltaMs: Long) = seekVod(deltaMs)
         override fun togglePlay() {
             player?.let { it.playWhenReady = !it.playWhenReady }
@@ -1152,7 +1181,41 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
+        requestSeek((seekPosition() + deltaMs).coerceIn(0, max))
+    }
+
+    /**
+     * Holding a seek key: every seek on a network stream starts a new download, so the presses
+     * add up and the player jumps once you let go (a single press still seeks at once).
+     */
+    private var seekTarget = -1L
+    private var lastSeekAt = 0L
+    private val commitSeek = Runnable {
+        val target = seekTarget
+        seekTarget = -1
+        if (target >= 0) player?.seekTo(target)
+    }
+
+    /** Where playback is, or where it is about to jump to. */
+    private fun seekPosition(): Long = if (seekTarget >= 0) seekTarget else player?.currentPosition ?: 0
+
+    private fun requestSeek(target: Long) {
+        val now = SystemClock.uptimeMillis()
+        val burst = seekTarget >= 0 || now - lastSeekAt < 500
+        lastSeekAt = now
+        playerView.removeCallbacks(commitSeek)
+        if (burst) {
+            seekTarget = target
+            playerView.postDelayed(commitSeek, 400)
+        } else {
+            seekTarget = -1
+            player?.seekTo(target)
+        }
+    }
+
+    private fun cancelPendingSeek() {
+        seekTarget = -1
+        if (::playerView.isInitialized) playerView.removeCallbacks(commitSeek)
     }
 
     private fun setupVodChrome() {
@@ -1525,8 +1588,8 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        val target = (p.currentPosition + deltaMs).coerceIn(0, max)
-        p.seekTo(target)
+        val target = (seekPosition() + deltaMs).coerceIn(0, max)
+        requestSeek(target)
         (if (deltaMs > 0) seekForwardTime else seekBackTime).text =
             if (duration != C.TIME_UNSET && duration > 0) "${formatDuration(target)} / ${formatDuration(duration)}" else formatDuration(target)
         val forward = deltaMs > 0
@@ -1665,7 +1728,7 @@ class PlayerActivity : AppCompatActivity() {
             },
             onLongClick = null,
         )
-        channelsList.layoutManager = LinearLayoutManager(this)
+        channelsList.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
         channelsList.adapter = channelAdapter
     }
 
@@ -2004,6 +2067,7 @@ class PlayerActivity : AppCompatActivity() {
         if (::controls.isInitialized) controls.release()
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
         if (::playerView.isInitialized) playerView.removeCallbacks(retryVod)
+        if (::playerView.isInitialized) playerView.removeCallbacks(startZap)
         if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()
     }

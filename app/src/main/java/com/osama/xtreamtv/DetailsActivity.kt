@@ -128,6 +128,7 @@ class DetailsActivity : AppCompatActivity() {
         } else if (::episodeAdapter.isInitialized) {
             // A payload rebinds rows in place, so the focused episode keeps focus.
             episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount, "progress")
+            if (seasons.isNotEmpty()) updateSeriesResume(focus = false)
         }
     }
 
@@ -337,19 +338,13 @@ class DetailsActivity : AppCompatActivity() {
                     episodesView.visibility = View.VISIBLE
                     seasonAdapter.submit(seasons.keys.toList())
                     // Open on the season of the episode being watched, with Resume ready.
-                    val watching = prefs.continueWatching(ContentType.SERIES).firstOrNull { it.seriesId == item.id }
-                    val resumeEp = watching?.let { w -> seasons.values.flatten().firstOrNull { it.id == w.id } }
+                    val resumeEp = updateSeriesResume(focus = true)
                     val startSeason = resumeEp?.season?.takeIf { it in seasons } ?: seasons.keys.first()
                     showSeason(seasons.keys.indexOf(startSeason), startSeason)
                     if (resumeEp != null) {
                         // Episode row starts at the one being watched.
                         (seasons[startSeason] ?: emptyList()).indexOfFirst { it.id == resumeEp.id }.takeIf { it > 0 }
                             ?.let { (episodesView.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(it, 0) }
-                        resumeButton.text = "▶  Resume ${resumeEp.label().take(28)}"
-                        resumeButton.visibility = View.VISIBLE
-                        buttons.post { alignButtons() }
-                        resumeButton.setOnClickListener { playEpisode(resumeEp) }
-                        resumeButton.requestFocus()
                     } else {
                         episodesView.post { episodesView.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() }
                     }
@@ -361,6 +356,24 @@ class DetailsActivity : AppCompatActivity() {
             }
             progress.visibility = View.GONE
         }
+    }
+
+    /** Resume button: the series' episode in Continue watching (it changes after watching more). */
+    private fun updateSeriesResume(focus: Boolean): Episode? {
+        val watching = prefs.continueWatching(ContentType.SERIES).firstOrNull { it.seriesId == item.id }
+        val resumeEp = watching?.let { w -> seasons.values.flatten().firstOrNull { it.id == w.id } }
+        if (resumeEp == null) {
+            if (resumeButton.hasFocus()) favoriteButton.requestFocus()
+            resumeButton.visibility = View.GONE
+        } else {
+            resumeButton.text = "▶  Resume ${resumeEp.label().take(28)}"
+            resumeButton.visibility = View.VISIBLE
+            // Resume was an explicit choice here, so the player doesn't ask again.
+            resumeButton.setOnClickListener { playEpisode(resumeEp, askResume = false) }
+            if (focus) resumeButton.requestFocus()
+        }
+        buttons.post { alignButtons() }
+        return resumeEp
     }
 
     private fun showSeason(index: Int, season: Int) {
@@ -420,14 +433,14 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
-    private fun playEpisode(ep: Episode) {
+    private fun playEpisode(ep: Episode, askResume: Boolean = true) {
         val episodeLabel = ep.label()
         val seriesName = title.text.toString()
         val key = episodeKey(ep)
         // The player uses this for next/previous episode and its episode list.
         Session.seriesQueue = SeriesQueue(item.id, seriesName, posterUrl, seasons.values.flatten())
         val entry = WatchEntry(key, ContentType.SERIES, ep.id, ep.ext, seriesName, episodeLabel, posterUrl, seriesId = item.id)
-        startActivity(PlayerActivity.vodIntent(this, api.episodeUrl(ep.id, ep.ext), "$seriesName  ·  $episodeLabel", key, prefs.position(key), entry))
+        startActivity(PlayerActivity.vodIntent(this, api.episodeUrl(ep.id, ep.ext), "$seriesName  ·  $episodeLabel", key, prefs.position(key), entry, askResume))
     }
 
     private fun showMessage(text: String) {

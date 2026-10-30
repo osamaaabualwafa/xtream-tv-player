@@ -611,8 +611,9 @@ class TextAdapter<T>(
         set(value) {
             val old = field
             field = value
-            if (old in items.indices) notifyItemChanged(old)
-            if (value in items.indices) notifyItemChanged(value)
+            // A payload rebinds in place: no fade that swaps the row and drops its focus.
+            if (old in items.indices) notifyItemChanged(old, "active")
+            if (value in items.indices) notifyItemChanged(value, "active")
         }
 
     fun submit(list: List<T>) {

@@ -19,6 +19,8 @@ class VodControls(private val root: View, private val host: Host) {
 
     interface Host {
         val player: Player?
+        /** Playback position, or where a seek still in progress is going. */
+        fun positionMs(): Long = player?.currentPosition ?: 0
         fun seekBy(deltaMs: Long)
         fun togglePlay()
         fun previousEpisode()
@@ -114,7 +116,7 @@ class VodControls(private val root: View, private val host: Host) {
             thumb.scaleX = if (hasFocus) 1.4f else 1f
             thumb.scaleY = if (hasFocus) 1.4f else 1f
             if (hasFocus) {
-                showBubble(host.player?.currentPosition ?: 0)
+                showBubble(host.positionMs())
             } else {
                 bubble.visibility = View.INVISIBLE
                 meta.alpha = 1f
@@ -131,7 +133,7 @@ class VodControls(private val root: View, private val host: Host) {
                 host.seekBy(delta)
                 poke()
                 refresh()
-                showBubble(host.player?.currentPosition ?: 0)
+                showBubble(host.positionMs())
             }
             true
         }
@@ -263,7 +265,7 @@ class VodControls(private val root: View, private val host: Host) {
         if (quality.visibility != qVisibility) quality.visibility = qVisibility
         if (mode != Mode.FULL) return
 
-        val pos = p.currentPosition.coerceAtLeast(0)
+        val pos = host.positionMs().coerceAtLeast(0)
         val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 }
         setIfChanged(position, formatDuration(pos))
         setIfChanged(remaining, if (duration != null) "−" + formatDuration((duration - pos).coerceAtLeast(0)) else "")

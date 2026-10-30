@@ -376,7 +376,7 @@ class HomeActivity : AppCompatActivity() {
                 val items = all.filter { it.id in ids }.sortedByDescending { it.added }
                 newAdapter.newIds = ids
                 favoritesAdapter.newIds = ids
-                favoritesAdapter.notifyItemRangeChanged(0, favoritesAdapter.itemCount)
+                favoritesAdapter.notifyItemRangeChanged(0, favoritesAdapter.itemCount, "new")
                 showRow(R.id.row_new, R.id.row_new_title, newAdapter, items)
             } catch (e: CancellationException) {
                 throw e

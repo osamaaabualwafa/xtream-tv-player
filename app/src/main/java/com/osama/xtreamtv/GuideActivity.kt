@@ -77,7 +77,7 @@ class GuideActivity : AppCompatActivity() {
         )
         channelAdapter.favorites = Prefs(this).favoriteIds(ContentType.LIVE)
         channelAdapter.submit(channels.map { if (it.archiveDays > 0) it.copy(note = (it.num ?: "") + " ⏪") else it })
-        channelsView.layoutManager = LinearLayoutManager(this)
+        channelsView.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
         channelsView.adapter = channelAdapter
 
         programAdapter = TextAdapter(
@@ -85,7 +85,7 @@ class GuideActivity : AppCompatActivity() {
             bind = { vh, e -> bindProgram(vh, e) },
             onClick = { _, e -> openProgram(e) },
         )
-        programsView.layoutManager = LinearLayoutManager(this)
+        programsView.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
         programsView.adapter = programAdapter
 
         val start = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, channels.size - 1)
