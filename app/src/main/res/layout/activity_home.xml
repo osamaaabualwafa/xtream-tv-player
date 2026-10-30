@@ -49,6 +49,7 @@
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center_vertical"
+                android:nextFocusDown="@id/tile_series"
                 android:orientation="horizontal"
                 android:paddingLeft="6dp"
                 android:paddingRight="16dp">
@@ -74,6 +75,15 @@
                     android:textColor="@color/text"
                     android:textSize="15sp" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/settings_button"
+                style="@style/GlassChip"
+                android:layout_marginLeft="10dp"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusDown="@id/tile_search"
+                android:text="⚙  Settings" />
 
             <TextView
                 android:id="@+id/clock"

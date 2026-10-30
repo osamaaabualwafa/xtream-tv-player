@@ -107,6 +107,32 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putString("formats", value).apply()
 
     /** Audio language picked last time (ISO code), applied to the next videos. */
+    // Settings > appearance (whole app, all playlists).
+    var homeStyle: Int
+        get() = global.getInt("home_style", Appearance.HOME_TILES)
+        set(value) = global.edit().putInt("home_style", value).apply()
+
+    var browseStyle: Int
+        get() = global.getInt("browse_style", Appearance.BROWSE_SIDEBAR)
+        set(value) = global.edit().putInt("browse_style", value).apply()
+
+    var accentIndex: Int
+        get() = global.getInt("accent", 0)
+        set(value) = global.edit().putInt("accent", value).apply()
+
+    /** Playlist avatar: an emoji, or null for the first letter of the name. */
+    fun avatar(playlistId: String): String? = global.getString("avatar_$playlistId", null)
+
+    /** Index into [Appearance.ACCENT_COLORS] for the avatar circle, or -1 for the automatic colour. */
+    fun avatarColor(playlistId: String): Int = global.getInt("avatar_color_$playlistId", -1)
+
+    fun setAvatar(playlistId: String, emoji: String?, colorIndex: Int) {
+        val e = global.edit()
+        if (emoji == null) e.remove("avatar_$playlistId") else e.putString("avatar_$playlistId", emoji)
+        if (colorIndex < 0) e.remove("avatar_color_$playlistId") else e.putInt("avatar_color_$playlistId", colorIndex)
+        e.apply()
+    }
+
     var audioLanguage: String?
         get() = global.getString("audio_lang", null)
         set(value) = global.edit().putString("audio_lang", value).apply()
@@ -221,8 +247,19 @@ data class WatchEntry(
         .put("position", position).put("duration", duration).put("updated", updated)
         .put("series", seriesId)
 
-    fun progressText(): String =
-        if (duration > 0) "▶ ${formatDuration(position)} / ${formatDuration(duration)}" else "▶ ${formatDuration(position)}"
+    /** Short enough for a poster: "21 min left" (the bar on the poster shows how far in). */
+    fun progressText(): String {
+        if (duration <= 0) return "▶ ${formatDuration(position)}"
+        val minutesLeft = ((duration - position).coerceAtLeast(0) + 59_999) / 60_000
+        return when {
+            minutesLeft < 1 -> "Almost done"
+            minutesLeft < 60 -> "$minutesLeft min left"
+            else -> "${minutesLeft / 60} h ${minutesLeft % 60} min left"
+        }
+    }
+
+    /** 0..1 watched, or -1 when the length is unknown. */
+    fun progressFraction(): Float = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else -1f
 }
 
 fun watchEntryFromJson(o: JSONObject): WatchEntry? {
@@ -435,6 +472,8 @@ class ItemAdapter(
     private val onLongClick: ((Int, StreamItem) -> Unit)?,
     /** Optional row layout (Home rows); defaults to poster grid / channel list. */
     private val layout: Int? = null,
+    /** Called when an item gets focus (the browse screen's info strip). */
+    private val onFocusItem: ((StreamItem) -> Unit)? = null,
 ) : RecyclerView.Adapter<ItemAdapter.VH>() {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -442,6 +481,9 @@ class ItemAdapter(
         val title: TextView = view.findViewById(R.id.title)
         val subtitle: TextView = view.findViewById(R.id.subtitle)
         val fav: TextView? = view.findViewById(R.id.fav)
+        /** Poster grid: rating in a small badge on the picture. */
+        val ratingBadge: TextView? = view.findViewById(R.id.rating)
+        val watchProgress: android.widget.ProgressBar? = view.findViewById(R.id.watch_progress)
     }
 
     var items: List<StreamItem> = emptyList()
@@ -465,7 +507,28 @@ class ItemAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
         holder.title.text = item.name
-        holder.subtitle.text = item.note ?: if (grid) displayRating(item.rating)?.let { "★ $it" } ?: "" else item.num ?: ""
+        val badge = holder.ratingBadge
+        if (badge != null) {
+            val rating = displayRating(item.rating)
+            badge.text = rating?.let { "★ $it" }
+            badge.visibility = if (rating == null) View.GONE else View.VISIBLE
+            holder.subtitle.text = item.note ?: ""
+            holder.subtitle.visibility = if (item.note == null) View.GONE else View.VISIBLE
+        } else {
+            holder.subtitle.text = item.note ?: if (grid) displayRating(item.rating)?.let { "★ $it" } ?: "" else item.num ?: ""
+        }
+        holder.watchProgress?.apply {
+            visibility = if (item.progress >= 0f) View.VISIBLE else View.GONE
+            progress = (item.progress.coerceAtLeast(0f) * 1000).toInt()
+        }
+        val focusCallback = onFocusItem
+        if (focusCallback != null) {
+            holder.itemView.setOnFocusChangeListener { v, hasFocus ->
+                if (grid) scaleOnFocus.onFocusChange(v, hasFocus)
+                val p = holder.bindingAdapterPosition
+                if (hasFocus && p != RecyclerView.NO_POSITION) focusCallback(items[p])
+            }
+        }
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
         holder.image.load(item.image) {
             crossfade(false)

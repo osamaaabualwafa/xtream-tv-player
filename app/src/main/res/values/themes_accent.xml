@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme colours (Settings > Theme colour), applied on top of each screen's theme. -->
+<resources>
+    <style name="Accent" />
+
+    <style name="Accent.Blue">
+        <item name="appAccent">#FF3D8BFD</item>
+        <item name="appAccent0D">#0D3D8BFD</item>
+        <item name="appAccent26">#263D8BFD</item>
+        <item name="appAccent4D">#4D3D8BFD</item>
+        <item name="appAccent59">#593D8BFD</item>
+        <item name="appAccent66">#663D8BFD</item>
+        <item name="appAccent73">#733D8BFD</item>
+        <item name="appAccent80">#803D8BFD</item>
+        <item name="appAccent99">#993D8BFD</item>
+        <item name="appAccentCC">#CC3D8BFD</item>
+        <item name="appGlow">#FF182D4A</item>
+        <item name="colorAccent">#FF3D8BFD</item>
+    </style>
+
+    <style name="Accent.Purple">
+        <item name="appAccent">#FF8A5CF6</item>
+        <item name="appAccent0D">#0D8A5CF6</item>
+        <item name="appAccent26">#268A5CF6</item>
+        <item name="appAccent4D">#4D8A5CF6</item>
+        <item name="appAccent59">#598A5CF6</item>
+        <item name="appAccent66">#668A5CF6</item>
+        <item name="appAccent73">#738A5CF6</item>
+        <item name="appAccent80">#808A5CF6</item>
+        <item name="appAccent99">#998A5CF6</item>
+        <item name="appAccentCC">#CC8A5CF6</item>
+        <item name="appGlow">#FF292249</item>
+        <item name="colorAccent">#FF8A5CF6</item>
+    </style>
+
+    <style name="Accent.Teal">
+        <item name="appAccent">#FF14B8A6</item>
+        <item name="appAccent0D">#0D14B8A6</item>
+        <item name="appAccent26">#2614B8A6</item>
+        <item name="appAccent4D">#4D14B8A6</item>
+        <item name="appAccent59">#5914B8A6</item>
+        <item name="appAccent66">#6614B8A6</item>
+        <item name="appAccent73">#7314B8A6</item>
+        <item name="appAccent80">#8014B8A6</item>
+        <item name="appAccent99">#9914B8A6</item>
+        <item name="appAccentCC">#CC14B8A6</item>
+        <item name="appGlow">#FF0F3737</item>
+        <item name="colorAccent">#FF14B8A6</item>
+    </style>
+
+    <style name="Accent.Orange">
+        <item name="appAccent">#FFF97316</item>
+        <item name="appAccent0D">#0DF97316</item>
+        <item name="appAccent26">#26F97316</item>
+        <item name="appAccent4D">#4DF97316</item>
+        <item name="appAccent59">#59F97316</item>
+        <item name="appAccent66">#66F97316</item>
+        <item name="appAccent73">#73F97316</item>
+        <item name="appAccent80">#80F97316</item>
+        <item name="appAccent99">#99F97316</item>
+        <item name="appAccentCC">#CCF97316</item>
+        <item name="appGlow">#FF422718</item>
+        <item name="colorAccent">#FFF97316</item>
+    </style>
+
+    <style name="Accent.Pink">
+        <item name="appAccent">#FFEC4899</item>
+        <item name="appAccent0D">#0DEC4899</item>
+        <item name="appAccent26">#26EC4899</item>
+        <item name="appAccent4D">#4DEC4899</item>
+        <item name="appAccent59">#59EC4899</item>
+        <item name="appAccent66">#66EC4899</item>
+        <item name="appAccent73">#73EC4899</item>
+        <item name="appAccent80">#80EC4899</item>
+        <item name="appAccent99">#99EC4899</item>
+        <item name="appAccentCC">#CCEC4899</item>
+        <item name="appGlow">#FF3F1E34</item>
+        <item name="colorAccent">#FFEC4899</item>
+    </style>
+
+    <style name="Accent.Green">
+        <item name="appAccent">#FF22C55E</item>
+        <item name="appAccent0D">#0D22C55E</item>
+        <item name="appAccent26">#2622C55E</item>
+        <item name="appAccent4D">#4D22C55E</item>
+        <item name="appAccent59">#5922C55E</item>
+        <item name="appAccent66">#6622C55E</item>
+        <item name="appAccent73">#7322C55E</item>
+        <item name="appAccent80">#8022C55E</item>
+        <item name="appAccent99">#9922C55E</item>
+        <item name="appAccentCC">#CC22C55E</item>
+        <item name="appGlow">#FF123927</item>
+        <item name="colorAccent">#FF22C55E</item>
+    </style>
+
+    <style name="Accent.Red">
+        <item name="appAccent">#FFE11D48</item>
+        <item name="appAccent0D">#0DE11D48</item>
+        <item name="appAccent26">#26E11D48</item>
+        <item name="appAccent4D">#4DE11D48</item>
+        <item name="appAccent59">#59E11D48</item>
+        <item name="appAccent66">#66E11D48</item>
+        <item name="appAccent73">#73E11D48</item>
+        <item name="appAccent80">#80E11D48</item>
+        <item name="appAccent99">#99E11D48</item>
+        <item name="appAccentCC">#CCE11D48</item>
+        <item name="appGlow">#FF3C1423</item>
+        <item name="colorAccent">#FFE11D48</item>
+    </style>
+
+    <style name="Accent.Gold">
+        <item name="appAccent">#FFEAB308</item>
+        <item name="appAccent0D">#0DEAB308</item>
+        <item name="appAccent26">#26EAB308</item>
+        <item name="appAccent4D">#4DEAB308</item>
+        <item name="appAccent59">#59EAB308</item>
+        <item name="appAccent66">#66EAB308</item>
+        <item name="appAccent73">#73EAB308</item>
+        <item name="appAccent80">#80EAB308</item>
+        <item name="appAccent99">#99EAB308</item>
+        <item name="appAccentCC">#CCEAB308</item>
+        <item name="appGlow">#FF3E3514</item>
+        <item name="colorAccent">#FFEAB308</item>
+    </style>
+
+</resources>

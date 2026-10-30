@@ -12,5 +12,4 @@
     <color name="vc_button_idle">#00000000</color>
     <color name="vc_row_fill">#24FFFFFF</color>
     <color name="vc_row_stroke">#4DFFFFFF</color>
-    <color name="vc_button_focus">#803D8BFD</color> <!-- accent at 50% -->
 </resources>

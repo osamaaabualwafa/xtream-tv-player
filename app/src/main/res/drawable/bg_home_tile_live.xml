@@ -3,14 +3,14 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <gradient android:angle="315" android:endColor="#263D8BFD" android:startColor="#733D8BFD" />
+            <gradient android:angle="315" android:endColor="?attr/appAccent26" android:startColor="?attr/appAccent73" />
             <stroke android:width="3dp" android:color="@android:color/white" />
             <corners android:radius="22dp" />
         </shape>
     </item>
     <item>
         <shape>
-            <gradient android:angle="315" android:endColor="#0D3D8BFD" android:startColor="#4D3D8BFD" />
+            <gradient android:angle="315" android:endColor="?attr/appAccent0D" android:startColor="?attr/appAccent4D" />
             <stroke android:width="1dp" android:color="#29FFFFFF" />
             <corners android:radius="22dp" />
         </shape>

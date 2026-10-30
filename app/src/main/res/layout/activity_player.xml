@@ -138,7 +138,7 @@
                     android:layout_marginTop="6dp"
                     android:max="1000"
                     android:progressBackgroundTint="#4DFFFFFF"
-                    android:progressTint="@color/accent"
+                    android:progressTint="?attr/appAccent"
                     android:visibility="gone" />
 
                 <TextView

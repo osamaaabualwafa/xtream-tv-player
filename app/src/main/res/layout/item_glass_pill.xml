@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A glass pill made in code (avatar groups, settings choices). -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    style="@style/GlassPill"
+    android:layout_marginLeft="0dp"
+    android:layout_marginRight="10dp" />

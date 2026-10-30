@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Browse B3: categories as a row of glass chips under the header; the grid uses the full width. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_glow"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/type_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="18dp"
+                android:textColor="@color/text"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/category_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="16dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textAlignment="viewStart"
+                android:textColor="@color/text"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_guide"
+                style="@style/GlassPill"
+                android:layout_height="46dp"
+                android:text="TV guide"
+                android:visibility="gone" />
+
+            <EditText
+                android:id="@+id/search"
+                style="@style/GlassInput"
+                android:layout_width="220dp"
+                android:layout_height="46dp"
+                android:hint="⌕  Search"
+                android:imeOptions="actionSearch|flagNoExtractUi"
+                android:inputType="text" />
+        </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/categories"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:clipToPadding="false"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/items"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:padding="6dp" />
+
+            <ProgressBar
+                android:id="@+id/progress"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/message"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:padding="24dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="17sp"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- Focused movie / series: name, then year · genre · rating, then the start of the plot. -->
+        <LinearLayout
+            android:id="@+id/info_strip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_glass_card"
+            android:orientation="vertical"
+            android:paddingLeft="18dp"
+            android:paddingTop="10dp"
+            android:paddingRight="18dp"
+            android:paddingBottom="10dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/info_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxWidth="520dp"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/info_meta"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="12dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/info_plot"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:visibility="gone" />
+        </LinearLayout>
+</LinearLayout>

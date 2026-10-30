@@ -37,6 +37,12 @@ data class StreamItem(
     val added: Long = 0,
     /** Every category the item is in (newer panels list several in "category_ids"). */
     val categoryIds: List<String> = listOfNotNull(categoryId),
+    /** Shown in the info strip under the poster grid when the list provides them. */
+    val genre: String? = null,
+    val year: String? = null,
+    val plot: String? = null,
+    /** Continue watching: how far in (0..1), shown as a bar on the poster; -1 = no bar. */
+    val progress: Float = -1f,
 )
 
 data class UserInfo(
@@ -305,6 +311,9 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"),
                 added = o.long("added") ?: 0,
                 categoryIds = o.categoryIds(),
+                genre = o.str("genre")?.takeIf { it.isNotBlank() },
+                year = (o.str("year") ?: o.str("releasedate") ?: o.str("release_date"))?.let { Regex("(19|20)\\d{2}").find(it)?.value },
+                plot = o.str("plot")?.takeIf { it.isNotBlank() },
             )
         }
         ContentType.SERIES -> o.str("series_id")?.let { id ->
@@ -312,6 +321,9 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.rating("rating"),
                 added = o.long("last_modified") ?: 0,
                 categoryIds = o.categoryIds(),
+                genre = o.str("genre")?.takeIf { it.isNotBlank() },
+                year = (o.str("releaseDate") ?: o.str("release_date") ?: o.str("year"))?.let { Regex("(19|20)\\d{2}").find(it)?.value },
+                plot = o.str("plot")?.takeIf { it.isNotBlank() },
             )
         }
     }

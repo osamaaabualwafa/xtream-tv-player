@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import coil.load
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -40,12 +41,23 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var favoritesAdapter: ItemAdapter
     private lateinit var recentAdapter: ItemAdapter
     private var expiryShown = false
+    /** Layout and colour this screen was built with; rebuilt when Settings changes them. */
+    private var builtLook = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
-        setContentView(R.layout.activity_home)
+        Appearance.apply(this)
+        builtLook = lookKey()
+        setContentView(
+            when (prefs.homeStyle) {
+                Appearance.HOME_HERO -> R.layout.activity_home_hero
+                Appearance.HOME_SIDE_MENU -> R.layout.activity_home_side
+                Appearance.HOME_TABS -> R.layout.activity_home_tabs
+                else -> R.layout.activity_home
+            }
+        )
         accountView = findViewById(R.id.account)
         expiryWarning = findViewById(R.id.expiry_warning)
         clock = findViewById(R.id.clock)
@@ -58,16 +70,23 @@ class HomeActivity : AppCompatActivity() {
         )
         for ((id, type) in tiles) {
             val tile = findViewById<View>(id)
-            tile.onFocusChangeListener = scaleOnFocus
+            if (prefs.homeStyle != Appearance.HOME_SIDE_MENU) tile.onFocusChangeListener = scaleOnFocus
             tile.setOnClickListener {
                 startActivity(Intent(this, BrowseActivity::class.java).putExtra(BrowseActivity.EXTRA_TYPE, type.name))
             }
         }
         findViewById<View>(R.id.tile_search).apply {
-            onFocusChangeListener = scaleOnFocus
+            if (prefs.homeStyle != Appearance.HOME_SIDE_MENU) onFocusChangeListener = scaleOnFocus
             setOnClickListener { startActivity(Intent(this@HomeActivity, SearchActivity::class.java)) }
         }
         findViewById<View>(R.id.tile_live).requestFocus()
+        // Up from the tiles reaches the top-bar chips (they sit far to the right).
+        if (prefs.homeStyle != Appearance.HOME_SIDE_MENU) {
+            findViewById<View>(R.id.tile_live).nextFocusUpId = R.id.playlist_chip
+            findViewById<View>(R.id.tile_movies).nextFocusUpId = R.id.playlist_chip
+            findViewById<View>(R.id.tile_series).nextFocusUpId = R.id.settings_button
+            findViewById<View>(R.id.tile_search).nextFocusUpId = R.id.settings_button
+        }
 
         val openPlaylists = View.OnClickListener {
             Session.clear()
@@ -75,6 +94,7 @@ class HomeActivity : AppCompatActivity() {
             finish()
         }
         findViewById<View>(R.id.logout).setOnClickListener(openPlaylists)
+        findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         findViewById<View>(R.id.playlist_chip).setOnClickListener(openPlaylists)
         findViewById<View>(R.id.refresh_lists).setOnClickListener { refreshLists() }
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
@@ -99,6 +119,10 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!::continueAdapter.isInitialized) return
+        if (lookKey() != builtLook) {
+            recreate()
+            return
+        }
         clock.removeCallbacks(clockTicker)
         clockTicker.run()
         loadLocalRows()
@@ -113,6 +137,8 @@ class HomeActivity : AppCompatActivity() {
             showAccount()
         }
     }
+
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
@@ -142,10 +168,12 @@ class HomeActivity : AppCompatActivity() {
 
     /** Rows stored on the device: Continue watching and favorites. */
     private fun loadLocalRows() {
-        val watching = (prefs.continueWatching(ContentType.MOVIE) + prefs.continueWatching(ContentType.SERIES))
+        val entries = (prefs.continueWatching(ContentType.MOVIE) + prefs.continueWatching(ContentType.SERIES))
             .sortedByDescending { it.updated }
+        showHero(entries.firstOrNull())
+        val watching = entries
             .map { e ->
-                StreamItem(e.type, e.key, listOfNotNull(e.title, e.subtitle).joinToString("  ·  "), e.image, null, e.ext, null, null, note = e.progressText())
+                StreamItem(e.type, e.key, listOfNotNull(e.title, e.subtitle).joinToString("  ·  "), e.image, null, e.ext, null, null, note = e.progressText(), progress = e.progressFraction())
             }
         showRow(R.id.row_continue, R.id.row_continue_title, continueAdapter, watching)
         val channels = prefs.favorites(ContentType.LIVE)
@@ -175,6 +203,24 @@ class HomeActivity : AppCompatActivity() {
                 list.also { Session.streamCache[key] = it }
             }
         }.also { allLists[type] = it }
+    }
+
+    /** H1 only: the last thing watched, big, with a Resume button. */
+    private fun showHero(entry: WatchEntry?) {
+        val hero = findViewById<View?>(R.id.hero) ?: return
+        if (entry == null) {
+            hero.visibility = View.GONE
+            return
+        }
+        hero.visibility = View.VISIBLE
+        findViewById<TextView>(R.id.hero_title).text = entry.title
+        findViewById<TextView>(R.id.hero_meta).text = listOfNotNull(entry.subtitle, entry.progressText()).joinToString("  ·  ")
+        findViewById<android.widget.ProgressBar>(R.id.hero_progress).progress = (entry.progressFraction().coerceAtLeast(0f) * 1000).toInt()
+        findViewById<android.widget.ImageView>(R.id.hero_image).load(entry.image) {
+            crossfade(false)
+            error(R.drawable.placeholder)
+        }
+        findViewById<View>(R.id.hero_resume).setOnClickListener { resume(entry.key) }
     }
 
     /** "5,537 channels" under each tile's name (lists come from the device cache). */
@@ -239,10 +285,7 @@ class HomeActivity : AppCompatActivity() {
         val playlistName = prefs.activePlaylist?.name ?: host
         // Top bar: playlist chip and expiry chip.
         findViewById<TextView>(R.id.playlist_name).text = playlistName
-        findViewById<TextView>(R.id.playlist_initial).apply {
-            text = playlistName.trim().firstOrNull()?.uppercase() ?: "?"
-            backgroundTintList = ColorStateList.valueOf(avatarColor(prefs.activePlaylist?.id ?: host))
-        }
+        Appearance.bindAvatar(findViewById(R.id.playlist_initial), prefs, prefs.activePlaylist?.id ?: host, playlistName, letterSizeSp = 14f, emojiSizeSp = 16f)
         findViewById<TextView>(R.id.expiry_chip).apply {
             val exp = info?.expDate
             text = if (exp != null) "Expires " + SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date(exp * 1000)) else "No expiry date"

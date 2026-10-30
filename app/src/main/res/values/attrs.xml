@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme colour chosen in Settings: the accent, its see-through variants, and the background glow. -->
+<resources>
+    <attr name="appAccent" format="color" />
+    <attr name="appAccent0D" format="color" />
+    <attr name="appAccent26" format="color" />
+    <attr name="appAccent4D" format="color" />
+    <attr name="appAccent59" format="color" />
+    <attr name="appAccent66" format="color" />
+    <attr name="appAccent73" format="color" />
+    <attr name="appAccent80" format="color" />
+    <attr name="appAccent99" format="color" />
+    <attr name="appAccentCC" format="color" />
+    <attr name="appGlow" format="color" />
+</resources>

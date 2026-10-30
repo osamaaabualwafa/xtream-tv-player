@@ -11,13 +11,24 @@
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="190dp">
+        android:layout_height="wrap_content">
 
-        <ImageView
+        <com.osama.xtreamtv.PosterImageView
             android:id="@+id/image"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop" />
+            android:layout_height="wrap_content"
+            android:background="#14FFFFFF"
+            android:scaleType="fitCenter" />
+
+        <ProgressBar
+            android:id="@+id/watch_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="5dp"
+            android:layout_gravity="bottom"
+            android:max="1000"
+            android:progressDrawable="@drawable/progress_poster"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/fav"

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- H4 tab: clear, focused = accent glass with a white border. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="?attr/appAccent80" />
+            <stroke android:width="2dp" android:color="@android:color/white" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#00000000" />
+            <corners android:radius="26dp" />
+        </shape>
+    </item>
+</selector>

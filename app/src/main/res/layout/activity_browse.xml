@@ -1,21 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Browse: categories in a glass panel on the left; header, grid (or channel list) and an
+     info strip for the focused poster on the right. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@drawable/bg_glow"
     android:orientation="horizontal"
     android:padding="20dp">
 
     <LinearLayout
-        android:layout_width="260dp"
+        android:layout_width="270dp"
         android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:background="@drawable/bg_glass_card"
+        android:orientation="vertical"
+        android:paddingLeft="10dp"
+        android:paddingTop="16dp"
+        android:paddingRight="10dp"
+        android:paddingBottom="10dp">
 
         <TextView
             android:id="@+id/type_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"
+            android:paddingLeft="8dp"
             android:textColor="@color/text"
             android:textSize="24sp"
             android:textStyle="bold" />
@@ -25,13 +33,13 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
-            android:padding="4dp" />
+            android:padding="2dp" />
     </LinearLayout>
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_marginLeft="16dp"
+        android:layout_marginLeft="20dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
@@ -51,22 +59,22 @@
                 android:singleLine="true"
                 android:textAlignment="viewStart"
                 android:textColor="@color/text"
-                android:textSize="18sp" />
+                android:textSize="20sp"
+                android:textStyle="bold" />
 
-            <Button
+            <TextView
                 android:id="@+id/tv_guide"
-                style="@style/TvButton"
+                style="@style/GlassPill"
                 android:layout_height="46dp"
-                android:layout_marginRight="12dp"
                 android:text="TV guide"
                 android:visibility="gone" />
 
             <EditText
                 android:id="@+id/search"
-                style="@style/TvInput"
-                android:layout_width="200dp"
+                style="@style/GlassInput"
+                android:layout_width="220dp"
                 android:layout_height="46dp"
-                android:hint="Search"
+                android:hint="⌕  Search"
                 android:imeOptions="actionSearch|flagNoExtractUi"
                 android:inputType="text" />
         </LinearLayout>
@@ -102,5 +110,60 @@
                 android:textSize="17sp"
                 android:visibility="gone" />
         </FrameLayout>
+
+        <!-- Focused movie / series: name, then year · genre · rating, then the start of the plot. -->
+        <LinearLayout
+            android:id="@+id/info_strip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_glass_card"
+            android:orientation="vertical"
+            android:paddingLeft="18dp"
+            android:paddingTop="10dp"
+            android:paddingRight="18dp"
+            android:paddingBottom="10dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/info_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxWidth="520dp"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/info_meta"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="12dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/info_plot"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

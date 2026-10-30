@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home H2: glass side menu (sections, settings, playlist) on the left, rows on the right. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_glow"
+    android:orientation="horizontal"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_glass_card"
+        android:clipChildren="false"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingLeft="10dp"
+            android:paddingRight="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Xtream TV"
+                android:textColor="@color/text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/clock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_live"
+                style="@style/SideMenuItem">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginRight="14dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_home_live" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="Live TV"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/tile_live_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="#FFC8D0DC"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_movies"
+                style="@style/SideMenuItem">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginRight="14dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_home_movies" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="Movies"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/tile_movies_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="#FFC8D0DC"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_series"
+                style="@style/SideMenuItem">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginRight="14dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_home_series" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="Series"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/tile_series_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="#FFC8D0DC"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_search"
+                style="@style/SideMenuItem">
+
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginRight="14dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_home_search" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="Search"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/settings_button"
+                style="@style/SideMenuItem">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="⚙   Settings"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/logout"
+                style="@style/SideMenuItem">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="☰   Playlists"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:id="@+id/playlist_chip"
+            android:layout_width="match_parent"
+            android:layout_height="58dp"
+            android:background="@drawable/bg_glass_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingLeft="10dp"
+            android:paddingRight="12dp">
+
+            <TextView
+                android:id="@+id/playlist_initial"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_avatar"
+                android:gravity="center"
+                android:textColor="@android:color/white"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="10dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/playlist_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/expiry_chip"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/home_scroll"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginLeft="24dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:orientation="vertical"
+            android:paddingBottom="16dp">
+
+        <TextView
+            android:id="@+id/expiry_warning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_glass_card"
+            android:padding="14dp"
+            android:textColor="@color/gold"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/row_continue_title"
+            style="@style/HomeRowTitle"
+            android:text="Continue watching" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_continue"
+            style="@style/HomeRow" />
+
+        <TextView
+            android:id="@+id/row_channels_title"
+            style="@style/HomeRowTitle"
+            android:text="Favorite channels" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_channels"
+            style="@style/HomeRow" />
+
+        <TextView
+            android:id="@+id/row_favorites_title"
+            style="@style/HomeRowTitle"
+            android:text="Favorite movies and series" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_favorites"
+            style="@style/HomeRow" />
+
+        <TextView
+            android:id="@+id/row_recent_title"
+            style="@style/HomeRowTitle"
+            android:text="Recently added movies" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_recent"
+            style="@style/HomeRow" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/account"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:lineSpacingExtra="4dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/refresh_lists"
+                style="@style/GlassPill"
+                android:text="Refresh lists" />
+
+            <TextView
+                android:id="@+id/check_updates"
+                style="@style/GlassPill"
+                android:text="Check for updates" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

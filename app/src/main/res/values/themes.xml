@@ -2,7 +2,18 @@
     <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
         <item name="colorPrimary">@color/surface</item>
         <item name="colorPrimaryDark">@color/bg</item>
-        <item name="colorAccent">@color/accent</item>
+        <item name="appAccent">#FF3D8BFD</item>
+        <item name="appAccent0D">#0D3D8BFD</item>
+        <item name="appAccent26">#263D8BFD</item>
+        <item name="appAccent4D">#4D3D8BFD</item>
+        <item name="appAccent59">#593D8BFD</item>
+        <item name="appAccent66">#663D8BFD</item>
+        <item name="appAccent73">#733D8BFD</item>
+        <item name="appAccent80">#803D8BFD</item>
+        <item name="appAccent99">#993D8BFD</item>
+        <item name="appAccentCC">#CC3D8BFD</item>
+        <item name="appGlow">#FF182D4A</item>
+        <item name="colorAccent">#FF3D8BFD</item>
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
@@ -12,7 +23,7 @@
 
     <!-- Dialog buttons get the same strong focus highlight as the rest of the app (D-pad only). -->
     <style name="TvDialog" parent="Theme.AppCompat.Dialog.Alert">
-        <item name="colorAccent">@color/accent</item>
+        <item name="colorAccent">?attr/appAccent</item>
         <item name="android:windowBackground">@drawable/bg_panel</item>
         <item name="buttonBarPositiveButtonStyle">@style/TvDialogButton</item>
         <item name="buttonBarNegativeButtonStyle">@style/TvDialogButton</item>
@@ -109,6 +120,45 @@
         <item name="android:clickable">true</item>
         <item name="android:textColor">@color/text</item>
         <item name="android:textSize">16sp</item>
+    </style>
+
+    <!-- Home H2 side menu row and H4 tab. -->
+    <style name="SideMenuItem">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">50dp</item>
+        <item name="android:layout_marginBottom">5dp</item>
+        <item name="android:background">@drawable/bg_glass_item</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">14dp</item>
+    </style>
+
+    <style name="HomeTab">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="android:background">@drawable/bg_glass_tab</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">26dp</item>
+        <item name="android:paddingRight">26dp</item>
+    </style>
+
+    <style name="SettingsMenuItem">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">54dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:background">@drawable/bg_glass_item</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">17sp</item>
     </style>
 
     <style name="GlassInput" parent="TvInput">

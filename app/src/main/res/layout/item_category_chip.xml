@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Browse B3: one category as a glass chip (name and count). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="46dp"
+    android:layout_marginRight="10dp"
+    android:background="@drawable/bg_glass_chip_cat"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingLeft="18dp"
+    android:paddingRight="18dp">
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxWidth="280dp"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textColor="@color/text"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="8dp"
+        android:singleLine="true"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp" />
+</LinearLayout>

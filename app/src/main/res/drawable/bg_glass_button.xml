@@ -3,14 +3,14 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <solid android:color="@color/accent" />
+            <solid android:color="?attr/appAccent" />
             <stroke android:width="3dp" android:color="@android:color/white" />
             <corners android:radius="10dp" />
         </shape>
     </item>
     <item>
         <shape>
-            <solid android:color="#CC3D8BFD" />
+            <solid android:color="?attr/appAccentCC" />
             <corners android:radius="10dp" />
         </shape>
     </item>

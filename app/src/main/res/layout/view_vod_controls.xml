@@ -193,7 +193,7 @@
                     android:layout_height="4dp"
                     android:layout_gravity="bottom"
                     android:layout_marginBottom="10dp"
-                    android:background="@color/accent" />
+                    android:background="?attr/appAccent" />
 
                 <View
                     android:id="@+id/vc_thumb"

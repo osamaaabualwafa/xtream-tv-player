@@ -222,6 +222,7 @@ class PlayerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
+        Appearance.apply(this)
         setContentView(R.layout.activity_player)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 

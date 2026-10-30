@@ -57,6 +57,7 @@ class GuideActivity : AppCompatActivity() {
         channels = Session.zapList
         if (channels.isEmpty()) return finish()
         fromPlayer = intent.getBooleanExtra(EXTRA_FROM_PLAYER, false)
+        Appearance.apply(this)
         setContentView(R.layout.activity_guide)
 
         channelsView = findViewById(R.id.guide_channels)

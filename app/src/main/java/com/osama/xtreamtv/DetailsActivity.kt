@@ -84,6 +84,7 @@ class DetailsActivity : AppCompatActivity() {
         )
         ext = item.ext
         posterUrl = item.image
+        Appearance.apply(this)
         setContentView(R.layout.activity_details)
 
         poster = findViewById(R.id.poster)

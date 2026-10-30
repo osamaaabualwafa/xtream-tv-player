@@ -40,6 +40,7 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        Appearance.apply(this)
         setContentView(R.layout.activity_login)
         name = findViewById(R.id.name)
         server = findViewById(R.id.server)

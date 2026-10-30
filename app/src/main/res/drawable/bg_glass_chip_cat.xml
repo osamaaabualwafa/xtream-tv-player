@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- B3 category chip: focused = accent glass + white border, chosen = faint accent. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="?attr/appAccent80" />
+            <stroke android:width="2dp" android:color="@android:color/white" />
+            <corners android:radius="23dp" />
+        </shape>
+    </item>
+    <item android:state_activated="true">
+        <shape>
+            <solid android:color="?attr/appAccent4D" />
+            <stroke android:width="1dp" android:color="?attr/appAccent" />
+            <corners android:radius="23dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#12FFFFFF" />
+            <stroke android:width="1dp" android:color="#29FFFFFF" />
+            <corners android:radius="23dp" />
+        </shape>
+    </item>
+</selector>

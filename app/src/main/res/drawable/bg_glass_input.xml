@@ -3,8 +3,8 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <solid android:color="#263D8BFD" />
-            <stroke android:width="2dp" android:color="@color/accent" />
+            <solid android:color="?attr/appAccent26" />
+            <stroke android:width="2dp" android:color="?attr/appAccent" />
             <corners android:radius="10dp" />
         </shape>
     </item>

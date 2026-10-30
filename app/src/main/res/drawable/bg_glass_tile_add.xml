@@ -3,7 +3,7 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <solid android:color="#4D3D8BFD" />
+            <solid android:color="?attr/appAccent4D" />
             <stroke android:width="3dp" android:color="@android:color/white" />
             <corners android:radius="28dp" />
         </shape>

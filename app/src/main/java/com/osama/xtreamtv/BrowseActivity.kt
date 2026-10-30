@@ -8,7 +8,9 @@ import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import coil.load
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -41,6 +43,12 @@ class BrowseActivity : AppCompatActivity() {
     private lateinit var categoryAdapter: TextAdapter<Category>
     private lateinit var itemAdapter: ItemAdapter
 
+    /** Settings > Movies and series layout (live channels have no preview, so B4 falls back to B1). */
+    private var style = Appearance.BROWSE_SIDEBAR
+    /** B2 / B4: the category list that slides over the posters, and the rail that opens it. */
+    private var panel: View? = null
+    private var rail: View? = null
+
     private var allItems: List<StreamItem> = emptyList()
     private var currentCategory: Category? = null
     private var loadJob: Job? = null
@@ -57,7 +65,18 @@ class BrowseActivity : AppCompatActivity() {
         } catch (e: IllegalArgumentException) {
             ContentType.LIVE
         }
-        setContentView(R.layout.activity_browse)
+        Appearance.apply(this)
+        style = prefs.browseStyle.let { if (type == ContentType.LIVE && it == Appearance.BROWSE_PREVIEW) Appearance.BROWSE_SIDEBAR else it }
+        setContentView(
+            when (style) {
+                Appearance.BROWSE_FOLDING -> R.layout.activity_browse_folding
+                Appearance.BROWSE_CHIPS -> R.layout.activity_browse_chips
+                Appearance.BROWSE_PREVIEW -> R.layout.activity_browse_preview
+                else -> R.layout.activity_browse
+            }
+        )
+        panel = findViewById(R.id.category_panel)
+        rail = findViewById(R.id.category_rail)
 
         categoriesView = findViewById(R.id.categories)
         itemsView = findViewById(R.id.items)
@@ -73,23 +92,49 @@ class BrowseActivity : AppCompatActivity() {
         }
 
         categoryAdapter = TextAdapter(
-            R.layout.item_category,
+            if (style == Appearance.BROWSE_CHIPS) R.layout.item_category_chip else R.layout.item_category,
             bind = { vh, cat ->
                 vh.title.text = cat.name
                 vh.subtitle?.text = counts[cat.id]?.let { java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(it) } ?: ""
             },
-            onClick = { _, cat -> selectCategory(cat) },
+            onClick = { _, cat ->
+                selectCategory(cat)
+                closePanel()
+            },
         )
-        categoriesView.layoutManager = LinearLayoutManager(this)
+        categoriesView.layoutManager = LinearLayoutManager(this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, false)
         categoriesView.adapter = categoryAdapter
 
         val live = type == ContentType.LIVE
+        val preview = style == Appearance.BROWSE_PREVIEW
         itemAdapter = ItemAdapter(
             grid = !live,
             onClick = { index, item -> open(index, item) },
             onLongClick = { _, item -> onLongPress(item) },
+            layout = if (preview) R.layout.item_poster_small else null,
+            onFocusItem = if (live) null else { item -> showInfo(item) },
         )
-        itemsView.layoutManager = if (live) LinearLayoutManager(this) else GridLayoutManager(this, 5)
+        itemsView.layoutManager = when {
+            live -> LinearLayoutManager(this)
+            preview -> LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> GridLayoutManager(this, 6)
+            else -> GridLayoutManager(this, 8)
+        }
+
+        // B2 / B4: the rail opens the category list; Back from the posters opens it too.
+        rail?.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) openPanel() }
+        if (panel != null) {
+            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (panel?.visibility != View.VISIBLE) {
+                        openPanel()
+                    } else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            })
+        }
         itemsView.adapter = itemAdapter
 
         search.doAfterTextChanged { applyFilter() }
@@ -129,6 +174,52 @@ class BrowseActivity : AppCompatActivity() {
             }
         }
         itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "refresh")
+    }
+
+    private fun openPanel() {
+        val p = panel ?: return
+        p.visibility = View.VISIBLE
+        rail?.visibility = View.GONE
+        setGridColumns()
+        categoriesView.post {
+            val index = categoryAdapter.activeIndex.coerceAtLeast(0)
+            (categoriesView.findViewHolderForAdapterPosition(index)?.itemView ?: categoriesView).requestFocus()
+        }
+    }
+
+    /** B2 / B4: hide the category list and go back to the posters. */
+    private fun closePanel() {
+        val p = panel ?: return
+        if (p.visibility != View.VISIBLE) return
+        p.visibility = View.GONE
+        rail?.visibility = View.VISIBLE
+        setGridColumns()
+        focusFirstItem()
+    }
+
+    /** B2: fewer columns while the list is open so the posters keep their size. */
+    private fun setGridColumns() {
+        if (style != Appearance.BROWSE_FOLDING) return
+        (itemsView.layoutManager as? GridLayoutManager)?.spanCount = if (panel?.visibility == View.VISIBLE) 6 else 8
+    }
+
+    private fun focusFirstItem() {
+        itemsView.post {
+            val lm = itemsView.layoutManager as? LinearLayoutManager
+            val first = lm?.findFirstVisibleItemPosition()?.takeIf { it >= 0 } ?: 0
+            (lm?.findViewByPosition(first) ?: itemsView).requestFocus()
+        }
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Right from the sliding category list closes it.
+        if (panel?.visibility == View.VISIBLE && categoriesView.hasFocus() &&
+            event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+        ) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) closePanel()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun loadCategories() {
@@ -179,6 +270,7 @@ class BrowseActivity : AppCompatActivity() {
                 num = null,
                 rating = null,
                 note = e.progressText(),
+                progress = e.progressFraction(),
             )
         }
         else -> emptyList()
@@ -275,6 +367,9 @@ class BrowseActivity : AppCompatActivity() {
         itemAdapter.favorites = prefs.favoriteIds(type)
         itemAdapter.submit(list)
         if (scrollToTop) itemsView.scrollToPosition(0)
+        if (list.isEmpty()) findViewById<View>(R.id.info_strip).visibility = if (style == Appearance.BROWSE_PREVIEW) View.INVISIBLE else View.GONE
+        // The list closed before the items arrived: move to the first item once they are there.
+        if (list.isNotEmpty() && panel?.visibility == View.GONE && (currentFocus == null || currentFocus == itemsView)) focusFirstItem()
         val catId = currentCategory?.id
         when {
             progress.visibility == View.VISIBLE -> message.visibility = View.GONE
@@ -284,6 +379,28 @@ class BrowseActivity : AppCompatActivity() {
                 showMessage("Nothing to continue yet.\nStart watching something and it will appear here.")
             list.isEmpty() -> showMessage(if (query.isEmpty()) "Nothing here." else "No results for \"$query\".")
             else -> message.visibility = View.GONE
+        }
+    }
+
+    /** Info strip under the grid: name, then year · genre · rating, then the start of the plot. */
+    private fun showInfo(item: StreamItem) {
+        findViewById<View>(R.id.info_strip).visibility = View.VISIBLE
+        findViewById<TextView>(R.id.info_name).text = item.name
+        val meta = listOfNotNull(
+            item.note,
+            item.year,
+            item.genre,
+            displayRating(item.rating)?.let { "★ $it" },
+            if (item.year == null && item.added > 0) "Added " + formatDate(item.added) else null,
+        ).joinToString("  ·  ")
+        findViewById<TextView>(R.id.info_meta).text = meta
+        findViewById<TextView>(R.id.info_plot).apply {
+            text = item.plot
+            visibility = if (item.plot == null) View.GONE else View.VISIBLE
+        }
+        findViewById<android.widget.ImageView?>(R.id.preview_image)?.load(item.image) {
+            crossfade(false)
+            error(R.drawable.placeholder)
         }
     }
 

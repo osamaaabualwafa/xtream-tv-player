@@ -39,6 +39,7 @@ class SearchActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
+        Appearance.apply(this)
         setContentView(R.layout.activity_search)
         query = findViewById(R.id.search_query)
         status = findViewById(R.id.search_status)

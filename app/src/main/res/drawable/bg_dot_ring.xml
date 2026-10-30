@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ring around a colour choice: white when focused, faint when it is the chosen one. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <stroke android:width="3dp" android:color="@android:color/white" />
+        </shape>
+    </item>
+    <item android:state_activated="true">
+        <shape android:shape="oval">
+            <stroke android:width="2dp" android:color="#B3FFFFFF" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#00000000" />
+        </shape>
+    </item>
+</selector>

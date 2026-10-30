@@ -72,6 +72,7 @@ class PlaylistsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        Appearance.apply(this)
         setContentView(R.layout.activity_playlists)
         listView = findViewById(R.id.playlists)
         progress = findViewById(R.id.progress)
@@ -143,8 +144,7 @@ class PlaylistsActivity : AppCompatActivity() {
             vh.subtitle?.text = ""
         } else {
             tile.setBackgroundResource(R.drawable.bg_glass_tile)
-            initial.text = p.name.trim().firstOrNull()?.uppercase() ?: "?"
-            initial.backgroundTintList = ColorStateList.valueOf(avatarColor(p.id))
+            Appearance.bindAvatar(initial, prefs, p.id, p.name, letterSizeSp = 36f, emojiSizeSp = 40f)
             vh.title.text = p.name
             val status = statuses[p.id]
             vh.subtitle?.text = status?.first ?: ""
@@ -300,10 +300,11 @@ class PlaylistsActivity : AppCompatActivity() {
         if (busy) return
         AlertDialog.Builder(this)
             .setTitle(p.name)
-            .setItems(arrayOf("Edit", "Delete")) { _, which ->
+            .setItems(arrayOf("Edit", "Change avatar", "Delete")) { _, which ->
                 when (which) {
                     0 -> startActivity(LoginActivity.editIntent(this, p.id))
-                    1 -> confirmDelete(p)
+                    1 -> AvatarPicker.show(this, p) { showList(prefs.playlists()) }
+                    2 -> confirmDelete(p)
                 }
             }
             .setNegativeButton("Cancel", null)

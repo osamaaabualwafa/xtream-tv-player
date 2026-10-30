@@ -60,7 +60,8 @@ object Updates {
 
     /** Background check from Home: only speaks up when there is something newer. */
     fun checkQuietly(activity: Activity, scope: LifecycleCoroutineScope) {
-        if (checkedThisSession) return
+        // Test builds (build 1) would always be offered the published release; only "Check for updates" asks.
+        if (BuildConfig.DEBUG || checkedThisSession) return
         checkedThisSession = true
         scope.launch {
             val release = try { latest() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
