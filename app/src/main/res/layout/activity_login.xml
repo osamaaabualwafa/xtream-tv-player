@@ -1,93 +1,132 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Add / edit playlist: one frosted glass card in the middle of the glow background. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@drawable/bg_glow">
 
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true">
 
-        <LinearLayout
-            android:layout_width="480dp"
+        <FrameLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:orientation="vertical"
-            android:padding="24dp">
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
 
-            <TextView
-                android:id="@+id/heading"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="520dp"
                 android:layout_height="wrap_content"
-                android:text="Add playlist"
-                android:textColor="@color/text"
-                android:textSize="32sp"
-                android:textStyle="bold" />
+                android:layout_gravity="center"
+                android:background="@drawable/bg_glass_card"
+                android:orientation="vertical"
+                android:paddingLeft="36dp"
+                android:paddingTop="30dp"
+                android:paddingRight="36dp"
+                android:paddingBottom="32dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="20dp"
-                android:text="Sign in with your Xtream Codes account"
-                android:textColor="@color/text_secondary"
-                android:textSize="15sp" />
-
-            <EditText
-                android:id="@+id/name"
-                style="@style/TvInput"
-                android:layout_marginBottom="12dp"
-                android:hint="Playlist name (optional)"
-                android:inputType="textCapWords" />
-
-            <EditText
-                android:id="@+id/server"
-                style="@style/TvInput"
-                android:hint="Server (http://host:port) or M3U link"
-                android:inputType="textUri" />
-
-            <EditText
-                android:id="@+id/username"
-                style="@style/TvInput"
-                android:layout_marginTop="12dp"
-                android:hint="Username"
-                android:inputType="text" />
-
-            <EditText
-                android:id="@+id/password"
-                style="@style/TvInput"
-                android:layout_marginTop="12dp"
-                android:hint="Password"
-                android:imeOptions="actionDone|flagNoExtractUi"
-                android:inputType="textPassword" />
-
-            <TextView
-                android:id="@+id/error"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:textColor="@color/error"
-                android:textSize="15sp"
-                android:visibility="gone" />
-
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp">
-
-                <Button
-                    android:id="@+id/login"
-                    style="@style/TvButton"
+                <TextView
+                    android:id="@+id/heading"
                     android:layout_width="match_parent"
-                    android:text="Log in" />
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Add playlist"
+                    android:textColor="@color/text"
+                    android:textSize="28sp"
+                    android:textStyle="bold" />
 
-                <ProgressBar
-                    android:id="@+id/progress"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    android:layout_gravity="center"
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="24dp"
+                    android:gravity="center"
+                    android:text="Xtream Codes account"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="15sp" />
+
+                <EditText
+                    android:id="@+id/name"
+                    style="@style/GlassInput"
+                    android:layout_marginBottom="12dp"
+                    android:hint="Playlist name (optional)"
+                    android:inputType="textCapWords" />
+
+                <EditText
+                    android:id="@+id/server"
+                    style="@style/GlassInput"
+                    android:hint="Server (http://host:port) or M3U link"
+                    android:inputType="textUri" />
+
+                <EditText
+                    android:id="@+id/username"
+                    style="@style/GlassInput"
+                    android:layout_marginTop="12dp"
+                    android:hint="Username"
+                    android:inputType="text" />
+
+                <!-- Password with a Show / Hide button at its end. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/password"
+                        style="@style/GlassInput"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:hint="Password"
+                        android:imeOptions="actionDone|flagNoExtractUi"
+                        android:inputType="textPassword" />
+
+                    <TextView
+                        android:id="@+id/show_password"
+                        style="@style/GlassPill"
+                        android:layout_height="52dp"
+                        android:layout_marginLeft="10dp"
+                        android:layout_marginRight="0dp"
+                        android:minWidth="84dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
+                        android:text="Show"
+                        android:textSize="15sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/error"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textColor="@color/error"
+                    android:textSize="15sp"
                     android:visibility="gone" />
-            </FrameLayout>
-        </LinearLayout>
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp">
+
+                    <Button
+                        android:id="@+id/login"
+                        style="@style/TvButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:background="@drawable/bg_glass_button"
+                        android:text="Log in"
+                        android:textStyle="bold" />
+
+                    <ProgressBar
+                        android:id="@+id/progress"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_gravity="center"
+                        android:visibility="gone" />
+                </FrameLayout>
+            </LinearLayout>
+        </FrameLayout>
     </ScrollView>
 </FrameLayout>

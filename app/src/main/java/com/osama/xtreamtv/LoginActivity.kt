@@ -3,6 +3,7 @@ package com.osama.xtreamtv
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.text.InputType
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
@@ -56,6 +57,15 @@ class LoginActivity : AppCompatActivity() {
             } else {
                 false
             }
+        }
+
+        // Show / hide the password (keeps the cursor at the end).
+        findViewById<TextView>(R.id.show_password).setOnClickListener { v ->
+            val hidden = password.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD != 0
+            password.inputType = InputType.TYPE_CLASS_TEXT or
+                if (hidden) InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD else InputType.TYPE_TEXT_VARIATION_PASSWORD
+            password.setSelection(password.text.length)
+            (v as TextView).text = if (hidden) "Hide" else "Show"
         }
 
         val editId = intent.getStringExtra(EXTRA_PLAYLIST_ID)

@@ -94,6 +94,27 @@
         <item name="android:textStyle">bold</item>
     </style>
 
+    <!-- Glass screens (playlists, add playlist). -->
+    <style name="GlassPill">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_marginLeft">8dp</item>
+        <item name="android:layout_marginRight">8dp</item>
+        <item name="android:minWidth">110dp</item>
+        <item name="android:paddingLeft">22dp</item>
+        <item name="android:paddingRight">22dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/bg_glass_pill</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="GlassInput" parent="TvInput">
+        <item name="android:background">@drawable/bg_glass_input</item>
+    </style>
+
     <style name="HomeRowTitle">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

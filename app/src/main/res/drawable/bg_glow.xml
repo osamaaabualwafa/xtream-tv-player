@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark background with a soft blue glow top-left and a violet one bottom-right (glass screens). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FF0E1218" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.22"
+                android:centerY="0.12"
+                android:endColor="#000E1218"
+                android:gradientRadius="620dp"
+                android:startColor="#FF1D2B44"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.88"
+                android:centerY="0.95"
+                android:endColor="#000E1218"
+                android:gradientRadius="520dp"
+                android:startColor="#B324193A"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.View
 import android.widget.ProgressBar
@@ -16,17 +17,25 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 
-/** Start screen: pick one of the saved playlists, add a new one, or edit/delete with a long-press. */
+/**
+ * Start screen: glass profile tiles, one per saved playlist (with its account status), plus
+ * "Add playlist". Edit/delete with a long-press or the Edit button; Backup and Restore below.
+ */
 class PlaylistsActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_MANAGE = "manage"
         private const val ADD_ID = "__add__"
-        private const val BACKUP_ID = "__backup__"
-        private const val RESTORE_ID = "__restore__"
+        private val AVATAR_COLORS = intArrayOf(
+            0xFF3D8BFD.toInt(), 0xFF8A5CF6.toInt(), 0xFF14B8A6.toInt(),
+            0xFFF97316.toInt(), 0xFFEC4899.toInt(), 0xFF22C55E.toInt(),
+        )
 
         /** Opened from Home to switch playlists: never auto-opens the only playlist. */
         fun manageIntent(context: Context): Intent =
@@ -41,6 +50,11 @@ class PlaylistsActivity : AppCompatActivity() {
     private lateinit var message: TextView
     private lateinit var adapter: TextAdapter<Playlist>
     private var busy = false
+    /** Account status line under each tile, filled in as the servers answer (second = shown in red). */
+    private val statuses = HashMap<String, Pair<String, Boolean>>()
+    private var statusJob: Job? = null
+    /** The playlist the Edit button acts on: the last one that had focus. */
+    private var lastFocused: Playlist? = null
 
     // Backup files go through the system file picker when the TV has one.
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -68,39 +82,21 @@ class PlaylistsActivity : AppCompatActivity() {
         message = findViewById(R.id.message)
 
         adapter = TextAdapter(
-            R.layout.item_episode,
-            bind = { vh, p ->
-                when (p.id) {
-                    ADD_ID -> {
-                        vh.title.text = "＋  Add playlist"
-                        vh.subtitle?.text = "Xtream Codes server, username and password"
-                    }
-                    BACKUP_ID -> {
-                        vh.title.text = "⤓  Back up playlists and settings"
-                        vh.subtitle?.text = "Save playlists, favorites and progress to a file"
-                    }
-                    RESTORE_ID -> {
-                        vh.title.text = "⤒  Restore from a backup"
-                        vh.subtitle?.text = "Load a backup file made with this app"
-                    }
-                    else -> {
-                    vh.title.text = p.name
-                        vh.subtitle?.text = "${p.username}  @  ${p.base.substringAfter("://")}"
-                    }
-                }
-            },
-            onClick = { _, p ->
-                when (p.id) {
-                    ADD_ID -> addPlaylist()
-                    BACKUP_ID -> backUp()
-                    RESTORE_ID -> restore()
-                    else -> open(p)
-                }
-            },
-            onLongClick = { _, p -> if (p.id !in setOf(ADD_ID, BACKUP_ID, RESTORE_ID)) showOptions(p) },
+            R.layout.item_playlist_tile,
+            bind = { vh, p -> bindTile(vh, p) },
+            onClick = { _, p -> if (p.id == ADD_ID) addPlaylist() else open(p) },
+            onLongClick = { _, p -> if (p.id != ADD_ID) showOptions(p) },
         )
-        listView.layoutManager = LinearLayoutManager(this)
+        listView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         listView.adapter = adapter
+        listView.itemAnimator = null
+
+        findViewById<View>(R.id.backup).setOnClickListener { backUp() }
+        findViewById<View>(R.id.restore).setOnClickListener { restore() }
+        findViewById<View>(R.id.edit).setOnClickListener {
+            val playlists = prefs.playlists()
+            (lastFocused ?: playlists.firstOrNull { it.id == prefs.activeId } ?: playlists.firstOrNull())?.let { showOptions(it) }
+        }
 
         autoOpenChecked = savedInstanceState != null || intent.getBooleanExtra(EXTRA_MANAGE, false)
     }
@@ -129,15 +125,77 @@ class PlaylistsActivity : AppCompatActivity() {
     }
 
     private fun showList(playlists: List<Playlist>) {
-        val extras = listOfNotNull(
-            Playlist(ADD_ID, "", "", "", ""),
-            if (playlists.isNotEmpty()) Playlist(BACKUP_ID, "", "", "", "") else null,
-            Playlist(RESTORE_ID, "", "", "", ""),
-        )
-        adapter.submit(playlists + extras)
+        adapter.submit(playlists + Playlist(ADD_ID, "", "", "", ""))
+        val hasPlaylists = playlists.isNotEmpty()
+        findViewById<View>(R.id.backup).visibility = if (hasPlaylists) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.edit).visibility = if (hasPlaylists) View.VISIBLE else View.GONE
+        if (lastFocused?.let { f -> playlists.none { it.id == f.id } } == true) lastFocused = null
         // Focus the playlist used last time.
         val focusIndex = playlists.indexOfFirst { it.id == prefs.activeId }.coerceAtLeast(0)
         listView.post { listView.findViewHolderForAdapterPosition(focusIndex)?.itemView?.requestFocus() }
+        loadStatuses(playlists)
+    }
+
+    private fun bindTile(vh: TextAdapter.VH, p: Playlist) {
+        val tile = vh.itemView.findViewById<View>(R.id.tile)
+        val initial = vh.itemView.findViewById<TextView>(R.id.initial)
+        if (p.id == ADD_ID) {
+            tile.setBackgroundResource(R.drawable.bg_glass_tile_add)
+            initial.text = "+"
+            initial.backgroundTintList = ColorStateList.valueOf(0x1FFFFFFF)
+            vh.title.text = "Add playlist"
+            vh.subtitle?.text = ""
+        } else {
+            tile.setBackgroundResource(R.drawable.bg_glass_tile)
+            initial.text = p.name.trim().firstOrNull()?.uppercase() ?: "?"
+            initial.backgroundTintList = ColorStateList.valueOf(AVATAR_COLORS[Math.floorMod(p.id.hashCode(), AVATAR_COLORS.size)])
+            vh.title.text = p.name
+            val status = statuses[p.id]
+            vh.subtitle?.text = status?.first ?: ""
+            vh.subtitle?.setTextColor(getColor(if (status?.second == true) R.color.error else R.color.text_secondary))
+        }
+        // The focused tile grows a little.
+        vh.itemView.setOnFocusChangeListener { v, hasFocus ->
+            val scale = if (hasFocus) 1.08f else 1f
+            v.animate().scaleX(scale).scaleY(scale).setDuration(150).start()
+            if (hasFocus && p.id != ADD_ID) lastFocused = p
+        }
+    }
+
+    /** Ask each server for its account status, in parallel; a slow server just shows "Can't reach server". */
+    private fun loadStatuses(playlists: List<Playlist>) {
+        statusJob?.cancel()
+        statusJob = lifecycleScope.launch {
+            playlists.map { p ->
+                async {
+                    val info = withTimeoutOrNull(8_000) {
+                        try {
+                            XtreamApi(p.toAccount(), cacheDir).userInfo()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    statuses[p.id] = statusLine(info)
+                    val index = adapter.items.indexOfFirst { it.id == p.id }
+                    if (index >= 0) adapter.notifyItemChanged(index)
+                }
+            }.forEach { it.await() }
+        }
+    }
+
+    /** "Active · Jun 2027", "9 days left", or what is wrong with the account. */
+    private fun statusLine(info: UserInfo?): Pair<String, Boolean> {
+        if (info == null) return "Can't reach server" to true
+        accountProblem(info)?.let { return it to true }
+        val exp = info.expDate ?: return "Active" to false
+        val daysLeft = ((exp * 1000 - System.currentTimeMillis()) / 86_400_000L).toInt()
+        return if (daysLeft <= 14) {
+            (if (daysLeft <= 1) "Expires today" else "$daysLeft days left") to true
+        } else {
+            "Active · " + java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(exp * 1000)) to false
+        }
     }
 
     private fun backUp() {

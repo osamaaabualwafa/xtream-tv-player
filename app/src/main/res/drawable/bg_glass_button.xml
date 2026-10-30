@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Main button on the glass card (Log in). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="@color/accent" />
+            <stroke android:width="3dp" android:color="@android:color/white" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#CC3D8BFD" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</selector>

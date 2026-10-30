@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Add playlist" tile: dashed glass outline. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="#4D3D8BFD" />
+            <stroke android:width="3dp" android:color="@android:color/white" />
+            <corners android:radius="28dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#08FFFFFF" />
+            <stroke android:width="2dp" android:color="#4DFFFFFF" android:dashWidth="10dp" android:dashGap="7dp" />
+            <corners android:radius="28dp" />
+        </shape>
+    </item>
+</selector>

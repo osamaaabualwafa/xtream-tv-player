@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Frosted glass card (add / edit playlist). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#12FFFFFF" />
+    <stroke android:width="1dp" android:color="#29FFFFFF" />
+    <corners android:radius="24dp" />
+</shape>
