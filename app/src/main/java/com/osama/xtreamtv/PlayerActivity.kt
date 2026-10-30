@@ -96,7 +96,6 @@ class PlayerActivity : AppCompatActivity() {
         )
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
-        private const val NEXT_PROMPT_MS = 30_000L
         private val PARSE_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
@@ -372,11 +371,13 @@ class PlayerActivity : AppCompatActivity() {
     private fun startVod() {
         val p = player ?: return
         currentUrl = vodUrl
+        // Settings > Player > "Start from the beginning" (an explicit Resume button still resumes).
+        if (askResume && !resumeAsked && startPosition > 5_000 && prefs.resumeMode == 2) startPosition = 0
         p.setMediaItem(mediaItem(vodUrl, vodMimeType))
         if (startPosition > 0) p.seekTo(startPosition)
         p.prepare()
         p.setPlaybackSpeed(speed)
-        if (askResume && !resumeAsked && startPosition > 5_000) {
+        if (askResume && !resumeAsked && startPosition > 5_000 && prefs.resumeMode == 0) {
             resumeAsked = true
             p.playWhenReady = false
             askResumeOrRestart()
@@ -450,7 +451,7 @@ class PlayerActivity : AppCompatActivity() {
                     prefs.setWatched(resumeKey, true)
                 }
                 // Series: carry on with the next episode, like a TV binge (unless the sleep timer says stop).
-                if (hasNextEpisode && !sleepAtEnd) playEpisodeAt(episodeIndex + 1) else finish()
+                if (prefs.autoNext && hasNextEpisode && !sleepAtEnd) playEpisodeAt(episodeIndex + 1) else finish()
             }
         }
 
@@ -554,10 +555,11 @@ class PlayerActivity : AppCompatActivity() {
 
     // ---- Live TV ----
 
-    private fun hlsAllowed(): Boolean {
-        val formats = prefs.formats.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-        return formats.isEmpty() || formats.contains("m3u8")
-    }
+    private fun hlsAllowed(): Boolean = prefs.useHls()
+
+    /** Jump sizes from Settings > Player. */
+    private fun forwardMs() = prefs.seekForwardSeconds * 1000L
+    private fun backMs() = prefs.seekBackSeconds * 1000L
 
     private fun playChannel(index: Int) {
         val list = Session.zapList
@@ -662,7 +664,7 @@ class PlayerActivity : AppCompatActivity() {
             if (::playerView.isInitialized && event.keyCode == KeyEvent.KEYCODE_BACK &&
                 event.isFromSource(InputDevice.SOURCE_MOUSE) && episodesPanel.visibility != View.VISIBLE
             ) {
-                if (event.action == KeyEvent.ACTION_DOWN) quickSeek(-5_000L)
+                if (event.action == KeyEvent.ACTION_DOWN) quickSeek(-backMs())
                 return true
             }
             if (!::playerView.isInitialized || event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
@@ -697,9 +699,9 @@ class PlayerActivity : AppCompatActivity() {
             // Remote ⏩/⏪ buttons (remotes send different codes for them) always seek.
             val mediaSeek = when (event.keyCode) {
                 KeyEvent.KEYCODE_FORWARD, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-                KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD, KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> 10_000L
+                KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD, KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> forwardMs()
                 KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
-                KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> -5_000L
+                KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> -backMs()
                 else -> 0L
             }
             if (mediaSeek != 0L) {
@@ -752,8 +754,8 @@ class PlayerActivity : AppCompatActivity() {
             }
             // Controls hidden: Right = +10 s, Left = −5 s without opening them.
             val seekDelta = when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_RIGHT -> 10_000L
-                KeyEvent.KEYCODE_DPAD_LEFT -> -5_000L
+                KeyEvent.KEYCODE_DPAD_RIGHT -> forwardMs()
+                KeyEvent.KEYCODE_DPAD_LEFT -> -backMs()
                 else -> 0L
             }
             if (seekDelta != 0L) {
@@ -1170,8 +1172,8 @@ class PlayerActivity : AppCompatActivity() {
             episodesPanel.visibility != View.VISIBLE
         ) {
             val delta = when (ev.actionButton) {
-                MotionEvent.BUTTON_BACK -> -5_000L
-                MotionEvent.BUTTON_FORWARD -> 10_000L
+                MotionEvent.BUTTON_BACK -> -backMs()
+                MotionEvent.BUTTON_FORWARD -> forwardMs()
                 else -> 0L
             }
             if (delta != 0L) {
@@ -1201,7 +1203,7 @@ class PlayerActivity : AppCompatActivity() {
         val pos = p.currentPosition
         val duration = p.duration
         val remaining = if (duration != C.TIME_UNSET && duration > 0) duration - pos else Long.MAX_VALUE
-        if (hasNextEpisode && !nextDismissed && !sleepAtEnd && remaining <= NEXT_PROMPT_MS && p.playbackState == Player.STATE_READY) {
+        if (prefs.autoNext && hasNextEpisode && !nextDismissed && !sleepAtEnd && remaining <= prefs.nextCountdownSeconds * 1000L && p.playbackState == Player.STATE_READY) {
             val next = episodes[episodeIndex + 1]
             showCard(
                 CardAction.NEXT_EPISODE,

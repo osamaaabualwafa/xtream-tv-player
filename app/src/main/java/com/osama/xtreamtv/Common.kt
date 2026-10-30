@@ -152,6 +152,52 @@ class Prefs(context: Context) {
         get() = global.getBoolean("sub_bg", false)
         set(value) = global.edit().putBoolean("sub_bg", value).apply()
 
+    // Settings > Player.
+    /** Seconds for Right / ⏩ (forward) and Left / ⏪ (back). */
+    var seekForwardSeconds: Int
+        get() = global.getInt("seek_fwd", 10)
+        set(value) = global.edit().putInt("seek_fwd", value).apply()
+
+    var seekBackSeconds: Int
+        get() = global.getInt("seek_back", 5)
+        set(value) = global.edit().putInt("seek_back", value).apply()
+
+    /** With a saved position: 0 ask, 1 resume, 2 start over. */
+    var resumeMode: Int
+        get() = global.getInt("resume_mode", 0)
+        set(value) = global.edit().putInt("resume_mode", value).apply()
+
+    /** Series: carry on with the next episode (prompt [nextCountdownSeconds] before the end). */
+    var autoNext: Boolean
+        get() = global.getBoolean("auto_next", true)
+        set(value) = global.edit().putBoolean("auto_next", value).apply()
+
+    var nextCountdownSeconds: Int
+        get() = global.getInt("next_countdown", 30)
+        set(value) = global.edit().putInt("next_countdown", value).apply()
+
+    /** Player controls hide after this many seconds without a key. */
+    var controlsHideSeconds: Int
+        get() = global.getInt("controls_hide", 5)
+        set(value) = global.edit().putInt("controls_hide", value).apply()
+
+    /** Live TV list: muted preview of the highlighted channel. */
+    var channelPreview: Boolean
+        get() = global.getBoolean("channel_preview", true)
+        set(value) = global.edit().putBoolean("channel_preview", value).apply()
+
+    /** Live stream type: 0 automatic (what the server offers), 1 HLS (m3u8), 2 MPEG-TS. */
+    var streamType: Int
+        get() = global.getInt("stream_type", 0)
+        set(value) = global.edit().putInt("stream_type", value).apply()
+
+    /** Live channels as HLS (m3u8) rather than TS, from Settings or the server's formats. */
+    fun useHls(): Boolean = when (streamType) {
+        1 -> true
+        2 -> false
+        else -> formats.split(',').map { it.trim() }.filter { it.isNotEmpty() }.let { it.isEmpty() || it.contains("m3u8") }
+    }
+
     /** Picture size index: 0 fit, 1 zoom, 2 stretch. */
     var pictureSize: Int
         get() = global.getInt("picture_size", 0)
@@ -185,20 +231,39 @@ class Prefs(context: Context) {
         return added
     }
 
+    /** Categories moved by the user (ids, first = top); the others follow in the server's order. */
+    fun categoryOrder(type: ContentType): List<String> =
+        sp.getString("cat_order_${type.name}", null)?.split('\n')?.filter { it.isNotEmpty() } ?: emptyList()
+
+    fun setCategoryOrder(type: ContentType, ids: List<String>) =
+        sp.edit().putString("cat_order_${type.name}", ids.joinToString("\n")).apply()
+
+    fun hiddenCategories(type: ContentType): Set<String> =
+        sp.getStringSet("cat_hidden_${type.name}", null)?.toSet() ?: emptySet()
+
+    fun setHiddenCategories(type: ContentType, ids: Set<String>) =
+        sp.edit().putStringSet("cat_hidden_${type.name}", ids).apply()
+
     fun continueWatching(type: ContentType): List<WatchEntry> =
         readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.type == type }.sortedByDescending { it.updated }
 
     fun saveProgress(entry: WatchEntry) {
         // One entry per series: the episode watched last replaces the others.
-        val all = readList("continue").mapNotNull { watchEntryFromJson(it) }
-            .filter { it.key != entry.key && (entry.seriesId == null || it.seriesId != entry.seriesId) }
-        writeList("continue", (listOf(entry) + all).take(40).map { it.toJson() })
+        val before = readList("continue").mapNotNull { watchEntryFromJson(it) }
+        val all = before.filter { it.key != entry.key && (entry.seriesId == null || it.seriesId != entry.seriesId) }
+        val kept = (listOf(entry) + all).take(40)
+        writeList("continue", kept.map { it.toJson() })
+        // Same list on the TV home screen ("Play next").
+        val playlist = activeId ?: LEGACY_ID
+        before.filter { old -> kept.none { it.key == old.key } }.forEach { WatchNext.remove(app, playlist, it.key) }
+        WatchNext.update(app, playlist, entry)
     }
 
     fun removeProgress(key: String) {
         val all = readList("continue").mapNotNull { watchEntryFromJson(it) }.filter { it.key != key }
         writeList("continue", all.map { it.toJson() })
         savePosition(key, 0)
+        WatchNext.remove(app, activeId ?: LEGACY_ID, key)
     }
 
     private fun readList(key: String): List<JSONObject> {

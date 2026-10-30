@@ -2,7 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@drawable/bg_glow"
     android:orientation="vertical"
     android:paddingLeft="48dp"
     android:paddingTop="28dp"
@@ -23,14 +23,74 @@
             android:textSize="28sp"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/search_query"
-            style="@style/TvInput"
+        <!-- Search box with the mic inside its right end (hidden when the TV has no speech recognition). -->
+        <FrameLayout
             android:layout_width="0dp"
-            android:layout_weight="1"
-            android:hint="Channel, movie or series name"
-            android:imeOptions="actionSearch|flagNoExtractUi"
-            android:inputType="text" />
+            android:layout_height="wrap_content"
+            android:layout_weight="1">
+
+            <EditText
+                android:id="@+id/search_query"
+                style="@style/GlassInput"
+                android:hint="Channel, movie or series name"
+                android:imeOptions="actionSearch|flagNoExtractUi"
+                android:inputType="text"
+                android:nextFocusRight="@id/voice_mic"
+                android:paddingRight="110dp" />
+
+            <!-- Sound bars while listening. -->
+            <LinearLayout
+                android:id="@+id/voice_bars"
+                android:layout_width="wrap_content"
+                android:layout_height="20dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginRight="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="6dp"
+                    android:layout_marginLeft="3dp"
+                    android:background="@drawable/bg_voice_bar" />
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="6dp"
+                    android:layout_marginLeft="3dp"
+                    android:background="@drawable/bg_voice_bar" />
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="6dp"
+                    android:layout_marginLeft="3dp"
+                    android:background="@drawable/bg_voice_bar" />
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="6dp"
+                    android:layout_marginLeft="3dp"
+                    android:background="@drawable/bg_voice_bar" />
+                <View
+                    android:layout_width="4dp"
+                    android:layout_height="6dp"
+                    android:layout_marginLeft="3dp"
+                    android:background="@drawable/bg_voice_bar" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/voice_mic"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginRight="7dp"
+                android:background="@drawable/bg_mic"
+                android:clickable="true"
+                android:contentDescription="Voice search"
+                android:focusable="true"
+                android:nextFocusLeft="@id/search_query"
+                android:padding="9dp"
+                android:src="@drawable/ic_mic"
+                android:visibility="gone" />
+        </FrameLayout>
     </LinearLayout>
 
     <TextView
@@ -42,17 +102,95 @@
         android:textColor="@color/text_secondary"
         android:textSize="15sp" />
 
+    <!-- Sections: All / Live TV / Movies / Series, each with its count. -->
+    <LinearLayout
+        android:id="@+id/search_chips"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/chip_all"
+            style="@style/SearchChip"
+            android:text="All" />
+        <TextView
+            android:id="@+id/chip_live"
+            style="@style/SearchChip"
+            android:text="Live TV" />
+        <TextView
+            android:id="@+id/chip_movies"
+            style="@style/SearchChip"
+            android:text="Movies" />
+        <TextView
+            android:id="@+id/chip_series"
+            style="@style/SearchChip"
+            android:text="Series" />
+    </LinearLayout>
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
+        <!-- "All": one row per section. -->
+        <ScrollView
+            android:id="@+id/search_sections"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:orientation="vertical"
+                android:paddingBottom="24dp">
+
+            <TextView
+                android:id="@+id/sec_live_title"
+                style="@style/HomeRowTitle"
+                android:layout_marginTop="10dp"
+                android:text="Live TV" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/sec_live"
+                style="@style/HomeRow" />
+
+            <TextView
+                android:id="@+id/sec_movies_title"
+                style="@style/HomeRowTitle"
+                android:layout_marginTop="10dp"
+                android:text="Movies" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/sec_movies"
+                style="@style/HomeRow" />
+
+            <TextView
+                android:id="@+id/sec_series_title"
+                style="@style/HomeRowTitle"
+                android:layout_marginTop="10dp"
+                android:text="Series" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/sec_series"
+                style="@style/HomeRow" />
+
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- One section: the full list (channel rows or a poster grid). -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/search_results"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
             android:paddingTop="4dp"
-            android:paddingBottom="24dp" />
+            android:paddingBottom="24dp"
+            android:visibility="gone" />
 
         <ProgressBar
             android:id="@+id/search_progress"

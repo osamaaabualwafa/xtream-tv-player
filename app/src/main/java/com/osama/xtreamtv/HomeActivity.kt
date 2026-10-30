@@ -114,6 +114,16 @@ class HomeActivity : AppCompatActivity() {
         loadCounts()
         loadRecentlyAdded()
         Updates.checkQuietly(this, lifecycleScope)
+        // Make sure the TV home screen's "Play next" row has everything in Continue watching.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val playlist = prefs.activeId ?: "legacy"
+            (prefs.continueWatching(ContentType.MOVIE) + prefs.continueWatching(ContentType.SERIES)).forEach { WatchNext.update(applicationContext, playlist, it) }
+        }
+        // Opened from the TV home screen's "Play next" row: continue that item right away.
+        intent.getStringExtra(WatchNext.EXTRA_RESUME_KEY)?.let { key ->
+            intent.removeExtra(WatchNext.EXTRA_RESUME_KEY)
+            resume(key)
+        }
     }
 
     override fun onResume() {

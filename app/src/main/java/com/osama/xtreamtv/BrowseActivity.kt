@@ -27,6 +27,7 @@ class BrowseActivity : AppCompatActivity() {
         private const val CAT_ALL = "__all__"
         private const val CAT_FAV = "__fav__"
         private const val CAT_CONTINUE = "__continue__"
+        private const val CAT_HIDDEN = "__hidden__"
     }
 
     private lateinit var type: ContentType
@@ -47,7 +48,12 @@ class BrowseActivity : AppCompatActivity() {
     private var style = Appearance.BROWSE_SIDEBAR
     /** B2 / B4: the category list that slides over the posters, and the rail that opens it. */
     private var panel: View? = null
+    /** Live TV: small muted preview of the highlighted channel. */
+    private var channelPreview: ChannelPreview? = null
     private var rail: View? = null
+
+    /** The server's categories (before the user's order and hidden list are applied). */
+    private var serverCategories: List<Category> = emptyList()
 
     private var allItems: List<StreamItem> = emptyList()
     private var currentCategory: Category? = null
@@ -98,9 +104,14 @@ class BrowseActivity : AppCompatActivity() {
                 vh.subtitle?.text = counts[cat.id]?.let { java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(it) } ?: ""
             },
             onClick = { _, cat ->
-                selectCategory(cat)
-                closePanel()
+                if (cat.id == CAT_HIDDEN) {
+                    showHiddenCategories()
+                } else {
+                    selectCategory(cat)
+                    closePanel()
+                }
             },
+            onLongClick = { _, cat -> categoryOptions(cat) },
         )
         categoriesView.layoutManager = LinearLayoutManager(this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, false)
         categoriesView.adapter = categoryAdapter
@@ -112,13 +123,24 @@ class BrowseActivity : AppCompatActivity() {
             onClick = { index, item -> open(index, item) },
             onLongClick = { _, item -> onLongPress(item) },
             layout = if (preview) R.layout.item_poster_small else null,
-            onFocusItem = if (live) null else { item -> showInfo(item) },
+            onFocusItem = if (live) { item -> channelPreview?.focus(item) } else { item -> showInfo(item) },
         )
         itemsView.layoutManager = when {
             live -> LinearLayoutManager(this)
             preview -> LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
             style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> GridLayoutManager(this, 6)
             else -> GridLayoutManager(this, 8)
+        }
+
+        if (live && prefs.channelPreview) {
+            // Preview in the top-right corner of the list area; the rows leave room for it.
+            val p = ChannelPreview(this, api, prefs)
+            (itemsView.parent as? android.widget.FrameLayout)?.let { frame ->
+                frame.addView(p.view)
+                val gap = ((ChannelPreview.WIDTH_DP + 16) * resources.displayMetrics.density).toInt()
+                itemsView.setPadding(itemsView.paddingLeft, itemsView.paddingTop, gap, itemsView.paddingBottom)
+                channelPreview = p
+            }
         }
 
         // B2 / B4: the rail opens the category list; Back from the posters opens it too.
@@ -156,6 +178,12 @@ class BrowseActivity : AppCompatActivity() {
         }
 
         loadCategories()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Free the stream before the player opens (providers often allow one connection).
+        channelPreview?.release()
     }
 
     override fun onResume() {
@@ -212,6 +240,14 @@ class BrowseActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Menu key on a category = the same options as holding OK.
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_MENU && categoriesView.hasFocus()) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val pos = currentFocus?.let { categoriesView.findContainingViewHolder(it)?.bindingAdapterPosition } ?: -1
+                categoryAdapter.items.getOrNull(pos)?.let { categoryOptions(it) }
+            }
+            return true
+        }
         // Right from the sliding category list closes it.
         if (panel?.visibility == View.VISIBLE && categoriesView.hasFocus() &&
             event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
@@ -226,12 +262,9 @@ class BrowseActivity : AppCompatActivity() {
         lifecycleScope.launch {
             showLoading(true)
             try {
-                val cats = Session.categoryCache[type] ?: api.categories(type).also { Session.categoryCache[type] = it }
-                val list = ArrayList<Category>()
-                if (type != ContentType.LIVE) list.add(Category(CAT_CONTINUE, "▶ Continue watching"))
-                list.add(Category(CAT_FAV, "★ Favorites"))
-                list.add(Category(CAT_ALL, "All"))
-                list.addAll(cats)
+                serverCategories = Session.categoryCache[type] ?: api.categories(type).also { Session.categoryCache[type] = it }
+                val list = buildCategoryList()
+                val cats = list.filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN) }
                 categoryAdapter.submit(list)
                 loadCounts()
                 // Open "Continue watching" when there is something to resume, otherwise the
@@ -239,7 +272,7 @@ class BrowseActivity : AppCompatActivity() {
                 val firstIndex = when {
                     type != ContentType.LIVE && prefs.continueWatching(type).isNotEmpty() -> 0
                     cats.isEmpty() -> list.indexOfFirst { it.id == CAT_ALL }
-                    else -> list.size - cats.size
+                    else -> list.indexOf(cats.first())
                 }
                 selectCategory(list[firstIndex])
                 // No scrollToPosition: it would pin this row to the top and hide
@@ -254,6 +287,78 @@ class BrowseActivity : AppCompatActivity() {
                 showMessage("Couldn't load categories.\n${e.message ?: ""}")
             }
         }
+    }
+
+    /** Continue watching, Favorites, All, then the categories in the user's order, minus hidden ones. */
+    private fun buildCategoryList(): List<Category> {
+        val hidden = prefs.hiddenCategories(type)
+        val order = prefs.categoryOrder(type)
+        val visible = serverCategories.filter { it.id !in hidden }
+        val rank = order.withIndex().associate { it.value to it.index }
+        // Moved categories first (in their saved order), then the rest as the server lists them.
+        val sorted = visible.sortedWith(compareBy { rank[it.id] ?: (order.size + visible.indexOf(it)) })
+        val list = ArrayList<Category>()
+        if (type != ContentType.LIVE) list.add(Category(CAT_CONTINUE, "▶ Continue watching"))
+        list.add(Category(CAT_FAV, "★ Favorites"))
+        list.add(Category(CAT_ALL, "All"))
+        list.addAll(sorted)
+        if (hidden.any { id -> serverCategories.any { it.id == id } }) list.add(Category(CAT_HIDDEN, "⊘  Hidden categories"))
+        return list
+    }
+
+    /** Rebuild the list after a move / hide, keeping the selection and focusing [focusId]. */
+    private fun refreshCategoryList(focusId: String?) {
+        val list = buildCategoryList()
+        categoryAdapter.submit(list)
+        currentCategory?.let { c -> categoryAdapter.activeIndex = list.indexOfFirst { it.id == c.id } }
+        refreshLocalCounts()
+        val index = list.indexOfFirst { it.id == focusId }.takeIf { it >= 0 } ?: return
+        categoriesView.scrollToPosition(index)
+        categoriesView.post { categoriesView.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus() }
+    }
+
+    /** Hold OK (or the menu key) on a category: move it or hide it. */
+    private fun categoryOptions(cat: Category) {
+        if (cat.id in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN)) return
+        val ids = buildCategoryList().filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN) }.map { it.id }.toMutableList()
+        val at = ids.indexOf(cat.id)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(cat.name)
+            .setItems(arrayOf("Move to top", "Move up", "Move down", "Hide this category")) { _, which ->
+                when (which) {
+                    0 -> { ids.removeAt(at); ids.add(0, cat.id) }
+                    1 -> if (at > 0) { ids.removeAt(at); ids.add(at - 1, cat.id) }
+                    2 -> if (at < ids.size - 1) { ids.removeAt(at); ids.add(at + 1, cat.id) }
+                    3 -> {
+                        prefs.setHiddenCategories(type, prefs.hiddenCategories(type) + cat.id)
+                        Toast.makeText(this, "Hidden. Find it under \"Hidden categories\" at the bottom.", Toast.LENGTH_LONG).show()
+                        refreshCategoryList(null)
+                        return@setItems
+                    }
+                }
+                prefs.setCategoryOrder(type, ids)
+                refreshCategoryList(cat.id)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** "Hidden categories": tick the ones to show again. */
+    private fun showHiddenCategories() {
+        val hiddenIds = prefs.hiddenCategories(type)
+        val hidden = serverCategories.filter { it.id in hiddenIds }
+        if (hidden.isEmpty()) return
+        val checked = BooleanArray(hidden.size)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Show again")
+            .setMultiChoiceItems(hidden.map { it.name }.toTypedArray(), checked) { _, which, isChecked -> checked[which] = isChecked }
+            .setPositiveButton("Show") { _, _ ->
+                val back = hidden.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
+                prefs.setHiddenCategories(type, hiddenIds - back)
+                refreshCategoryList(back.firstOrNull())
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /** Lists stored on the device (no network). */
@@ -341,6 +446,7 @@ class BrowseActivity : AppCompatActivity() {
     private fun refreshLocalCounts() {
         val map = HashMap(counts)
         map[CAT_FAV] = prefs.favorites(type).size
+        map[CAT_HIDDEN] = prefs.hiddenCategories(type).count { id -> serverCategories.any { it.id == id } }
         if (type != ContentType.LIVE) map[CAT_CONTINUE] = prefs.continueWatching(type).size
         counts = map
         categoryAdapter.notifyItemRangeChanged(0, categoryAdapter.itemCount, "counts")

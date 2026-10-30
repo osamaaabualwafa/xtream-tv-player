@@ -15,7 +15,7 @@ import androidx.lifecycle.lifecycleScope
  */
 class SettingsActivity : AppCompatActivity() {
 
-    private enum class Section { HOME, BROWSE, COLOR, AVATARS, ABOUT }
+    private enum class Section { HOME, BROWSE, PLAYER, COLOR, AVATARS, ABOUT }
 
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
@@ -33,6 +33,7 @@ class SettingsActivity : AppCompatActivity() {
         val menu = listOf(
             R.id.menu_home to Section.HOME,
             R.id.menu_browse to Section.BROWSE,
+            R.id.menu_player to Section.PLAYER,
             R.id.menu_color to Section.COLOR,
             R.id.menu_avatars to Section.AVATARS,
             R.id.menu_about to Section.ABOUT,
@@ -77,6 +78,11 @@ class SettingsActivity : AppCompatActivity() {
                 title.text = "Movies and series"
                 hint.text = "How the screen after opening Movies or Series looks"
                 choiceCards("B", Appearance.BROWSE_NAMES, prefs.browseStyle) { prefs.browseStyle = it }
+            }
+            Section.PLAYER -> {
+                title.text = "Player"
+                hint.text = "How movies, episodes and live channels play"
+                playerOptions()
             }
             Section.COLOR -> {
                 title.text = "Theme colour"
@@ -152,6 +158,61 @@ class SettingsActivity : AppCompatActivity() {
             row!!.addView(card)
             if (index == names.lastIndex) mark(current)
         }
+    }
+
+    /** Settings > Player: a heading per group, then one row per option (OK picks a value). */
+    private fun playerOptions() {
+        val languages = listOf(null to "Automatic", "ar" to "Arabic", "en" to "English", "fr" to "French", "tr" to "Turkish")
+        val subtitleLanguages = listOf(PlayerActivity.SUBTITLES_OFF to "Off", "ar" to "Arabic", "en" to "English", "fr" to "French", "tr" to "Turkish")
+        heading("Playback")
+        option("Forward jump", listOf(5, 10, 15, 30, 60).map { it to "$it seconds" }, { prefs.seekForwardSeconds }, { prefs.seekForwardSeconds = it })
+        option("Back jump", listOf(5, 10, 15, 30).map { it to "$it seconds" }, { prefs.seekBackSeconds }, { prefs.seekBackSeconds = it })
+        option("Saved position", listOf(0 to "Ask each time", 1 to "Always resume", 2 to "Start from the beginning"), { prefs.resumeMode }, { prefs.resumeMode = it })
+        option("Next episode", listOf(true to "Play automatically", false to "Stop at the end"), { prefs.autoNext }, { prefs.autoNext = it })
+        option("Next episode countdown", listOf(10, 20, 30, 60).map { it to "$it seconds before the end" }, { prefs.nextCountdownSeconds }, { prefs.nextCountdownSeconds = it })
+        option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
+        heading("Picture and sound")
+        option("Picture size", listOf(0 to "Fit", 1 to "Zoom (fill screen)", 2 to "Stretch"), { prefs.pictureSize }, { prefs.pictureSize = it })
+        option("Audio language", languages, { prefs.audioLanguage }, { prefs.audioLanguage = it })
+        option("Subtitles", subtitleLanguages, { prefs.subtitleLanguage ?: PlayerActivity.SUBTITLES_OFF }, { prefs.subtitleLanguage = it })
+        option("Subtitle size", listOf(0 to "Small", 1 to "Medium", 2 to "Large", 3 to "Extra large"), { prefs.subtitleSize }, { prefs.subtitleSize = it })
+        option("Subtitle background", listOf(false to "Off", true to "Dark box"), { prefs.subtitleBackground }, { prefs.subtitleBackground = it })
+        heading("Live TV")
+        option("Channel preview in the list", listOf(true to "On", false to "Off"), { prefs.channelPreview }, { prefs.channelPreview = it })
+        option("Stream type", listOf(0 to "Automatic", 1 to "HLS (m3u8)", 2 to "MPEG-TS"), { prefs.streamType }, { prefs.streamType = it })
+    }
+
+    private fun heading(text: String) {
+        body.addView(TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.text_secondary))
+            textSize = 15f
+            setPadding(dp(6), if (body.childCount == 0) 0 else dp(16), 0, dp(6))
+        })
+    }
+
+    /** A row showing the current choice; OK opens the list of choices. */
+    private fun <T> option(name: String, choices: List<Pair<T, String>>, get: () -> T, set: (T) -> Unit) {
+        val row = LayoutInflater.from(this).inflate(R.layout.item_settings_option, body, false)
+        val value = row.findViewById<TextView>(R.id.subtitle)
+        row.findViewById<TextView>(R.id.title).text = name
+        fun show() {
+            value.text = choices.firstOrNull { it.first == get() }?.second ?: choices.first().second
+        }
+        show()
+        row.setOnClickListener {
+            val current = choices.indexOfFirst { it.first == get() }.coerceAtLeast(0)
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(name)
+                .setSingleChoiceItems(choices.map { it.second }.toTypedArray(), current) { d, which ->
+                    set(choices[which].first)
+                    show()
+                    d.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        body.addView(row)
     }
 
     /** The theme colours; picking one rebuilds this screen in the new colour. */

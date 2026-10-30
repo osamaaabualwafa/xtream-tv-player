@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mic in the search box: listening = red, focused = accent + white ring, otherwise soft accent. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true">
+        <shape android:shape="oval">
+            <solid android:color="#FFE5484D" />
+            <stroke android:width="5dp" android:color="#40E5484D" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="?attr/appAccent80" />
+            <stroke android:width="2dp" android:color="@android:color/white" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="?attr/appAccent4D" />
+        </shape>
+    </item>
+</selector>

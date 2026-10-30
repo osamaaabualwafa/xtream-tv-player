@@ -32,7 +32,6 @@ class VodControls(private val root: View, private val host: Host) {
 
     companion object {
         private const val FADE_MS = 200L
-        private const val AUTO_HIDE_MS = 5_000L
         private const val TITLE_ONLY_MS = 3_000L
         private const val TIMELINE_STEP_MS = 10_000L
         private val CLOCK = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -62,6 +61,12 @@ class VodControls(private val root: View, private val host: Host) {
     private val back: View = root.findViewById(R.id.vc_back)
     private val forward: View = root.findViewById(R.id.vc_forward)
 
+    /** Settings > Player: jump sizes and how long the controls stay up. */
+    private val prefs = Prefs(root.context)
+    private val forwardMs get() = prefs.seekForwardSeconds * 1000L
+    private val backMs get() = prefs.seekBackSeconds * 1000L
+    private val autoHideMs get() = prefs.controlsHideSeconds * 1000L
+
     private enum class Mode { HIDDEN, TITLE, FULL }
     private var mode = Mode.HIDDEN
 
@@ -87,9 +92,13 @@ class VodControls(private val root: View, private val host: Host) {
 
     init {
         prev.setOnClickListener { host.previousEpisode(); poke() }
-        back.setOnClickListener { host.seekBy(-5_000L); poke(); refresh() }
+        (back as? TextView)?.text = "${prefs.seekBackSeconds}s"
+        (forward as? TextView)?.text = "${prefs.seekForwardSeconds}s"
+        back.contentDescription = "Back ${prefs.seekBackSeconds} seconds"
+        forward.contentDescription = "Forward ${prefs.seekForwardSeconds} seconds"
+        back.setOnClickListener { host.seekBy(-backMs); poke(); refresh() }
         play.setOnClickListener { host.togglePlay(); poke(); refresh() }
-        forward.setOnClickListener { host.seekBy(10_000L); poke(); refresh() }
+        forward.setOnClickListener { host.seekBy(forwardMs); poke(); refresh() }
         next.setOnClickListener { host.nextEpisode(); poke() }
         episodesButton.setOnClickListener { host.openEpisodes() }
         root.findViewById<View>(R.id.vc_tracks).setOnClickListener { host.openTracks() }
@@ -191,11 +200,11 @@ class VodControls(private val root: View, private val host: Host) {
         if (hadFocus) host.onControlsHidden()
     }
 
-    /** Any key while the controls are open: start the 5-second countdown again. */
+    /** Any key while the controls are open: start the hide countdown again. */
     fun poke() {
         if (mode != Mode.FULL) return
         root.removeCallbacks(hideRunnable)
-        root.postDelayed(hideRunnable, AUTO_HIDE_MS)
+        root.postDelayed(hideRunnable, autoHideMs)
     }
 
     private fun setMode(newMode: Mode) {

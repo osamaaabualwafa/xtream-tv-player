@@ -32,9 +32,10 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:ellipsize="end"
-        android:singleLine="true"
+        android:maxLines="2"
+        android:lineSpacingExtra="-2dp"
         android:textColor="@color/text"
-        android:textSize="18sp" />
+        android:textSize="17sp" />
 
     <TextView
         android:id="@+id/fav"

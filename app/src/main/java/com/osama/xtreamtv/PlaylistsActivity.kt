@@ -101,6 +101,17 @@ class PlaylistsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         val playlists = prefs.playlists()
+        // Opened from the TV home screen's "Play next" row: go straight to that playlist and resume.
+        val resumePlaylist = intent.getStringExtra(WatchNext.EXTRA_RESUME_PLAYLIST)
+        if (!autoOpenChecked && resumePlaylist != null) {
+            autoOpenChecked = true
+            val p = playlists.firstOrNull { it.id == resumePlaylist }
+            if (p != null) {
+                showList(playlists)
+                open(p, intent.getStringExtra(WatchNext.EXTRA_RESUME_KEY))
+                return
+            }
+        }
         if (!autoOpenChecked) {
             autoOpenChecked = true
             // Same behaviour as before playlists existed: no list to choose from, skip the chooser.
@@ -323,7 +334,8 @@ class PlaylistsActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun open(p: Playlist) {
+    /** [resumeKey]: play this Continue watching entry once Home is open (from "Play next"). */
+    private fun open(p: Playlist, resumeKey: String? = null) {
         if (busy) return
         busy = true
         message.visibility = View.GONE
@@ -340,7 +352,7 @@ class PlaylistsActivity : AppCompatActivity() {
                 prefs.activeId = p.id
                 prefs.formats = info.formats.joinToString(",")
                 Session.start(api, info)
-                startActivity(Intent(this@PlaylistsActivity, HomeActivity::class.java))
+                startActivity(Intent(this@PlaylistsActivity, HomeActivity::class.java).putExtra(WatchNext.EXTRA_RESUME_KEY, resumeKey))
                 finish()
             } catch (e: CancellationException) {
                 throw e
