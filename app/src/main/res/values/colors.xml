@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg">#FF101418</color>
+    <color name="surface">#FF1C232B</color>
+    <color name="surface_focus">#FF2B3A4D</color>
+    <color name="surface_active">#FF24303C</color>
+    <color name="accent">#FF3D8BFD</color>
+    <color name="text">#FFFFFFFF</color>
+    <color name="text_secondary">#FFA0A8B0</color>
+    <color name="gold">#FFFFC94D</color>
+    <color name="overlay">#E6101418</color>
+    <color name="error">#FFFF6B6B</color>
+</resources>
