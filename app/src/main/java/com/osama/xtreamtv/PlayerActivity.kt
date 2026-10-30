@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Button
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -97,6 +98,7 @@ class PlayerActivity : AppCompatActivity() {
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
         private const val VOD_RETRIES = 5
+        private const val STILL_WATCHING_AFTER = 3
         private val PARSE_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
@@ -123,6 +125,12 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var episodesPanel: View
     private lateinit var episodesSeries: TextView
     private lateinit var episodesList: RecyclerView
+    private lateinit var seasonsList: RecyclerView
+    private lateinit var seasonAdapter: TextAdapter<Int>
+    /** Season shown in the episodes panel. */
+    private var shownSeason = -1
+    private lateinit var menuPanel: View
+    private lateinit var menuItems: android.widget.LinearLayout
     private lateinit var episodeAdapter: TextAdapter<Episode>
     private lateinit var channelsPanel: View
     private lateinit var channelsTitle: TextView
@@ -181,6 +189,8 @@ class PlayerActivity : AppCompatActivity() {
     private var probed = false
     /** Movies / episodes: reconnect attempts after a network or server error (reset once playing). */
     private var vodRetries = 0
+    /** Episodes started on their own (no key pressed since): ask "Still watching?" at [STILL_WATCHING_AFTER]. */
+    private var autoEpisodes = 0
     private val retryVod = Runnable {
         player?.let {
             it.prepare()
@@ -249,6 +259,23 @@ class PlayerActivity : AppCompatActivity() {
         episodesPanel = findViewById(R.id.episodes_panel)
         episodesSeries = findViewById(R.id.episodes_series)
         episodesList = findViewById(R.id.episodes_list)
+        seasonsList = findViewById(R.id.episodes_seasons)
+        menuPanel = findViewById(R.id.player_menu)
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
+            if (now == null) return@addOnGlobalFocusChangeListener
+            fun inside(panel: View): Boolean {
+                var v: View? = now
+                while (v != null) {
+                    if (v === panel) return true
+                    v = v.parent as? View
+                }
+                return false
+            }
+            if (menuPanel.visibility == View.VISIBLE && !inside(menuPanel)) closeMenu(refocus = false)
+            if (episodesPanel.visibility == View.VISIBLE && !inside(episodesPanel)) closeEpisodes(refocus = false)
+        }
+        menuItems = findViewById(R.id.player_menu_items)
+        placeMenuPanel()
         channelsPanel = findViewById(R.id.channels_panel)
         channelsTitle = findViewById(R.id.channels_title)
         channelsList = findViewById(R.id.channels_list)
@@ -285,6 +312,15 @@ class PlayerActivity : AppCompatActivity() {
             askResume = intent.getBooleanExtra(EXTRA_ASK_RESUME, true)
             // Catch-up streams are plain MPEG-TS; the HLS guess only applies to movies/episodes.
             if (prefs.vodIsHls && !isCatchup) vodMimeType = MimeTypes.APPLICATION_M3U8
+            // Settings > Player: movies and episodes in another player app.
+            if (!isCatchup && prefs.vodPlayer != 0) {
+                if (ExternalPlayer.open(this, prefs.vodPlayer, vodUrl, vodTitle, startPosition)) {
+                    watchEntry?.let { prefs.saveProgress(it.copy(position = startPosition, updated = System.currentTimeMillis())) }
+                    finish()
+                    return
+                }
+                Toast.makeText(this, "${ExternalPlayer.PLAYERS.getOrNull(prefs.vodPlayer)?.first ?: "That player"} isn't installed. Playing here.", Toast.LENGTH_LONG).show()
+            }
             // Our own controls (VodControls) replace the standard ones.
             playerView.useController = false
             // After using the mouse, the first remote key only leaves touch mode and focuses the
@@ -297,7 +333,12 @@ class PlayerActivity : AppCompatActivity() {
                     lastMouseClick = SystemClock.uptimeMillis()
                     hoverX = ev.x
                     hoverY = ev.y
-                    if (controlsShown()) controls.hide() else controls.show()
+                    when {
+                        menuPanel.visibility == View.VISIBLE -> closeMenu()
+                        episodesPanel.visibility == View.VISIBLE -> closeEpisodes()
+                        controlsShown() -> controls.hide()
+                        else -> controls.show()
+                    }
                 }
                 true
             }
@@ -309,6 +350,7 @@ class PlayerActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    menuPanel.visibility == View.VISIBLE -> closeMenu()
                     episodesPanel.visibility == View.VISIBLE -> closeEpisodes()
                     channelsPanel.visibility == View.VISIBLE -> closeChannels()
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
@@ -395,20 +437,42 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /** Glass card: resume from the saved spot or start over. */
     private fun askResumeOrRestart() {
         val pos = startPosition
-        AlertDialog.Builder(this)
-            .setTitle(vodTitle)
-            .setItems(arrayOf("▶   Resume from ${formatDuration(pos)}", "↺   Start from the beginning")) { _, which ->
-                val p = player ?: return@setItems
-                if (which == 1) {
-                    p.seekTo(0)
-                    startPosition = 0
-                }
-                p.playWhenReady = true
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val view = layoutInflater.inflate(R.layout.dialog_resume, null)
+        dialog.setContentView(view)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        val total = watchEntry?.duration?.takeIf { it > 0 }
+        view.findViewById<TextView>(R.id.resume_title).text = vodTitle
+        view.findViewById<TextView>(R.id.resume_where).text =
+            "You stopped at ${formatDuration(pos)}" + (total?.let { " of ${formatDuration(it)}" } ?: "")
+        view.findViewById<ProgressBar>(R.id.resume_bar).apply {
+            if (total != null) progress = (pos * 1000 / total).toInt().coerceIn(0, 1000) else visibility = View.GONE
+        }
+        var chosen = false
+        view.findViewById<Button>(R.id.resume_go).apply {
+            text = "▶  Resume from ${formatDuration(pos)}"
+            setOnClickListener {
+                chosen = true
+                dialog.dismiss()
+                player?.playWhenReady = true
             }
-            .setOnCancelListener { player?.playWhenReady = true }
-            .show()
+            post { requestFocus() }
+        }
+        view.findViewById<Button>(R.id.resume_restart).setOnClickListener {
+            chosen = true
+            dialog.dismiss()
+            player?.let {
+                it.seekTo(0)
+                startPosition = 0
+                it.playWhenReady = true
+            }
+        }
+        dialog.setOnDismissListener { if (!chosen) player?.playWhenReady = true }
+        dialog.show()
     }
 
     private fun mediaItem(url: String, mimeType: String?): MediaItem =
@@ -461,7 +525,12 @@ class PlayerActivity : AppCompatActivity() {
                     prefs.setWatched(resumeKey, true)
                 }
                 // Series: carry on with the next episode, like a TV binge (unless the sleep timer says stop).
-                if (prefs.autoNext && hasNextEpisode && !sleepAtEnd) playEpisodeAt(episodeIndex + 1) else finish()
+                if (prefs.autoNext && hasNextEpisode && !sleepAtEnd) {
+                    autoEpisodes++
+                    if (autoEpisodes >= STILL_WATCHING_AFTER) askStillWatching() else playEpisodeAt(episodeIndex + 1)
+                } else {
+                    finish()
+                }
             }
         }
 
@@ -681,7 +750,32 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /** Several episodes in a row with nobody pressing a key: check before going on. */
+    private fun askStillWatching() {
+        val next = episodes.getOrNull(episodeIndex + 1)
+        AlertDialog.Builder(this)
+            .setTitle("Are you still watching?")
+            .setMessage(next?.let { "Next: ${it.label()}" } ?: "")
+            .setPositiveButton("Continue watching") { _, _ ->
+                autoEpisodes = 0
+                playEpisodeAt(episodeIndex + 1)
+            }
+            .setNegativeButton("Stop") { _, _ -> finish() }
+            .setOnCancelListener { finish() }
+            .show()
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Somebody is there: start counting episodes again.
+        if (event.action == KeyEvent.ACTION_DOWN) autoEpisodes = 0
+        // Menu open: plain D-pad navigation; Back (remote or mouse) closes it.
+        if (::menuPanel.isInitialized && menuPanel.visibility == View.VISIBLE) {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                if (event.action == KeyEvent.ACTION_UP) closeMenu()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (!isLive) {
             // Some TVs deliver the mouse back button as a Back key from the mouse: treat it as −5 s.
             if (::playerView.isInitialized && event.keyCode == KeyEvent.KEYCODE_BACK &&
@@ -869,9 +963,17 @@ class PlayerActivity : AppCompatActivity() {
         override fun nextEpisode() {
             if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
         }
-        override fun openEpisodes() = this@PlayerActivity.openEpisodes()
-        override fun openTracks() = showTrackPicker()
-        override fun openSettings() = showSettings()
+        override fun openEpisodes() {
+            if (episodesPanel.visibility == View.VISIBLE) closeEpisodes() else this@PlayerActivity.openEpisodes()
+        }
+        override fun openTracks() {
+            closePanels(refocus = false)
+            showTrackPicker()
+        }
+        override fun openSettings() {
+            if (menuPanel.visibility == View.VISIBLE) closeMenu() else showSettings()
+        }
+        override fun beforeAction() = closePanels(refocus = false)
         override fun onControlsHidden() {
             playerView.requestFocus()
         }
@@ -885,17 +987,43 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun setupVodChrome() {
+        val shelf = prefs.episodesStyle == 1
         episodeAdapter = TextAdapter(
-            R.layout.item_episode,
+            if (shelf) R.layout.item_episode_card else R.layout.item_episode_glass,
             bind = { vh, ep -> bindEpisodeRow(vh, ep) },
-            onClick = { index, _ ->
+            onClick = { _, ep ->
                 closeEpisodes()
-                if (index != episodeIndex) playEpisodeAt(index)
+                val index = episodes.indexOfFirst { it.id == ep.id }
+                if (index >= 0 && index != episodeIndex) playEpisodeAt(index)
             },
-            onLongClick = { index, ep -> toggleWatched(index, ep) },
+            onLongClick = { _, ep -> toggleWatched(episodes.indexOfFirst { it.id == ep.id }, ep) },
         )
-        episodesList.layoutManager = LinearLayoutManager(this)
+        episodesList.layoutManager = RowLayoutManager(this, if (shelf) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL)
         episodesList.adapter = episodeAdapter
+        seasonAdapter = TextAdapter(
+            R.layout.item_category_chip,
+            bind = { vh, season ->
+                vh.title.text = "Season $season"
+                vh.subtitle?.text = ""
+            },
+            onClick = { _, season -> showSeason(season) },
+        )
+        seasonsList.layoutManager = RowLayoutManager(this)
+        seasonsList.adapter = seasonAdapter
+        // Side panel on the right, or a shelf across the bottom.
+        val density = resources.displayMetrics.density
+        episodesPanel.layoutParams = (episodesPanel.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
+            if (shelf) {
+                width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                height = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                gravity = android.view.Gravity.BOTTOM
+            } else {
+                width = (600 * density).toInt()
+                height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                gravity = android.view.Gravity.END
+            }
+        }
+        if (shelf) episodesList.layoutParams = episodesList.layoutParams.apply { height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT }
 
         updateEpisodeButtons()
         loadEpisodeQueue()
@@ -933,7 +1061,10 @@ class PlayerActivity : AppCompatActivity() {
         seriesName = queue.name
         seriesCover = queue.cover
         episodesSeries.text = queue.name
-        episodeAdapter.submit(episodes)
+        val seasons = episodes.map { it.season }.distinct()
+        seasonAdapter.submit(seasons)
+        seasonsList.visibility = if (seasons.size > 1) View.VISIBLE else View.GONE
+        showSeason(episodes[episodeIndex].season)
         updateEpisodeButtons()
     }
 
@@ -954,16 +1085,51 @@ class PlayerActivity : AppCompatActivity() {
     private fun bindEpisodeRow(vh: TextAdapter.VH, ep: Episode) {
         vh.title.text = ep.label()
         val playing = episodes.getOrNull(episodeIndex)?.id == ep.id
-        val pos = prefs.position("ep_${ep.id}")
+        val key = "ep_${ep.id}"
+        val pos = if (playing) player?.currentPosition ?: prefs.position(key) else prefs.position(key)
+        val watched = prefs.isWatched(key)
         vh.subtitle?.text = listOfNotNull(
             when {
-                playing -> "▶ Now playing"
+                playing -> "▶ Playing"
                 pos > 0 -> "Resume ${formatDuration(pos)}"
-                prefs.isWatched("ep_${ep.id}") -> "✓ Watched"
+                watched -> "✓ Watched"
                 else -> null
             },
             ep.duration,
         ).joinToString("   ·   ")
+        vh.itemView.findViewById<android.widget.ImageView?>(R.id.image)?.load(seriesCover) {
+            crossfade(false)
+            error(R.drawable.placeholder)
+        }
+        vh.itemView.findViewById<android.widget.ProgressBar?>(R.id.watch_progress)?.apply {
+            val total = if (playing) player?.duration?.takeIf { it > 0 } else null
+            val length = total ?: parseDuration(ep.duration)
+            val fraction = when {
+                watched && !playing -> 1f
+                length != null && length > 0 && pos > 0 -> (pos.toFloat() / length).coerceIn(0f, 1f)
+                else -> -1f
+            }
+            visibility = if (fraction >= 0f) View.VISIBLE else View.GONE
+            progress = (fraction.coerceAtLeast(0f) * 1000).toInt()
+        }
+    }
+
+    /** "00:34:12" / "34:12" / "34 min" -> milliseconds. */
+    private fun parseDuration(text: String?): Long? {
+        if (text.isNullOrBlank()) return null
+        val parts = text.trim().split(':').mapNotNull { it.trim().toLongOrNull() }
+        return when {
+            parts.size == 3 -> (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+            parts.size == 2 -> (parts[0] * 60 + parts[1]) * 1000
+            else -> Regex("(\\d+)").find(text)?.value?.toLongOrNull()?.times(60_000)
+        }
+    }
+
+    /** Episodes panel: show one season (the chips pick it). */
+    private fun showSeason(season: Int) {
+        shownSeason = season
+        episodeAdapter.submit(episodes.filter { it.season == season })
+        seasonAdapter.activeIndex = seasonAdapter.items.indexOf(season)
     }
 
     /** Long-press in the Episodes panel: mark as watched / not watched. */
@@ -973,7 +1139,7 @@ class PlayerActivity : AppCompatActivity() {
         prefs.setWatched(key, watched)
         if (watched && index != episodeIndex) prefs.removeProgress(key)
         Toast.makeText(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT).show()
-        episodeAdapter.notifyItemChanged(index, "watched")
+        episodeAdapter.items.indexOfFirst { it.id == ep.id }.takeIf { it >= 0 }?.let { episodeAdapter.notifyItemChanged(it, "watched") }
     }
 
     private fun playEpisodeAt(index: Int) {
@@ -1001,17 +1167,54 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun openEpisodes() {
         if (episodes.isEmpty()) return
-        controls.hide()
+        closeMenu(refocus = false)
+        placeEpisodesPanel()
         episodesPanel.visibility = View.VISIBLE
-        episodeAdapter.activeIndex = episodeIndex
+        if (controlsShown()) controls.hold(true)
+        // Open on the season and episode that is playing.
+        showSeason(episodes[episodeIndex].season)
+        val row = episodeAdapter.items.indexOfFirst { it.id == episodes[episodeIndex].id }.coerceAtLeast(0)
+        episodeAdapter.activeIndex = row
         episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount, "progress")
-        episodesList.scrollToPosition(episodeIndex)
-        episodesList.post { episodesList.findViewHolderForAdapterPosition(episodeIndex)?.itemView?.requestFocus() }
+        episodesList.scrollToPosition(row)
+        episodesList.post { episodesList.findViewHolderForAdapterPosition(row)?.itemView?.requestFocus() }
     }
 
-    private fun closeEpisodes() {
+    private fun closeEpisodes(refocus: Boolean = true) {
+        if (episodesPanel.visibility != View.VISIBLE) return
         episodesPanel.visibility = View.GONE
-        playerView.requestFocus()
+        if (controlsShown()) {
+            controls.hold(false)
+            if (refocus) findViewById<View>(R.id.vc_episodes).requestFocus()
+        } else if (refocus) {
+            playerView.requestFocus()
+        }
+    }
+
+    /** Settings pop-up and episodes list: only one at a time, and either closes for another action. */
+    private fun closePanels(refocus: Boolean) {
+        closeMenu(refocus)
+        closeEpisodes(refocus)
+    }
+
+    /** Episodes list: above the toolbar when it is up (side panel or bottom shelf). */
+    private fun placeEpisodesPanel() {
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
+        val shelf = prefs.episodesStyle == 1
+        var bottom = dp(20)
+        val bar = findViewById<View>(R.id.vc_row)
+        val root = window.decorView
+        if (controlsShown() && bar.isShown && root.height > 0) {
+            val loc = IntArray(2)
+            bar.getLocationInWindow(loc)
+            bottom = root.height - loc[1] + dp(12)
+        }
+        (episodesPanel.layoutParams as android.widget.FrameLayout.LayoutParams).let { lp ->
+            lp.setMargins(dp(20), dp(20), dp(20), bottom)
+            episodesPanel.layoutParams = lp
+        }
+        if (!shelf) episodesPanel.requestLayout()
     }
 
     /** Lets the standard controller (and remote media keys) step through the episode list. */
@@ -1180,6 +1383,23 @@ class PlayerActivity : AppCompatActivity() {
      * forward = +10 s (handled before Android turns "back" into Back).
      */
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        if (::episodesPanel.isInitialized && episodesPanel.visibility == View.VISIBLE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && ev.actionButton == MotionEvent.BUTTON_BACK
+        ) {
+            closeEpisodes()
+            return true
+        }
+        // Menu open: the mouse back button closes it; moving the mouse doesn't touch the toolbar.
+        if (::menuPanel.isInitialized && menuPanel.visibility == View.VISIBLE) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS &&
+                ev.actionButton == MotionEvent.BUTTON_BACK
+            ) {
+                closeMenu()
+                return true
+            }
+            if (ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || ev.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE) return true
+            return super.dispatchGenericMotionEvent(ev)
+        }
         if (!isLive && ::controls.isInitialized && ev.actionMasked == MotionEvent.ACTION_HOVER_MOVE &&
             episodesPanel.visibility != View.VISIBLE && actionCard.visibility != View.VISIBLE
         ) {
@@ -1301,11 +1521,90 @@ class PlayerActivity : AppCompatActivity() {
 
     // ---- Settings menu (movies/episodes) and options menu (live) ----
 
-    private fun showMenu(title: String, items: List<Pair<String, () -> Unit>>) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
-            .show()
+    /**
+     * Glass menu (Settings > Player > Player menu): a small pop-up above the buttons or a side
+     * panel. "Name:  value" items show the value on the right; [selected] marks a choice with ✓.
+     */
+    private fun showMenu(title: String, items: List<Pair<String, () -> Unit>>, selected: Int = -1) {
+        closeEpisodes(refocus = false)
+        placeMenuPanel()
+        findViewById<TextView>(R.id.player_menu_title).apply {
+            text = title
+            textSize = if (prefs.playerMenuStyle == 0) 16f else 19f
+        }
+        val pad = ((if (prefs.playerMenuStyle == 0) 10 else 14) * resources.displayMetrics.density).toInt()
+        menuPanel.setPadding(pad, pad, pad, pad)
+        menuItems.removeAllViews()
+        items.forEachIndexed { i, (text, action) ->
+            val row = layoutInflater.inflate(R.layout.item_settings_option, menuItems, false)
+            val name = text.substringBefore(":  ")
+            val value = if (text.contains(":  ")) text.substringAfter(":  ") else if (i == selected) "✓" else ""
+            row.findViewById<TextView>(R.id.title).text = name
+            row.findViewById<TextView>(R.id.subtitle).text = value
+            if (prefs.playerMenuStyle == 0) {
+                // Compact rows in the pop-up.
+                val d = resources.displayMetrics.density
+                row.layoutParams = (row.layoutParams as android.view.ViewGroup.MarginLayoutParams).apply {
+                    height = (38 * d).toInt()
+                    bottomMargin = (3 * d).toInt()
+                }
+                row.setPadding((12 * d).toInt(), 0, (12 * d).toInt(), 0)
+                row.findViewById<TextView>(R.id.title).textSize = 14f
+                row.findViewById<TextView>(R.id.subtitle).textSize = 13f
+            }
+            row.setOnClickListener {
+                closeMenu()
+                action()
+            }
+            menuItems.addView(row)
+        }
+        menuPanel.visibility = View.VISIBLE
+        // Opened from the controls: keep the toolbar up underneath while the menu is open.
+        if (!isLive && controlsShown()) controls.hold(true)
+        val focus = if (selected in items.indices) selected else 0
+        menuItems.post { menuItems.getChildAt(focus)?.requestFocus() }
+    }
+
+    /** One of [labels] to pick, the current one ticked. */
+    private fun showChoices(title: String, labels: List<String>, selected: Int, pick: (Int) -> Unit) =
+        showMenu(title, labels.mapIndexed { i, label -> label to { pick(i) } }, selected)
+
+    private fun closeMenu(refocus: Boolean = true) {
+        if (menuPanel.visibility != View.VISIBLE) return
+        menuPanel.visibility = View.GONE
+        if (!isLive && controlsShown()) {
+            controls.hold(false)
+            if (refocus) findViewById<View>(R.id.vc_settings).requestFocus()
+        } else if (refocus) {
+            playerView.requestFocus()
+        }
+    }
+
+    /**
+     * Pop-up: on the right, just above the toolbar when the controls are up, otherwise in the
+     * bottom-right corner. Side panel: full height on the right.
+     */
+    private fun placeMenuPanel() {
+        val density = resources.displayMetrics.density
+        fun dp(v: Int) = (v * density).toInt()
+        val side = prefs.playerMenuStyle == 1
+        val width = if (side) dp(460) else dp(360)
+        var right = dp(40)
+        var bottom = dp(40)
+        val gear = findViewById<View>(R.id.vc_settings)
+        val root = window.decorView
+        if (!side && !isLive && controlsShown() && gear.isShown && root.width > 0) {
+            val loc = IntArray(2)
+            gear.getLocationInWindow(loc)
+            // Right-hand side, just above the toolbar.
+            bottom = root.height - loc[1] + dp(14)
+        }
+        menuPanel.layoutParams = (menuPanel.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
+            this.width = width
+            height = if (side) android.widget.FrameLayout.LayoutParams.MATCH_PARENT else android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+            gravity = if (side) android.view.Gravity.END else android.view.Gravity.BOTTOM or android.view.Gravity.END
+            if (side) setMargins(dp(20), dp(20), dp(20), dp(20)) else setMargins(dp(20), dp(24), right, bottom)
+        }
     }
 
     private fun showSettings() {
@@ -1355,14 +1654,10 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun pickSubtitleSize() {
-        AlertDialog.Builder(this)
-            .setTitle("Subtitle size")
-            .setSingleChoiceItems(SUBTITLE_SIZES.map { it.first }.toTypedArray(), prefs.subtitleSize.coerceIn(0, 3)) { d, which ->
-                prefs.subtitleSize = which
-                applySubtitleStyle()
-                d.dismiss()
-            }
-            .show()
+        showChoices("Subtitle size", SUBTITLE_SIZES.map { it.first }, prefs.subtitleSize.coerceIn(0, 3)) { which ->
+            prefs.subtitleSize = which
+            applySubtitleStyle()
+        }
     }
 
     private fun speedLabel(s: Float): String {
@@ -1371,27 +1666,19 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun pickSpeed() {
-        AlertDialog.Builder(this)
-            .setTitle("Playback speed")
-            .setSingleChoiceItems(SPEEDS.map { speedLabel(it) }.toTypedArray(), SPEEDS.indexOf(speed).coerceAtLeast(0)) { d, which ->
-                speed = SPEEDS[which]
-                player?.setPlaybackSpeed(speed)
-                d.dismiss()
-            }
-            .show()
+        showChoices("Playback speed", SPEEDS.map { speedLabel(it) }, SPEEDS.indexOf(speed).coerceAtLeast(0)) { which ->
+            speed = SPEEDS[which]
+            player?.setPlaybackSpeed(speed)
+        }
     }
 
     private fun pictureLabel() = PICTURE_SIZES[prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)].first
 
     private fun pickPictureSize() {
-        AlertDialog.Builder(this)
-            .setTitle("Picture size")
-            .setSingleChoiceItems(PICTURE_SIZES.map { it.first }.toTypedArray(), prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)) { d, which ->
-                prefs.pictureSize = which
-                playerView.resizeMode = PICTURE_SIZES[which].second
-                d.dismiss()
-            }
-            .show()
+        showChoices("Picture size", PICTURE_SIZES.map { it.first }, prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)) { which ->
+            prefs.pictureSize = which
+            playerView.resizeMode = PICTURE_SIZES[which].second
+        }
     }
 
     private fun sleepLabel(): String = when {

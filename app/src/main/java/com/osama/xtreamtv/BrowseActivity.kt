@@ -113,7 +113,7 @@ class BrowseActivity : AppCompatActivity() {
             },
             onLongClick = { _, cat -> categoryOptions(cat) },
         )
-        categoriesView.layoutManager = LinearLayoutManager(this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, false)
+        categoriesView.layoutManager = RowLayoutManager(this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL)
         categoriesView.adapter = categoryAdapter
 
         val live = type == ContentType.LIVE
@@ -124,10 +124,11 @@ class BrowseActivity : AppCompatActivity() {
             onLongClick = { _, item -> onLongPress(item) },
             layout = if (preview) R.layout.item_poster_small else null,
             onFocusItem = if (live) { item -> channelPreview?.focus(item) } else { item -> showInfo(item) },
+            onBindExtra = if (live) { vh, item -> bindNowPlaying(vh, item) } else null,
         )
         itemsView.layoutManager = when {
             live -> LinearLayoutManager(this)
-            preview -> LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            preview -> RowLayoutManager(this)
             style == Appearance.BROWSE_SIDEBAR || style == Appearance.BROWSE_FOLDING -> GridLayoutManager(this, 6)
             else -> GridLayoutManager(this, 8)
         }
@@ -202,6 +203,46 @@ class BrowseActivity : AppCompatActivity() {
             }
         }
         itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "refresh")
+    }
+
+    // ---- Live TV: "Now: programme" and its progress under each channel (fetched as rows appear).
+    private val epg = HashMap<String, List<EpgEntry>>()
+    private val epgLoading = HashSet<String>()
+    private val epgSlots = kotlinx.coroutines.sync.Semaphore(4)
+
+    private fun bindNowPlaying(vh: ItemAdapter.VH, item: StreamItem) {
+        val now = epg[item.id]?.firstOrNull()
+        val start = now?.start
+        val end = now?.end
+        vh.epgNow?.apply {
+            text = now?.let { "Now:  ${it.title}" } ?: ""
+            visibility = if (now == null) View.GONE else View.VISIBLE
+        }
+        vh.epgBar?.apply {
+            if (start != null && end != null && end > start) {
+                val nowSec = System.currentTimeMillis() / 1000
+                progress = ((nowSec - start) * 1000 / (end - start)).toInt().coerceIn(0, 1000)
+                visibility = View.VISIBLE
+            } else {
+                visibility = View.GONE
+            }
+        }
+        if (epg.containsKey(item.id) || !epgLoading.add(item.id)) return
+        lifecycleScope.launch {
+            val list = try {
+                epgSlots.acquire()
+                try { api.shortEpg(item.id) } finally { epgSlots.release() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            epg[item.id] = list
+            epgLoading.remove(item.id)
+            if (list.isNotEmpty()) {
+                itemAdapter.items.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }?.let { itemAdapter.notifyItemChanged(it) }
+            }
+        }
     }
 
     private fun openPanel() {

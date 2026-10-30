@@ -18,6 +18,11 @@
 
     <!-- Voice search: see whether the TV has speech recognition (Android 11+ package visibility). -->
     <queries>
+        <!-- Settings > Player > Play movies and series in: VLC, MX Player, Just Player. -->
+        <package android:name="org.videolan.vlc" />
+        <package android:name="com.mxtech.videoplayer.ad" />
+        <package android:name="com.mxtech.videoplayer.pro" />
+        <package android:name="com.brouken.player" />
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>

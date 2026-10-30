@@ -35,6 +35,8 @@
 
         <TextView android:id="@+id/menu_avatars" style="@style/SettingsMenuItem" android:text="Playlist avatars" />
 
+        <TextView android:id="@+id/menu_connection" style="@style/SettingsMenuItem" android:text="Connection check" />
+
         <TextView android:id="@+id/menu_about" style="@style/SettingsMenuItem" android:text="About" />
     </LinearLayout>
 

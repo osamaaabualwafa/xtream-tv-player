@@ -221,7 +221,7 @@ class SearchActivity : AppCompatActivity() {
         for ((type, ids) in rows) {
             val rowAdapter = ItemAdapter(grid = type != ContentType.LIVE, onClick = { _, item -> open(item) }, onLongClick = null, layout = ids.second)
             findViewById<RecyclerView>(ids.first).apply {
-                layoutManager = LinearLayoutManager(this@SearchActivity, LinearLayoutManager.HORIZONTAL, false)
+                layoutManager = RowLayoutManager(this@SearchActivity)
                 this.adapter = rowAdapter
             }
             rowAdapters[type] = rowAdapter

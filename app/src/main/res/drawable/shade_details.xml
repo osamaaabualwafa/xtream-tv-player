@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Details page: darkens the backdrop towards the left so the text stays readable. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="0" android:startColor="#F00E1218" android:centerColor="#B30E1218" android:endColor="#660E1218" />
+</shape>

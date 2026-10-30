@@ -8,6 +8,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /**
  * Settings (S2): Home layout, movies and series layout (picture cards), theme colour,
@@ -15,7 +17,7 @@ import androidx.lifecycle.lifecycleScope
  */
 class SettingsActivity : AppCompatActivity() {
 
-    private enum class Section { HOME, BROWSE, PLAYER, COLOR, AVATARS, ABOUT }
+    private enum class Section { HOME, BROWSE, PLAYER, COLOR, AVATARS, CONNECTION, ABOUT }
 
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
@@ -36,6 +38,7 @@ class SettingsActivity : AppCompatActivity() {
             R.id.menu_player to Section.PLAYER,
             R.id.menu_color to Section.COLOR,
             R.id.menu_avatars to Section.AVATARS,
+            R.id.menu_connection to Section.CONNECTION,
             R.id.menu_about to Section.ABOUT,
         )
         for ((id, s) in menu) {
@@ -93,6 +96,11 @@ class SettingsActivity : AppCompatActivity() {
                 title.text = "Playlist avatars"
                 hint.text = "Without an avatar, a playlist shows the first letter of its name"
                 avatars()
+            }
+            Section.CONNECTION -> {
+                title.text = "Connection check"
+                hint.text = "Tests your account, the server and your internet speed"
+                connectionCheck()
             }
             Section.ABOUT -> {
                 title.text = "About"
@@ -170,6 +178,13 @@ class SettingsActivity : AppCompatActivity() {
         option("Saved position", listOf(0 to "Ask each time", 1 to "Always resume", 2 to "Start from the beginning"), { prefs.resumeMode }, { prefs.resumeMode = it })
         option("Next episode", listOf(true to "Play automatically", false to "Stop at the end"), { prefs.autoNext }, { prefs.autoNext = it })
         option("Next episode countdown", listOf(10, 20, 30, 60).map { it to "$it seconds before the end" }, { prefs.nextCountdownSeconds }, { prefs.nextCountdownSeconds = it })
+        option(
+            "Play movies and series in",
+            ExternalPlayer.PLAYERS.mapIndexed { i, p -> i to (p.first + if (i > 0 && ExternalPlayer.installedPackage(this, i) == null) "  (not installed)" else "") },
+            { prefs.vodPlayer }, { prefs.vodPlayer = it },
+        )
+        option("Episodes list", listOf(0 to "Side panel", 1 to "Bottom shelf"), { prefs.episodesStyle }, { prefs.episodesStyle = it })
+        option("Player menu", listOf(0 to "Small pop-up", 1 to "Side panel"), { prefs.playerMenuStyle }, { prefs.playerMenuStyle = it })
         option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
         heading("Picture and sound")
         option("Picture size", listOf(0 to "Fit", 1 to "Zoom (fill screen)", 2 to "Stretch"), { prefs.pictureSize }, { prefs.pictureSize = it })
@@ -181,6 +196,131 @@ class SettingsActivity : AppCompatActivity() {
         option("Channel preview in the list", listOf(true to "On", false to "Off"), { prefs.channelPreview }, { prefs.channelPreview = it })
         option("Stream type", listOf(0 to "Automatic", 1 to "HLS (m3u8)", 2 to "MPEG-TS"), { prefs.streamType }, { prefs.streamType = it })
     }
+
+    /** Account, server response time and download speed (5 seconds of a live channel). */
+    private fun connectionCheck() {
+        val run = pill("Run check")
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(run)
+        body.addView(results)
+        fun line(name: String, value: String, good: Boolean? = null) {
+            val row = LayoutInflater.from(this).inflate(R.layout.item_settings_option, results, false)
+            row.isFocusable = false
+            row.findViewById<TextView>(R.id.title).text = name
+            row.findViewById<TextView>(R.id.subtitle).apply {
+                text = value
+                when (good) {
+                    true -> setTextColor(0xFF4ADE80.toInt())
+                    false -> setTextColor(getColor(R.color.error))
+                    null -> {}
+                }
+            }
+            results.addView(row)
+        }
+        var running = false
+        run.setOnClickListener {
+            // (Not disabled while running: a disabled button would send the highlight back to the menu.)
+            if (running) return@setOnClickListener
+            val api = Session.api(this) ?: return@setOnClickListener line("Playlist", "Open a playlist first", false)
+            results.removeAllViews()
+            running = true
+            run.text = "Checking…"
+            lifecycleScope.launch {
+                try {
+                    // Account and server response time.
+                    val t0 = System.currentTimeMillis()
+                    val info = try { api.userInfo() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+                    val ms = System.currentTimeMillis() - t0
+                    if (info == null) {
+                        line("Server", "Not reachable", false)
+                        return@launch
+                    }
+                    line("Server response", "$ms ms", ms < 1500)
+                    line("Account", (info.status ?: "Unknown") + (info.expDate?.let { "  ·  until " + formatDate(it) } ?: ""), accountProblem(info) == null)
+                    val used = info.activeCons?.toIntOrNull()
+                    val max = info.maxConnections?.toIntOrNull()
+                    if (used != null && max != null) line("Connections in use", "$used of $max", used < max)
+                    // Download speed: a movie file downloads as fast as the line allows
+                    // (a live channel only arrives at its own bitrate), so test with a movie.
+                    val movie = (Session.streamCache["MOVIE:__all__"]
+                        ?: api.categories(ContentType.MOVIE).firstOrNull()?.let { api.streams(ContentType.MOVIE, it.id) })?.firstOrNull()
+                    val testUrl = movie?.let { api.movieUrl(it.id, it.ext) }
+                        ?: (Session.streamCache["LIVE:__all__"]
+                            ?: api.categories(ContentType.LIVE).firstOrNull()?.let { api.streams(ContentType.LIVE, it.id) })?.firstOrNull()?.let { api.liveUrl(it.id, "ts") }
+                    if (testUrl == null) {
+                        line("Download speed", "Nothing to test with", null)
+                        return@launch
+                    }
+                    run.text = "Measuring speed…"
+                    val mbps = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { measureSpeed(testUrl) }
+                    if (mbps == null) {
+                        line("Download speed", "Couldn't measure", false)
+                    } else {
+                        val verdict = when {
+                            mbps >= 25 -> "great for 4K"
+                            mbps >= 8 -> "good for HD"
+                            mbps >= 3 -> "enough for SD"
+                            else -> "too slow, expect buffering"
+                        }
+                        line("Download speed", String.format(java.util.Locale.US, "%.1f Mbps  ·  %s", mbps, verdict), mbps >= 8)
+                    }
+                } finally {
+                    running = false
+                    run.text = "Run check again"
+                }
+            }
+        }
+    }
+
+    /** Megabits per second over ~5 seconds of a stream; null when nothing could be read. */
+    private fun measureSpeed(url: String): Double? {
+        // Streams are often redirected to another server (sometimes http <-> https): follow by hand.
+        var target = url
+        var conn: java.net.HttpURLConnection? = null
+        try {
+            for (hop in 0 until 5) {
+                val c = (java.net.URL(target).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                    instanceFollowRedirects = false
+                    setRequestProperty("User-Agent", USER_AGENT)
+                }
+                val code = c.responseCode
+                if (code in 300..399) {
+                    val next = c.getHeaderField("Location") ?: return null
+                    c.disconnect()
+                    target = java.net.URL(java.net.URL(target), next).toString()
+                    continue
+                }
+                if (code !in 200..299) {
+                    android.util.Log.w("SpeedTest", "HTTP $code")
+                    c.disconnect()
+                    return null
+                }
+                conn = c
+                break
+            }
+            val input = conn?.inputStream ?: return null
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            val start = System.nanoTime()
+            val stop = start + 5_000_000_000L
+            while (System.nanoTime() < stop && total < 40L * 1024 * 1024) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                total += n
+            }
+            val seconds = (System.nanoTime() - start) / 1e9
+            if (total == 0L) android.util.Log.w("SpeedTest", "no data")
+            return if (total == 0L || seconds <= 0) null else total * 8 / seconds / 1_000_000
+        } catch (e: Exception) {
+            android.util.Log.w("SpeedTest", "failed: ${e.javaClass.simpleName}")
+            return null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
 
     private fun heading(text: String) {
         body.addView(TextView(this).apply {

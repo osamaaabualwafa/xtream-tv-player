@@ -342,43 +342,102 @@
     <!-- Movies/episodes: the new controls (titles, clock, timeline, buttons). -->
     <include layout="@layout/view_vod_controls" />
 
+    <!-- Episodes (Settings > Player > Episodes list): glass side panel or bottom shelf;
+         size and position are set in code. -->
     <LinearLayout
         android:id="@+id/episodes_panel"
-        android:layout_width="560dp"
+        android:layout_width="600dp"
         android:layout_height="match_parent"
         android:layout_gravity="end"
-        android:background="@color/overlay"
+        android:layout_margin="20dp"
+        android:background="@drawable/bg_glass_dialog"
         android:orientation="vertical"
-        android:paddingLeft="24dp"
-        android:paddingTop="28dp"
-        android:paddingRight="24dp"
+        android:paddingLeft="20dp"
+        android:paddingTop="18dp"
+        android:paddingRight="20dp"
+        android:paddingBottom="12dp"
         android:visibility="gone">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Episodes"
-            android:textColor="@color/text"
-            android:textSize="24sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/episodes_series"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:textAlignment="viewStart"
-            android:textColor="@color/text_secondary"
-            android:textSize="15sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Episodes"
+                android:textColor="@color/text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/episodes_series"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="14dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textAlignment="viewStart"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <!-- Season chips (hidden for a single season). -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/episodes_seasons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:clipToPadding="false"
+            android:visibility="gone" />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/episodes_list"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:layout_marginTop="10dp"
             android:clipToPadding="false"
             android:paddingTop="4dp"
-            android:paddingBottom="24dp" />
+            android:paddingBottom="12dp" />
+    </LinearLayout>
+
+    <!-- Settings / options menu (Settings > Player > Player menu): small pop-up or side panel. -->
+    <LinearLayout
+        android:id="@+id/player_menu"
+        android:layout_width="460dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:background="@drawable/bg_glass_dialog"
+        android:orientation="vertical"
+        android:padding="14dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_menu_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="6dp"
+            android:layout_marginBottom="10dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/text"
+            android:textSize="19sp"
+            android:textStyle="bold" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fadeScrollbars="false"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/player_menu_items"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
     </LinearLayout>
 </FrameLayout>

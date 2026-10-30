@@ -28,6 +28,8 @@ class VodControls(private val root: View, private val host: Host) {
         fun openSettings()
         /** Controls went away: give focus back to the video. */
         fun onControlsHidden()
+        /** A toolbar button was pressed (close an open panel first). */
+        fun beforeAction() {}
     }
 
     companion object {
@@ -91,15 +93,15 @@ class VodControls(private val root: View, private val host: Host) {
     }
 
     init {
-        prev.setOnClickListener { host.previousEpisode(); poke() }
+        prev.setOnClickListener { host.beforeAction(); host.previousEpisode(); poke() }
         (back as? TextView)?.text = "${prefs.seekBackSeconds}s"
         (forward as? TextView)?.text = "${prefs.seekForwardSeconds}s"
         back.contentDescription = "Back ${prefs.seekBackSeconds} seconds"
         forward.contentDescription = "Forward ${prefs.seekForwardSeconds} seconds"
-        back.setOnClickListener { host.seekBy(-backMs); poke(); refresh() }
-        play.setOnClickListener { host.togglePlay(); poke(); refresh() }
-        forward.setOnClickListener { host.seekBy(forwardMs); poke(); refresh() }
-        next.setOnClickListener { host.nextEpisode(); poke() }
+        back.setOnClickListener { host.beforeAction(); host.seekBy(-backMs); poke(); refresh() }
+        play.setOnClickListener { host.beforeAction(); host.togglePlay(); poke(); refresh() }
+        forward.setOnClickListener { host.beforeAction(); host.seekBy(forwardMs); poke(); refresh() }
+        next.setOnClickListener { host.beforeAction(); host.nextEpisode(); poke() }
         episodesButton.setOnClickListener { host.openEpisodes() }
         root.findViewById<View>(R.id.vc_tracks).setOnClickListener { host.openTracks() }
         root.findViewById<View>(R.id.vc_settings).setOnClickListener { host.openSettings() }
@@ -200,9 +202,18 @@ class VodControls(private val root: View, private val host: Host) {
         if (hadFocus) host.onControlsHidden()
     }
 
+    /** While a pop-up from the controls is open (settings menu): don't hide. */
+    private var held = false
+
+    fun hold(on: Boolean) {
+        held = on
+        root.removeCallbacks(hideRunnable)
+        if (!on) poke()
+    }
+
     /** Any key while the controls are open: start the hide countdown again. */
     fun poke() {
-        if (mode != Mode.FULL) return
+        if (mode != Mode.FULL || held) return
         root.removeCallbacks(hideRunnable)
         root.postDelayed(hideRunnable, autoHideMs)
     }

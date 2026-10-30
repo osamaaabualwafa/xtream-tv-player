@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import org.json.JSONArray
@@ -185,6 +186,21 @@ class Prefs(context: Context) {
     var channelPreview: Boolean
         get() = global.getBoolean("channel_preview", true)
         set(value) = global.edit().putBoolean("channel_preview", value).apply()
+
+    /** Movies and episodes play in: 0 this app, otherwise an installed player from [ExternalPlayer.PLAYERS]. */
+    var vodPlayer: Int
+        get() = global.getInt("vod_player", 0)
+        set(value) = global.edit().putInt("vod_player", value).apply()
+
+    /** Episodes list in the player: 0 glass side panel, 1 bottom shelf. */
+    var episodesStyle: Int
+        get() = global.getInt("episodes_style", 0)
+        set(value) = global.edit().putInt("episodes_style", value).apply()
+
+    /** Settings / options menu in the player: 0 small pop-up, 1 side panel. */
+    var playerMenuStyle: Int
+        get() = global.getInt("player_menu_style", 0)
+        set(value) = global.edit().putInt("player_menu_style", value).apply()
 
     /** Live stream type: 0 automatic (what the server offers), 1 HLS (m3u8), 2 MPEG-TS. */
     var streamType: Int
@@ -539,6 +555,8 @@ class ItemAdapter(
     private val layout: Int? = null,
     /** Called when an item gets focus (the browse screen's info strip). */
     private val onFocusItem: ((StreamItem) -> Unit)? = null,
+    /** Extra filling for a row (Live TV: what is on now). */
+    private val onBindExtra: ((VH, StreamItem) -> Unit)? = null,
 ) : RecyclerView.Adapter<ItemAdapter.VH>() {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -549,6 +567,8 @@ class ItemAdapter(
         /** Poster grid: rating in a small badge on the picture. */
         val ratingBadge: TextView? = view.findViewById(R.id.rating)
         val watchProgress: android.widget.ProgressBar? = view.findViewById(R.id.watch_progress)
+        val epgNow: TextView? = view.findViewById(R.id.epg_now)
+        val epgBar: android.widget.ProgressBar? = view.findViewById(R.id.epg_bar)
     }
 
     var items: List<StreamItem> = emptyList()
@@ -586,6 +606,7 @@ class ItemAdapter(
             visibility = if (item.progress >= 0f) View.VISIBLE else View.GONE
             progress = (item.progress.coerceAtLeast(0f) * 1000).toInt()
         }
+        onBindExtra?.invoke(holder, item)
         val focusCallback = onFocusItem
         if (focusCallback != null) {
             holder.itemView.setOnFocusChangeListener { v, hasFocus ->
@@ -615,5 +636,27 @@ class ItemAdapter(
         } else {
             holder.itemView.setOnLongClickListener(null)
         }
+    }
+}
+
+/**
+ * Row (or list) for the remote: holding Left/Right (Up/Down for a list) keeps the highlight in
+ * the row and scrolls it, instead of jumping out to whatever is nearest when the next item isn't
+ * on screen yet. At the ends the highlight stays put.
+ */
+class RowLayoutManager(context: android.content.Context, orientation: Int = HORIZONTAL) :
+    LinearLayoutManager(context, orientation, false) {
+
+    override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
+        val forward = if (orientation == HORIZONTAL) View.FOCUS_RIGHT else View.FOCUS_DOWN
+        val backward = if (orientation == HORIZONTAL) View.FOCUS_LEFT else View.FOCUS_UP
+        if (direction != forward && direction != backward) return null
+        val item = findContainingItemView(focused) ?: return null
+        val next = getPosition(item) + if (direction == forward) 1 else -1
+        // List ends: let Up/Down (Left/Right for a list) leave normally; along the row, stay.
+        if (next < 0 || next >= itemCount) return if (orientation == HORIZONTAL) focused else null
+        findViewByPosition(next)?.let { return it }
+        scrollToPosition(next)
+        return focused
     }
 }

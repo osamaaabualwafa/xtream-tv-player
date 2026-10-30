@@ -163,7 +163,7 @@ class HomeActivity : AppCompatActivity() {
     ): ItemAdapter {
         val adapter = ItemAdapter(grid = layout == R.layout.item_poster_row, onClick = onClick, onLongClick = onLongClick, layout = layout)
         findViewById<RecyclerView>(viewId).apply {
-            layoutManager = LinearLayoutManager(this@HomeActivity, LinearLayoutManager.HORIZONTAL, false)
+            layoutManager = RowLayoutManager(this@HomeActivity)
             this.adapter = adapter
         }
         return adapter

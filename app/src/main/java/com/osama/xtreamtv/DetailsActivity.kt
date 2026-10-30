@@ -49,7 +49,7 @@ class DetailsActivity : AppCompatActivity() {
 
     private lateinit var poster: ImageView
     private lateinit var title: TextView
-    private lateinit var meta: TextView
+    private lateinit var meta: android.widget.LinearLayout
     private lateinit var plot: TextView
     private lateinit var buttons: View
     private lateinit var playButton: Button
@@ -85,7 +85,7 @@ class DetailsActivity : AppCompatActivity() {
         ext = item.ext
         posterUrl = item.image
         Appearance.apply(this)
-        setContentView(R.layout.activity_details)
+        setContentView(if (item.type == ContentType.SERIES) R.layout.activity_details_series else R.layout.activity_details)
 
         poster = findViewById(R.id.poster)
         title = findViewById(R.id.title)
@@ -101,7 +101,7 @@ class DetailsActivity : AppCompatActivity() {
         message = findViewById(R.id.message)
 
         title.text = item.name
-        meta.text = item.rating?.let { "★ $it" } ?: ""
+        setMeta(listOfNotNull(displayRating(item.rating)?.let { "★ $it" }))
         loadPoster(item.image)
 
         buttons.visibility = View.VISIBLE
@@ -152,7 +152,21 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
+    /** No gap on the left of the first visible button. */
+    private fun alignButtons() {
+        val row = buttons as android.view.ViewGroup
+        var first = true
+        for (i in 0 until row.childCount) {
+            val b = row.getChildAt(i)
+            if (b.visibility != View.VISIBLE) continue
+            (b.layoutParams as android.view.ViewGroup.MarginLayoutParams).leftMargin = if (first) 0 else (12 * resources.displayMetrics.density).toInt()
+            b.requestLayout()
+            first = false
+        }
+    }
+
     private fun updateFavoriteButton() {
+        buttons.post { alignButtons() }
         val fav = item.id in prefs.favoriteIds(item.type)
         favoriteButton.text = if (fav) "★  Favorite" else "☆  Add to favorites"
     }
@@ -164,6 +178,34 @@ class DetailsActivity : AppCompatActivity() {
             crossfade(true)
             placeholder(R.drawable.placeholder)
             error(R.drawable.placeholder)
+        }
+        findViewById<ImageView>(R.id.backdrop).load(url) { crossfade(true) }
+    }
+
+    /** Rating, year, length, genre as glass chips. */
+    private fun setMeta(values: List<String>) {
+        meta.removeAllViews()
+        val density = resources.displayMetrics.density
+        for (v in values.filter { it.isNotBlank() }) {
+            meta.addView(TextView(this).apply {
+                text = v
+                setTextColor(getColor(R.color.text))
+                textSize = 14f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                maxWidth = (320 * density).toInt()
+                setBackgroundResource(R.drawable.bg_meta_chip)
+                setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { rightMargin = (8 * density).toInt() }
+            })
+        }
+    }
+
+    private fun showCredits(text: String?) {
+        findViewById<TextView>(R.id.credits).apply {
+            this.text = text
+            visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
         }
     }
 
@@ -184,17 +226,17 @@ class DetailsActivity : AppCompatActivity() {
                 val info = api.vodInfo(item.id)
                 info.name?.let { title.text = it }
                 if (info.ext != null) ext = info.ext
-                meta.text = listOfNotNull(
-                    info.rating?.let { "★ $it" },
+                setMeta(listOfNotNull(
+                    displayRating(info.rating)?.let { "★ $it" },
                     info.releaseDate?.take(4),
-                    info.duration,
+                    info.duration?.let { durationText(it) },
                     info.genre,
-                ).joinToString("   ·   ")
-                val extra = listOfNotNull(
+                ))
+                plot.text = info.plot
+                showCredits(listOfNotNull(
                     info.director?.let { "Director: $it" },
                     info.cast?.let { "Cast: $it" },
-                ).joinToString("\n")
-                plot.text = listOfNotNull(info.plot, extra.ifEmpty { null }).joinToString("\n\n")
+                ).joinToString("\n").ifEmpty { null })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
             } catch (e: CancellationException) {
@@ -209,10 +251,12 @@ class DetailsActivity : AppCompatActivity() {
     private fun updateResumeButton() {
         val pos = prefs.position(movieKey())
         if (pos > 0) {
-            resumeButton.text = "Resume from ${formatDuration(pos)}"
+            resumeButton.text = "▶  Resume ${formatDuration(pos)}"
             resumeButton.visibility = View.VISIBLE
+            buttons.post { alignButtons() }
         } else {
             resumeButton.visibility = View.GONE
+            buttons.post { alignButtons() }
         }
     }
 
@@ -226,18 +270,31 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun setupSeries() {
         playButton.visibility = View.GONE
-        plot.maxLines = 3
+        findViewById<View>(R.id.episodes_card).visibility = View.VISIBLE
 
         seasonAdapter = TextAdapter(
-            R.layout.item_season,
-            bind = { vh, season -> vh.title.text = if (season == 0) "Extras" else "Season $season" },
+            R.layout.item_category_chip,
+            bind = { vh, season ->
+                // Many seasons: short, smaller tabs so they all fit on one line.
+                val many = seasons.size > 6
+                vh.title.text = when {
+                    season == 0 -> "Extras"
+                    many -> "S$season"
+                    else -> "Season $season"
+                }
+                vh.subtitle?.text = ""
+                vh.title.textSize = if (many) 15f else 16f
+                val d = resources.displayMetrics.density
+                vh.itemView.setPadding(((if (many) 14 else 18) * d).toInt(), 0, ((if (many) 14 else 18) * d).toInt(), 0)
+                (vh.itemView.layoutParams as android.view.ViewGroup.MarginLayoutParams).rightMargin = ((if (many) 6 else 10) * d).toInt()
+            },
             onClick = { index, season -> showSeason(index, season) },
         )
-        seasonsView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        seasonsView.layoutManager = RowLayoutManager(this)
         seasonsView.adapter = seasonAdapter
 
         episodeAdapter = TextAdapter(
-            R.layout.item_episode,
+            R.layout.item_episode_card,
             bind = { vh, ep -> bindEpisode(vh, ep) },
             onClick = { _, ep -> playEpisode(ep) },
             onLongClick = { index, ep ->
@@ -250,19 +307,20 @@ class DetailsActivity : AppCompatActivity() {
                 episodeAdapter.notifyItemChanged(index, "watched")
             },
         )
-        episodesView.layoutManager = LinearLayoutManager(this)
+        episodesView.layoutManager = RowLayoutManager(this)
         episodesView.adapter = episodeAdapter
 
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
                 val info = api.seriesInfo(item.id)
-                meta.text = listOfNotNull(
-                    info.rating?.let { "★ $it" },
+                setMeta(listOfNotNull(
+                    displayRating(info.rating)?.let { "★ $it" },
                     info.releaseDate?.take(4),
                     info.genre,
-                ).joinToString("   ·   ")
-                plot.text = listOfNotNull(info.plot, info.cast?.let { "Cast: $it" }).joinToString("\n\n")
+                ))
+                plot.text = info.plot
+                showCredits(info.cast?.let { "Cast: $it" })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
                 seasons = info.seasons
@@ -272,8 +330,23 @@ class DetailsActivity : AppCompatActivity() {
                     seasonsView.visibility = View.VISIBLE
                     episodesView.visibility = View.VISIBLE
                     seasonAdapter.submit(seasons.keys.toList())
-                    showSeason(0, seasons.keys.first())
-                    seasonsView.post { seasonsView.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() }
+                    // Open on the season of the episode being watched, with Resume ready.
+                    val watching = prefs.continueWatching(ContentType.SERIES).firstOrNull { it.seriesId == item.id }
+                    val resumeEp = watching?.let { w -> seasons.values.flatten().firstOrNull { it.id == w.id } }
+                    val startSeason = resumeEp?.season?.takeIf { it in seasons } ?: seasons.keys.first()
+                    showSeason(seasons.keys.indexOf(startSeason), startSeason)
+                    if (resumeEp != null) {
+                        // Episode row starts at the one being watched.
+                        (seasons[startSeason] ?: emptyList()).indexOfFirst { it.id == resumeEp.id }.takeIf { it > 0 }
+                            ?.let { (episodesView.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(it, 0) }
+                        resumeButton.text = "▶  Resume ${resumeEp.label().take(28)}"
+                        resumeButton.visibility = View.VISIBLE
+                        buttons.post { alignButtons() }
+                        resumeButton.setOnClickListener { playEpisode(resumeEp) }
+                        resumeButton.requestFocus()
+                    } else {
+                        episodesView.post { episodesView.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -296,16 +369,49 @@ class DetailsActivity : AppCompatActivity() {
         // Many panels already put "S01 E02" in the title; don't repeat the number.
         val prefix = if (ep.number != null && !ep.hasNumberInTitle()) "E${ep.number}  ·  " else ""
         vh.title.text = prefix + ep.title
-        val pos = prefs.position(episodeKey(ep))
+        val key = episodeKey(ep)
+        val pos = prefs.position(key)
+        val watched = prefs.isWatched(key)
+        val length = parseLength(ep.duration)
         vh.subtitle?.text = listOfNotNull(
             when {
+                pos > 0 && length != null && length > pos -> "${(length - pos + 59_999) / 60_000} min left"
                 pos > 0 -> "▶ Resume ${formatDuration(pos)}"
-                prefs.isWatched(episodeKey(ep)) -> "✓ Watched"
+                watched -> "✓ Watched"
                 else -> null
             },
-            ep.duration,
-            ep.plot,
+            ep.duration?.let { durationText(it) },
         ).joinToString("   ·   ")
+        vh.itemView.findViewById<ImageView?>(R.id.image)?.load(posterUrl) {
+            crossfade(false)
+            error(R.drawable.placeholder)
+        }
+        vh.itemView.findViewById<ProgressBar?>(R.id.watch_progress)?.apply {
+            val fraction = when {
+                watched -> 1f
+                pos > 0 && length != null && length > 0 -> (pos.toFloat() / length).coerceIn(0f, 1f)
+                else -> -1f
+            }
+            visibility = if (fraction >= 0f) View.VISIBLE else View.GONE
+            progress = (fraction.coerceAtLeast(0f) * 1000).toInt()
+        }
+    }
+
+    /** "01:48:53" -> "1 h 48 min", "00:35:23" -> "35 min" (other text unchanged). */
+    private fun durationText(text: String): String {
+        val ms = parseLength(text) ?: return text
+        val minutes = ms / 60_000
+        return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
+    }
+
+    private fun parseLength(text: String?): Long? {
+        if (text.isNullOrBlank()) return null
+        val parts = text.trim().split(':').map { it.trim().toLongOrNull() ?: return null }
+        return when (parts.size) {
+            3 -> (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+            2 -> (parts[0] * 60 + parts[1]) * 1000
+            else -> null
+        }
     }
 
     private fun playEpisode(ep: Episode) {

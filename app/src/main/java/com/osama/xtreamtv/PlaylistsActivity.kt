@@ -84,7 +84,7 @@ class PlaylistsActivity : AppCompatActivity() {
             onClick = { _, p -> if (p.id == ADD_ID) addPlaylist() else open(p) },
             onLongClick = { _, p -> if (p.id != ADD_ID) showOptions(p) },
         )
-        listView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        listView.layoutManager = RowLayoutManager(this)
         listView.adapter = adapter
         listView.itemAnimator = null
 

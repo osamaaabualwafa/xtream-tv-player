@@ -24,7 +24,8 @@ import androidx.media3.ui.PlayerView
 class ChannelPreview(private val context: Context, private val api: XtreamApi, private val prefs: Prefs) {
 
     companion object {
-        private const val DELAY_MS = 900L
+        /** Wait this long on a channel before opening its stream (1-connection accounts). */
+        private const val DELAY_MS = 1_500L
         const val WIDTH_DP = 336
         const val HEIGHT_DP = 189
     }
