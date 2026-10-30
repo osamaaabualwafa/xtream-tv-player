@@ -102,7 +102,10 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var actionCard: View
     private lateinit var actionText: TextView
     private lateinit var actionButton: TextView
-    private lateinit var seekPill: TextView
+    private lateinit var seekForward: View
+    private lateinit var seekBack: View
+    private lateinit var seekForwardText: TextView
+    private lateinit var seekBackText: TextView
 
     // "Next episode in Ns" prompt near the end of an episode.
     private enum class CardAction { NONE, NEXT_EPISODE }
@@ -187,7 +190,10 @@ class PlayerActivity : AppCompatActivity() {
         actionCard = findViewById(R.id.action_card)
         actionText = findViewById(R.id.action_text)
         actionButton = findViewById(R.id.action_button)
-        seekPill = findViewById(R.id.seek_pill)
+        seekForward = findViewById(R.id.seek_forward)
+        seekBack = findViewById(R.id.seek_back)
+        seekForwardText = findViewById(R.id.seek_forward_text)
+        seekBackText = findViewById(R.id.seek_back_text)
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -858,8 +864,10 @@ class PlayerActivity : AppCompatActivity() {
     // ---- Quick seek: arrows / mouse side buttons, with a small pill instead of the full controls ----
 
     private var seekTotal = 0L
-    private val hideSeekPill = Runnable {
-        seekPill.visibility = View.GONE
+    private val hideSeekRipple = Runnable {
+        for (v in listOf(seekForward, seekBack)) {
+            if (v.visibility == View.VISIBLE) v.animate().alpha(0f).setDuration(200).withEndAction { v.visibility = View.GONE }.start()
+        }
         seekTotal = 0
     }
 
@@ -867,16 +875,23 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        val target = (p.currentPosition + deltaMs).coerceIn(0, max)
-        p.seekTo(target)
-        // Presses in the same direction add up ("+30s"); changing direction starts again.
-        seekTotal = if (seekPill.visibility == View.VISIBLE && (seekTotal > 0) == (deltaMs > 0)) seekTotal + deltaMs else deltaMs
-        val amount = "${kotlin.math.abs(seekTotal) / 1000}s"
-        val where = if (duration != C.TIME_UNSET && duration > 0) "${formatDuration(target)} / ${formatDuration(duration)}" else formatDuration(target)
-        seekPill.text = (if (seekTotal > 0) "⏩  +$amount" else "⏪  −$amount") + "     $where"
-        seekPill.visibility = View.VISIBLE
-        seekPill.removeCallbacks(hideSeekPill)
-        seekPill.postDelayed(hideSeekPill, 1_500)
+        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
+        val forward = deltaMs > 0
+        val shown = if (forward) seekForward else seekBack
+        val other = if (forward) seekBack else seekForward
+        // Presses in the same direction add up ("30 seconds"); changing direction starts again.
+        seekTotal = if (shown.visibility == View.VISIBLE && (seekTotal > 0) == forward) seekTotal + deltaMs else deltaMs
+        (if (forward) seekForwardText else seekBackText).text = "${kotlin.math.abs(seekTotal) / 1000} seconds"
+        other.animate().cancel()
+        other.visibility = View.GONE
+        shown.animate().cancel()
+        if (shown.visibility != View.VISIBLE) {
+            shown.alpha = 0f
+            shown.visibility = View.VISIBLE
+        }
+        shown.animate().alpha(1f).setDuration(120).start()
+        seekForward.removeCallbacks(hideSeekRipple)
+        seekForward.postDelayed(hideSeekRipple, 1_000)
     }
 
     /** Mouse side buttons: back = −5 s, forward = +10 s (handled before Android turns "back" into Back). */
