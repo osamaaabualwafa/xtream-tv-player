@@ -24,6 +24,8 @@ import kotlinx.coroutines.withContext
 /** One search box across live channels, movies and series. */
 class SearchActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         /** Per section; "All" rows show fewer. */
         private const val MAX_RESULTS = 300

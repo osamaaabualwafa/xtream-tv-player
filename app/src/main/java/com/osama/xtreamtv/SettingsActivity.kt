@@ -17,6 +17,8 @@ import kotlinx.coroutines.launch
  */
 class SettingsActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     private enum class Section { HOME, BROWSE, PLAYER, COLOR, AVATARS, CONNECTION, ABOUT }
 
     private lateinit var prefs: Prefs
@@ -88,9 +90,10 @@ class SettingsActivity : AppCompatActivity() {
                 playerOptions()
             }
             Section.COLOR -> {
-                title.text = "Theme colour"
-                hint.text = "Used for highlights, buttons and progress bars"
+                title.text = "Look"
+                hint.text = "Colours, background, text size and effects"
                 colors()
+                lookOptions()
             }
             Section.AVATARS -> {
                 title.text = "Playlist avatars"
@@ -189,6 +192,9 @@ class SettingsActivity : AppCompatActivity() {
         option("Screensaver when paused", listOf(true to "On", false to "Off"), { prefs.pauseScreensaver }, { prefs.pauseScreensaver = it })
         option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
         heading("Picture and sound")
+        option("Match frame rate", listOf(false to "Off", true to "On (TV switches to the video's rate)"), { prefs.matchFrameRate }, { prefs.matchFrameRate = it })
+        option("Decoder", PlaybackTuning.DECODER_NAMES.mapIndexed { i, n -> i to n }, { prefs.decoderMode }, { prefs.decoderMode = it })
+        option("Buffer size", PlaybackTuning.BUFFER_NAMES.mapIndexed { i, n -> i to n }, { prefs.bufferSize }, { prefs.bufferSize = it })
         option("Picture size", listOf(0 to "Fit", 1 to "Zoom (fill screen)", 2 to "Stretch"), { prefs.pictureSize }, { prefs.pictureSize = it })
         option("Audio language", languages, { prefs.audioLanguage }, { prefs.audioLanguage = it })
         option("Subtitles", subtitleLanguages, { prefs.subtitleLanguage ?: PlayerActivity.SUBTITLES_OFF }, { prefs.subtitleLanguage = it })
@@ -355,6 +361,17 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
         body.addView(row)
+    }
+
+    /** Settings > Look: background, text size and the visual effects. */
+    private fun lookOptions() {
+        heading("Screen")
+        option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
+        option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
+        heading("Effects")
+        option("Background follows the poster", listOf(true to "On", false to "Off"), { prefs.backdropFollows }, { prefs.backdropFollows = it })
+        option("Highlighted poster", listOf(true to "Rises with a glow", false to "Simple"), { prefs.posterGlow }, { prefs.posterGlow = it })
+        option("Featured banner on Home", listOf(true to "On", false to "Off"), { prefs.featuredBanner }, { prefs.featuredBanner = it })
     }
 
     /** The theme colours; picking one rebuilds this screen in the new colour. */

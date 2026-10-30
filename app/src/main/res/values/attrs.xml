@@ -12,4 +12,6 @@
     <attr name="appAccent99" format="color" />
     <attr name="appAccentCC" format="color" />
     <attr name="appGlow" format="color" />
+    <!-- Settings > Look > Background. -->
+    <attr name="appBackground" format="reference" />
 </resources>

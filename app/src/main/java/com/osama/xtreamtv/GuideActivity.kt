@@ -26,6 +26,8 @@ import java.util.Locale
  */
 class GuideActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         private const val EXTRA_INDEX = "index"
         private const val EXTRA_FROM_PLAYER = "from_player"

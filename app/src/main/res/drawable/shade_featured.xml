@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Featured banner: dark on the left for the text, picture showing on the right. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="0" android:startColor="#F00E1218" android:centerColor="#990E1218" android:endColor="#1A0E1218" />
+    <corners android:radius="20dp" />
+</shape>

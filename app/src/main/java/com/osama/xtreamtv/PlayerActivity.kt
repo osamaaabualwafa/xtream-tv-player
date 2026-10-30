@@ -47,6 +47,8 @@ import org.json.JSONObject
 
 class PlayerActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         private const val EXTRA_LIVE = "live"
         private const val EXTRA_INDEX = "index"
@@ -418,8 +420,10 @@ class PlayerActivity : AppCompatActivity() {
         // Live: retry a failing URL only once so the .ts fallback / error shows quickly.
         val sources = DefaultMediaSourceFactory(http)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (isLive) 1 else 3))
-        val p = ExoPlayer.Builder(this)
+        // Settings > Player: decoder and buffer size.
+        val p = ExoPlayer.Builder(this, PlaybackTuning.renderers(this, prefs.decoderMode == 1))
             .setMediaSourceFactory(sources)
+            .setLoadControl(PlaybackTuning.loadControl(prefs.bufferSize))
             .build()
         p.addListener(playerListener)
         applyTrackPreferences(p)
@@ -488,8 +492,64 @@ class PlayerActivity : AppCompatActivity() {
     private fun mediaItem(url: String, mimeType: String?): MediaItem =
         MediaItem.Builder().setUri(url).apply { if (mimeType != null) setMimeType(mimeType) }.build()
 
+    /** Settings > Player > Match frame rate: once per stream, when the frame rate is known. */
+    private var frameRateFor: String? = null
+
+    /** Frame rate measured from the decoded frames (streams that don't state it). */
+    private var measuredFps = 0f
+    private var fpsProbe: androidx.media3.exoplayer.video.VideoFrameMetadataListener? = null
+
+    private fun applyFrameRate() {
+        if (!prefs.matchFrameRate) return
+        val p = player as? ExoPlayer ?: return
+        if (frameRateFor == currentUrl) return
+        val stated = p.videoFormat?.frameRate?.takeIf { it > 1f }
+        if (stated == null) {
+            measureFrameRate(p)
+            return
+        }
+        switchFrameRate(stated)
+    }
+
+    private fun switchFrameRate(fps: Float) {
+        if (frameRateFor == currentUrl) return
+        frameRateFor = currentUrl
+        if (PlaybackTuning.matchFrameRate(this, fps)) {
+            Toast.makeText(this, "Matching ${"%.3f".format(java.util.Locale.US, fps).trimEnd('0').trimEnd('.')} fps", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Time ~40 frames, take the typical gap, and snap it to a standard rate (23.976 … 60). */
+    private fun measureFrameRate(p: ExoPlayer) {
+        if (fpsProbe != null) return
+        val times = ArrayList<Long>()
+        val url = currentUrl
+        val probe = androidx.media3.exoplayer.video.VideoFrameMetadataListener { presentationTimeUs, _, _, _ ->
+            synchronized(times) {
+                if (times.size >= 41) return@VideoFrameMetadataListener
+                times += presentationTimeUs
+                if (times.size == 41) {
+                    val gaps = times.sorted().zipWithNext { a, b -> b - a }.filter { it > 0 }.sorted()
+                    val gap = gaps.getOrNull(gaps.size / 2) ?: return@VideoFrameMetadataListener
+                    val raw = 1_000_000f / gap
+                    val fps = listOf(23.976f, 24f, 25f, 29.97f, 30f, 50f, 59.94f, 60f).minByOrNull { Math.abs(it - raw) }!!
+                    runOnUiThread {
+                        fpsProbe?.let { (player as? ExoPlayer)?.clearVideoFrameMetadataListener(it) }
+                        fpsProbe = null
+                        measuredFps = fps
+                        if (url == currentUrl && Math.abs(fps - raw) < 1.5f) switchFrameRate(fps)
+                    }
+                }
+            }
+        }
+        fpsProbe = probe
+        p.setVideoFrameMetadataListener(probe)
+    }
+
     private fun releasePlayer() {
         val p = player ?: return
+        fpsProbe?.let { (p as? ExoPlayer)?.clearVideoFrameMetadataListener(it) }
+        fpsProbe = null
         if (!isLive) saveVodPosition(p)
         p.removeListener(playerListener)
         p.release()
@@ -548,6 +608,7 @@ class PlayerActivity : AppCompatActivity() {
 
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
             if (isLive) showLiveQuality()
+            applyFrameRate()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -1830,9 +1891,12 @@ class PlayerActivity : AppCompatActivity() {
         val size = p.videoSize
         val lines = ArrayList<String>()
         if (size.width > 0) {
-            val fps = v?.frameRate?.takeIf { it > 0 }?.let { "  ·  ${Math.round(it)} fps" } ?: ""
+            val fps = (v?.frameRate?.takeIf { it > 0 } ?: measuredFps.takeIf { it > 0 })
+                ?.let { "  ·  ${"%.3f".format(java.util.Locale.US, it).trimEnd('0').trimEnd('.')} fps" } ?: ""
             lines += "Resolution:  ${size.width} × ${size.height}$fps"
         }
+        // The TV's current refresh rate (Match frame rate changes it).
+        window.decorView.display?.let { d -> lines += "TV refresh rate:  ${"%.2f".format(java.util.Locale.US, d.refreshRate).trimEnd('0').trimEnd('.')} Hz" }
         v?.let { f ->
             val codec = f.codecs ?: f.sampleMimeType?.substringAfter('/') ?: "unknown"
             val rate = listOf(f.bitrate, f.averageBitrate, f.peakBitrate).firstOrNull { it > 0 }
@@ -1933,6 +1997,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        PlaybackTuning.restoreFrameRate(this)
         if (current?.get() === this) current = null
         if (::playerView.isInitialized) playerView.removeCallbacks(showScreensaver)
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)

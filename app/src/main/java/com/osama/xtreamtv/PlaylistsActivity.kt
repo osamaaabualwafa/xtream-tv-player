@@ -29,6 +29,8 @@ import java.io.IOException
  */
 class PlaylistsActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         private const val EXTRA_MANAGE = "manage"
         private const val ADD_ID = "__add__"

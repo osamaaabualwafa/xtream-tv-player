@@ -15,6 +15,7 @@
         <item name="appGlow">#FF182D4A</item>
         <item name="colorAccent">#FF3D8BFD</item>
         <item name="android:windowBackground">@color/bg</item>
+        <item name="appBackground">@drawable/bg_glow</item>
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textColorHint">@color/text_secondary</item>

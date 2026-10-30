@@ -22,6 +22,8 @@ import java.util.Locale
 
 class HomeActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     private lateinit var api: XtreamApi
     private lateinit var prefs: Prefs
     private lateinit var accountView: TextView
@@ -41,6 +43,17 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var favoritesAdapter: ItemAdapter
     private lateinit var recentAdapter: ItemAdapter
     private lateinit var newAdapter: ItemAdapter
+    /** V1: background follows the highlighted poster (null when off). */
+    private var backdrop: FocusBackdrop? = null
+    /** V3: rotating banner at the top. */
+    private var featuredItems: List<Pair<String, StreamItem>> = emptyList()
+    private var featuredIndex = 0
+    private val rotateFeatured = object : Runnable {
+        override fun run() {
+            if (featuredItems.size > 1) showFeatured(featuredIndex + 1)
+            findViewById<View?>(R.id.featured)?.postDelayed(this, 7_000)
+        }
+    }
     private var expiryShown = false
     /** Layout and colour this screen was built with; rebuilt when Settings changes them. */
     private var builtLook = ""
@@ -111,6 +124,8 @@ class HomeActivity : AppCompatActivity() {
         favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        backdrop = FocusBackdrop.attach(this)
+        setupFeatured()
 
         showAccount()
         loadCounts()
@@ -137,6 +152,10 @@ class HomeActivity : AppCompatActivity() {
         }
         clock.removeCallbacks(clockTicker)
         clockTicker.run()
+        findViewById<View?>(R.id.featured)?.let { b ->
+            b.removeCallbacks(rotateFeatured)
+            if (featuredItems.size > 1) b.postDelayed(rotateFeatured, 7_000)
+        }
         loadLocalRows()
         loadNewEpisodes()
         lifecycleScope.launch {
@@ -151,10 +170,11 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
+        findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
     }
 
@@ -164,7 +184,10 @@ class HomeActivity : AppCompatActivity() {
         onClick: (Int, StreamItem) -> Unit,
         onLongClick: ((Int, StreamItem) -> Unit)? = null,
     ): ItemAdapter {
-        val adapter = ItemAdapter(grid = layout == R.layout.item_poster_row, onClick = onClick, onLongClick = onLongClick, layout = layout)
+        val adapter = ItemAdapter(
+            grid = layout == R.layout.item_poster_row, onClick = onClick, onLongClick = onLongClick, layout = layout,
+            onFocusItem = { item -> if (item.type != ContentType.LIVE) backdrop?.show(item.image) },
+        )
         findViewById<RecyclerView>(viewId).apply {
             layoutManager = RowLayoutManager(this@HomeActivity)
             this.adapter = adapter
@@ -254,6 +277,92 @@ class HomeActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     ""
                 }
+            }
+        }
+    }
+
+    // ---- V3: featured banner ----
+
+    private fun setupFeatured() {
+        val banner = findViewById<View?>(R.id.featured) ?: return
+        if (!prefs.featuredBanner) return
+        banner.clipToOutline = true
+        banner.setOnClickListener { featuredItems.getOrNull(featuredIndex)?.let { startActivity(DetailsActivity.intent(this, it.second)) } }
+        banner.setOnKeyListener { _, keyCode, event ->
+            val step = when (keyCode) {
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> 1
+                // Side-menu layout: Left goes back to the menu.
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> if (prefs.homeStyle == Appearance.HOME_SIDE_MENU) 0 else -1
+                else -> 0
+            }
+            if (step == 0 || featuredItems.size < 2) return@setOnKeyListener false
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                showFeatured(featuredIndex + step)
+                banner.removeCallbacks(rotateFeatured)
+                banner.postDelayed(rotateFeatured, 10_000)
+            }
+            true
+        }
+        lifecycleScope.launch {
+            try {
+                val movies = allStreams(ContentType.MOVIE).await().filter { it.added > 0 }.sortedByDescending { it.added }.take(5)
+                val series = allStreams(ContentType.SERIES).await()
+                val newIds = prefs.newEpisodeSeries(series)
+                val fresh = series.filter { it.id in newIds }.take(3)
+                featuredItems = fresh.map { "New episodes" to it } + movies.map { "Recently added" to it }
+                if (featuredItems.isEmpty()) return@launch
+                banner.visibility = View.VISIBLE
+                // Big tiles layout: tiles → banner → top bar.
+                if (prefs.homeStyle == Appearance.HOME_TILES) {
+                    listOf(R.id.tile_live, R.id.tile_movies, R.id.tile_series, R.id.tile_search).forEach { findViewById<View>(it).nextFocusUpId = R.id.featured }
+                    banner.nextFocusUpId = R.id.playlist_chip
+                    banner.nextFocusDownId = R.id.tile_live
+                }
+                val dots = findViewById<android.widget.LinearLayout>(R.id.featured_dots)
+                dots.removeAllViews()
+                val d = resources.displayMetrics.density
+                repeat(featuredItems.size) {
+                    dots.addView(View(this@HomeActivity).apply {
+                        layoutParams = android.widget.LinearLayout.LayoutParams((6 * d).toInt(), (4 * d).toInt()).apply { rightMargin = (4 * d).toInt() }
+                        setBackgroundResource(R.drawable.bg_avatar)
+                    })
+                }
+                showFeatured(0)
+                banner.removeCallbacks(rotateFeatured)
+                banner.postDelayed(rotateFeatured, 7_000)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // No banner.
+            }
+        }
+    }
+
+    private fun showFeatured(index: Int) {
+        if (featuredItems.isEmpty()) return
+        featuredIndex = Math.floorMod(index, featuredItems.size)
+        val (kind, item) = featuredItems[featuredIndex]
+        findViewById<TextView>(R.id.featured_kind).text = kind
+        findViewById<TextView>(R.id.featured_title).text = item.name
+        findViewById<TextView>(R.id.featured_meta).text = listOfNotNull(
+            displayRating(item.rating)?.let { "★ $it" },
+            item.year,
+            item.genre,
+            if (item.type == ContentType.SERIES) "Series" else "Movie",
+        ).joinToString("   ·   ")
+        val image = findViewById<android.widget.ImageView>(R.id.featured_image)
+        image.animate().cancel()
+        image.alpha = 0f
+        image.load(item.image) {
+            crossfade(false)
+            listener(onSuccess = { _, _ -> image.animate().alpha(0.75f).setDuration(400).start() })
+        }
+        val dots = findViewById<android.widget.LinearLayout>(R.id.featured_dots)
+        val d = resources.displayMetrics.density
+        for (i in 0 until dots.childCount) {
+            dots.getChildAt(i).apply {
+                layoutParams = layoutParams.apply { width = ((if (i == featuredIndex) 16 else 6) * d).toInt() }
+                alpha = if (i == featuredIndex) 1f else 0.45f
             }
         }
     }

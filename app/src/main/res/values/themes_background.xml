@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings > Look > Background, applied on top of each screen's theme. -->
+<resources>
+    <style name="Bg" />
+
+    <style name="Bg.Glow">
+        <item name="appBackground">@drawable/bg_glow</item>
+    </style>
+
+    <style name="Bg.Black">
+        <item name="appBackground">@drawable/bg_black</item>
+    </style>
+
+    <style name="Bg.Ocean">
+        <item name="appBackground">@drawable/bg_ocean</item>
+    </style>
+
+    <style name="Bg.Sunset">
+        <item name="appBackground">@drawable/bg_sunset</item>
+    </style>
+</resources>

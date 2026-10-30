@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 /** Add a new playlist, or edit one (EXTRA_PLAYLIST_ID). */
 class LoginActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         private const val EXTRA_PLAYLIST_ID = "playlist_id"
 

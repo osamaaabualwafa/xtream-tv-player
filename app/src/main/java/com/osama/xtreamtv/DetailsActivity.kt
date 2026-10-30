@@ -21,6 +21,8 @@ import kotlinx.coroutines.launch
 
 class DetailsActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         private const val EXTRA_TYPE = "type"
         private const val EXTRA_ID = "id"

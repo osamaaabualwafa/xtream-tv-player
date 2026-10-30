@@ -45,6 +45,7 @@ object Appearance {
     fun apply(activity: Activity) {
         val index = Prefs(activity).accentIndex.coerceIn(0, ACCENT_STYLES.size - 1)
         activity.theme.applyStyle(ACCENT_STYLES[index], true)
+        Look.applyBackground(activity)
     }
 
     /** A playlist's avatar circle: its emoji (or first letter) on its colour. */

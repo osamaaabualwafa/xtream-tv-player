@@ -212,6 +212,46 @@ class Prefs(context: Context) {
         get() = global.getBoolean("pause_screensaver", true)
         set(value) = global.edit().putBoolean("pause_screensaver", value).apply()
 
+    /** Switch the TV's refresh rate to the video's frame rate (smoother motion). */
+    var matchFrameRate: Boolean
+        get() = global.getBoolean("match_frame_rate", false)
+        set(value) = global.edit().putBoolean("match_frame_rate", value).apply()
+
+    /** 0 automatic (hardware decoder first), 1 prefer software decoders. */
+    var decoderMode: Int
+        get() = global.getInt("decoder_mode", 0)
+        set(value) = global.edit().putInt("decoder_mode", value).apply()
+
+    /** 0 small, 1 normal, 2 large. */
+    var bufferSize: Int
+        get() = global.getInt("buffer_size", 1)
+        set(value) = global.edit().putInt("buffer_size", value).apply()
+
+    // Settings > Look.
+    var backgroundStyle: Int
+        get() = global.getInt("background_style", 0)
+        set(value) = global.edit().putInt("background_style", value).apply()
+
+    /** 0 small, 1 normal, 2 large, 3 extra large. */
+    var textSize: Int
+        get() = global.getInt("text_size", 1)
+        set(value) = global.edit().putInt("text_size", value).apply()
+
+    /** Background takes the colours of the highlighted poster. */
+    var backdropFollows: Boolean
+        get() = global.getBoolean("backdrop_follows", true)
+        set(value) = global.edit().putBoolean("backdrop_follows", value).apply()
+
+    /** Highlighted poster rises with a glow, the others dim. */
+    var posterGlow: Boolean
+        get() = global.getBoolean("poster_glow", true)
+        set(value) = global.edit().putBoolean("poster_glow", value).apply()
+
+    /** Rotating banner at the top of Home. */
+    var featuredBanner: Boolean
+        get() = global.getBoolean("featured_banner", true)
+        set(value) = global.edit().putBoolean("featured_banner", value).apply()
+
     /** Live stream type: 0 automatic (what the server offers), 1 HLS (m3u8), 2 MPEG-TS. */
     var streamType: Int
         get() = global.getInt("stream_type", 0)
@@ -524,9 +564,32 @@ private val AVATAR_COLORS = intArrayOf(
 fun avatarColor(playlistId: String): Int = AVATAR_COLORS[Math.floorMod(playlistId.hashCode(), AVATAR_COLORS.size)]
 
 val scaleOnFocus = View.OnFocusChangeListener { v, hasFocus ->
-    val scale = if (hasFocus) 1.06f else 1f
-    v.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
-    v.elevation = if (hasFocus) 8f else 0f
+    val glow = Prefs(v.context).posterGlow
+    val scale = if (hasFocus) (if (glow) 1.1f else 1.06f) else 1f
+    val d = v.resources.displayMetrics.density
+    v.animate().scaleX(scale).scaleY(scale).translationY(if (hasFocus && glow) -4 * d else 0f).setDuration(140).start()
+    v.elevation = if (hasFocus) (if (glow) 18 * d else 8f) else 0f
+    if (glow && android.os.Build.VERSION.SDK_INT >= 28) {
+        // A soft glow in the theme colour around the highlighted poster.
+        val a = v.context.obtainStyledAttributes(intArrayOf(R.attr.appAccent))
+        val accent = a.getColor(0, 0xFF3D8BFD.toInt())
+        a.recycle()
+        v.outlineSpotShadowColor = accent
+        v.outlineAmbientShadowColor = accent
+    }
+    // In a row or grid: the others dim a little so the highlighted one stands out.
+    val parent = v.parent as? androidx.recyclerview.widget.RecyclerView ?: return@OnFocusChangeListener
+    if (!glow) return@OnFocusChangeListener
+    if (hasFocus) {
+        for (i in 0 until parent.childCount) {
+            val c = parent.getChildAt(i)
+            c.animate().alpha(if (c === v) 1f else 0.72f).setDuration(140).start()
+        }
+    } else {
+        parent.post {
+            if (!parent.hasFocus()) for (i in 0 until parent.childCount) parent.getChildAt(i).animate().alpha(1f).setDuration(140).start()
+        }
+    }
 }
 
 /** Simple list of focusable rows with a title and optional subtitle. */
@@ -642,6 +705,9 @@ class ItemAdapter(
             visibility = if (item.progress >= 0f) View.VISIBLE else View.GONE
             progress = (item.progress.coerceAtLeast(0f) * 1000).toInt()
         }
+        holder.itemView.findViewById<View?>(R.id.live_badge)?.visibility = if (item.type == ContentType.LIVE) View.VISIBLE else View.GONE
+        // Recycled rows may still be dimmed from the focus effect.
+        if (!holder.itemView.hasFocus()) holder.itemView.alpha = 1f
         holder.itemView.findViewById<View?>(R.id.new_badge)?.visibility = if (item.id in newIds) View.VISIBLE else View.GONE
         onBindExtra?.invoke(holder, item)
         val focusCallback = onFocusItem
@@ -654,8 +720,8 @@ class ItemAdapter(
         }
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
         holder.image.load(item.image) {
-            crossfade(false)
-            placeholder(R.drawable.placeholder)
+            crossfade(true)
+            placeholder(ShimmerDrawable())
             error(R.drawable.placeholder)
             fallback(R.drawable.placeholder)
         }

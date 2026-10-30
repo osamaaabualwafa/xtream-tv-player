@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 
 class BrowseActivity : AppCompatActivity() {
 
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
+
     companion object {
         const val EXTRA_TYPE = "type"
         private const val CAT_ALL = "__all__"
@@ -50,6 +52,8 @@ class BrowseActivity : AppCompatActivity() {
     private var panel: View? = null
     /** Live TV: small muted preview of the highlighted channel. */
     private var channelPreview: ChannelPreview? = null
+    /** V1: background follows the highlighted poster. */
+    private var backdrop: FocusBackdrop? = null
     private var rail: View? = null
 
     /** The server's categories (before the user's order and hidden list are applied). */
@@ -123,7 +127,7 @@ class BrowseActivity : AppCompatActivity() {
             onClick = { index, item -> open(index, item) },
             onLongClick = { _, item -> onLongPress(item) },
             layout = if (preview) R.layout.item_poster_small else null,
-            onFocusItem = if (live) { item -> channelPreview?.focus(item) } else { item -> showInfo(item) },
+            onFocusItem = if (live) { item -> channelPreview?.focus(item) } else { item -> showInfo(item); backdrop?.show(item.image) },
             onBindExtra = if (live) { vh, item -> bindNowPlaying(vh, item) } else null,
         )
         itemsView.layoutManager = when {
@@ -133,6 +137,7 @@ class BrowseActivity : AppCompatActivity() {
             else -> GridLayoutManager(this, 8)
         }
 
+        if (!live && style != Appearance.BROWSE_PREVIEW) backdrop = FocusBackdrop.attach(this)
         if (live && prefs.channelPreview) {
             // Preview in the top-right corner of the list area; the rows leave room for it.
             val p = ChannelPreview(this, api, prefs)
