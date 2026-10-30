@@ -102,10 +102,13 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var actionCard: View
     private lateinit var actionText: TextView
     private lateinit var actionButton: TextView
+    private lateinit var playFlash: TextView
     private lateinit var seekForward: View
     private lateinit var seekBack: View
     private lateinit var seekForwardText: TextView
     private lateinit var seekBackText: TextView
+    private lateinit var seekForwardTime: TextView
+    private lateinit var seekBackTime: TextView
 
     // "Next episode in Ns" prompt near the end of an episode.
     private enum class CardAction { NONE, NEXT_EPISODE }
@@ -190,10 +193,13 @@ class PlayerActivity : AppCompatActivity() {
         actionCard = findViewById(R.id.action_card)
         actionText = findViewById(R.id.action_text)
         actionButton = findViewById(R.id.action_button)
+        playFlash = findViewById(R.id.play_flash)
         seekForward = findViewById(R.id.seek_forward)
         seekBack = findViewById(R.id.seek_back)
         seekForwardText = findViewById(R.id.seek_forward_text)
         seekBackText = findViewById(R.id.seek_back_text)
+        seekForwardTime = findViewById(R.id.seek_forward_time)
+        seekBackTime = findViewById(R.id.seek_back_time)
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -213,6 +219,8 @@ class PlayerActivity : AppCompatActivity() {
             if (prefs.vodIsHls) vodMimeType = MimeTypes.APPLICATION_M3U8
             playerView.useController = true
             playerView.controllerShowTimeoutMs = 5_000
+            // Pausing (e.g. the remote play/pause button) shows a small icon, not the full controls.
+            playerView.controllerAutoShow = false
             playerView.requestFocus()
             setupVodChrome()
             resetEpisodePrompts()
@@ -534,6 +542,22 @@ class PlayerActivity : AppCompatActivity() {
                 firstTopButton() != null
             ) {
                 if (event.action == KeyEvent.ACTION_DOWN) firstTopButton()?.requestFocus()
+                return true
+            }
+            // Remote play/pause acts on the first press, with a small center icon instead of the controls.
+            val playKey = event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE || event.keyCode == KeyEvent.KEYCODE_SPACE
+            if (playKey) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    player?.let { p ->
+                        p.playWhenReady = when (event.keyCode) {
+                            KeyEvent.KEYCODE_MEDIA_PLAY -> true
+                            KeyEvent.KEYCODE_MEDIA_PAUSE -> false
+                            else -> !p.playWhenReady
+                        }
+                        showPlayPauseFlash(p.playWhenReady)
+                    }
+                }
                 return true
             }
             // Right = +10 s, Left = −5 s without opening the controls (unless a player button has focus).
@@ -863,6 +887,20 @@ class PlayerActivity : AppCompatActivity() {
 
     // ---- Quick seek: arrows / mouse side buttons, with a small pill instead of the full controls ----
 
+    private val hidePlayFlash = Runnable {
+        playFlash.animate().alpha(0f).setDuration(200).withEndAction { playFlash.visibility = View.GONE }.start()
+    }
+
+    /** Brief ▶ / ❚❚ in the middle of the screen; stays up while paused so the state is obvious. */
+    private fun showPlayPauseFlash(playing: Boolean) {
+        playFlash.text = if (playing) "▶" else "❚❚"
+        playFlash.animate().cancel()
+        playFlash.alpha = 1f
+        playFlash.visibility = View.VISIBLE
+        playFlash.removeCallbacks(hidePlayFlash)
+        if (playing) playFlash.postDelayed(hidePlayFlash, 700)
+    }
+
     private var seekTotal = 0L
     private val hideSeekRipple = Runnable {
         for (v in listOf(seekForward, seekBack)) {
@@ -875,7 +913,10 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
+        val target = (p.currentPosition + deltaMs).coerceIn(0, max)
+        p.seekTo(target)
+        (if (deltaMs > 0) seekForwardTime else seekBackTime).text =
+            if (duration != C.TIME_UNSET && duration > 0) "${formatDuration(target)} / ${formatDuration(duration)}" else formatDuration(target)
         val forward = deltaMs > 0
         val shown = if (forward) seekForward else seekBack
         val other = if (forward) seekBack else seekForward
