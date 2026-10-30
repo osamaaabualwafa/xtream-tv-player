@@ -45,6 +45,9 @@ class BrowseActivity : AppCompatActivity() {
     private var currentCategory: Category? = null
     private var loadJob: Job? = null
 
+    /** Items per category id (plus CAT_ALL / CAT_FAV / CAT_CONTINUE), shown next to each category. */
+    private var counts: Map<String, Int> = emptyMap()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
@@ -71,7 +74,10 @@ class BrowseActivity : AppCompatActivity() {
 
         categoryAdapter = TextAdapter(
             R.layout.item_category,
-            bind = { vh, cat -> vh.title.text = cat.name },
+            bind = { vh, cat ->
+                vh.title.text = cat.name
+                vh.subtitle?.text = counts[cat.id]?.let { java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(it) } ?: ""
+            },
             onClick = { _, cat -> selectCategory(cat) },
         )
         categoriesView.layoutManager = LinearLayoutManager(this)
@@ -110,6 +116,7 @@ class BrowseActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!::itemAdapter.isInitialized) return
+        if (counts.isNotEmpty()) refreshLocalCounts()
         itemAdapter.favorites = prefs.favoriteIds(type)
         // Favorites and progress change on other screens: refresh the local lists in place.
         val cat = currentCategory
@@ -135,6 +142,7 @@ class BrowseActivity : AppCompatActivity() {
                 list.add(Category(CAT_ALL, "All"))
                 list.addAll(cats)
                 categoryAdapter.submit(list)
+                loadCounts()
                 // Open "Continue watching" when there is something to resume, otherwise the
                 // first real category ("All" can be tens of thousands of items).
                 val firstIndex = when {
@@ -179,12 +187,13 @@ class BrowseActivity : AppCompatActivity() {
     private fun selectCategory(category: Category) {
         currentCategory = category
         categoryAdapter.activeIndex = categoryAdapter.items.indexOf(category)
-        categoryTitle.text = category.name
+        showCategoryTitle(category, counts[category.id])
         loadJob?.cancel()
         message.visibility = View.GONE
         if (category.id == CAT_FAV || category.id == CAT_CONTINUE) {
             showLoading(false)
             allItems = localItems(category.id)
+            showCategoryTitle(category, allItems.size)
             applyFilter()
             return
         }
@@ -193,6 +202,12 @@ class BrowseActivity : AppCompatActivity() {
             itemAdapter.submit(emptyList())
             try {
                 allItems = loadStreams(if (category.id == CAT_ALL) null else category.id)
+                showCategoryTitle(category, allItems.size)
+                // Categories the full list doesn't cover get their count once opened.
+                if (counts.isNotEmpty() && counts[category.id] != allItems.size) {
+                    counts = HashMap(counts).apply { put(category.id, allItems.size) }
+                    categoryAdapter.items.indexOf(category).takeIf { it >= 0 }?.let { categoryAdapter.notifyItemChanged(it, "count") }
+                }
                 showLoading(false)
                 applyFilter()
             } catch (e: CancellationException) {
@@ -205,13 +220,50 @@ class BrowseActivity : AppCompatActivity() {
         }
     }
 
+    /** "beIN Sports Vega  ·  18 channels" above the list. */
+    private fun showCategoryTitle(category: Category, count: Int?) {
+        // Isolate the name so Arabic names don't swap places with the English count.
+        val name = "⁨${category.name}⁩"
+        categoryTitle.text = if (count == null) name else "$name  ·  ${countLabel(type, count)}"
+    }
+
+    /** Count per category from the full list (cached on the device, so usually instant). */
+    private fun loadCounts() {
+        lifecycleScope.launch {
+            try {
+                val all = loadStreams(null)
+                val map = HashMap<String, Int>()
+                for (item in all) for (id in item.categoryIds) map[id] = (map[id] ?: 0) + 1
+                map[CAT_ALL] = all.size
+                counts = map
+                refreshLocalCounts()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Categories just show without numbers.
+            }
+        }
+    }
+
+    /** Favorites / Continue watching change on other screens. */
+    private fun refreshLocalCounts() {
+        val map = HashMap(counts)
+        map[CAT_FAV] = prefs.favorites(type).size
+        if (type != ContentType.LIVE) map[CAT_CONTINUE] = prefs.continueWatching(type).size
+        counts = map
+        categoryAdapter.notifyItemRangeChanged(0, categoryAdapter.itemCount, "counts")
+        currentCategory?.let { if (counts[it.id] != null && it.id != CAT_FAV && it.id != CAT_CONTINUE) showCategoryTitle(it, counts[it.id]) }
+    }
+
     private suspend fun loadStreams(categoryId: String?): List<StreamItem> {
         val key = "${type.name}:${categoryId ?: CAT_ALL}"
         Session.streamCache[key]?.let { return it }
         // Reuse a full list if we already have it instead of hitting the server again.
         if (categoryId != null) {
             Session.streamCache["${type.name}:$CAT_ALL"]?.let { all ->
-                return all.filter { it.categoryId == categoryId }.also { Session.streamCache[key] = it }
+                val local = all.filter { categoryId in it.categoryIds }
+                // Some panels list items under categories the full list doesn't mention: ask the server then.
+                if (local.isNotEmpty()) return local.also { Session.streamCache[key] = it }
             }
         }
         return api.streams(type, categoryId).also { Session.streamCache[key] = it }
@@ -267,6 +319,7 @@ class BrowseActivity : AppCompatActivity() {
             return
         }
         val added = prefs.toggleFavorite(item)
+        if (counts.isNotEmpty()) refreshLocalCounts()
         Toast.makeText(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT).show()
         if (!added && currentCategory?.id == CAT_FAV) {
             allItems = localItems(CAT_FAV)

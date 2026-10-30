@@ -35,6 +35,8 @@ data class StreamItem(
     val archiveDays: Int = 0,
     /** Movies/series: when the provider added it (unix seconds), for "Recently added". */
     val added: Long = 0,
+    /** Every category the item is in (newer panels list several in "category_ids"). */
+    val categoryIds: List<String> = listOfNotNull(categoryId),
 )
 
 data class UserInfo(
@@ -113,6 +115,16 @@ internal fun JSONObject.str(key: String): String? {
 internal fun JSONObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toInt()
 
 internal fun JSONObject.long(key: String): Long? = str(key)?.toDoubleOrNull()?.toLong()
+
+/** "category_id" plus any extra ids in "category_ids" (as numbers or strings). */
+internal fun JSONObject.categoryIds(): List<String> {
+    val ids = LinkedHashSet<String>()
+    str("category_id")?.let { ids.add(it) }
+    optJSONArray("category_ids")?.let { arr ->
+        for (i in 0 until arr.length()) arr.opt(i)?.toString()?.trim()?.takeIf { it.isNotEmpty() && it != "null" }?.let { ids.add(it) }
+    }
+    return ids.toList()
+}
 
 /** Panels send "0" for unrated items (treated as no rating) and values like "7.491" (shown as "7.5"). */
 internal fun JSONObject.rating(key: String): String? {
@@ -285,18 +297,21 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             StreamItem(
                 type, id, o.str("name") ?: "Channel $id", o.str("stream_icon"), o.str("category_id"), null, o.str("num"), null,
                 archiveDays = if (o.int("tv_archive") == 1) o.int("tv_archive_duration")?.coerceAtLeast(1) ?: 1 else 0,
+                categoryIds = o.categoryIds(),
             )
         }
         ContentType.MOVIE -> o.str("stream_id")?.let { id ->
             StreamItem(
                 type, id, o.str("name") ?: "Movie $id", o.str("stream_icon"), o.str("category_id"), o.str("container_extension"), null, o.rating("rating"),
                 added = o.long("added") ?: 0,
+                categoryIds = o.categoryIds(),
             )
         }
         ContentType.SERIES -> o.str("series_id")?.let { id ->
             StreamItem(
                 type, id, o.str("name") ?: "Series $id", o.str("cover"), o.str("category_id"), null, null, o.rating("rating"),
                 added = o.long("last_modified") ?: 0,
+                categoryIds = o.categoryIds(),
             )
         }
     }

@@ -72,6 +72,7 @@ class HomeActivity : AppCompatActivity() {
         recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
 
         showAccount()
+        loadCounts()
         loadRecentlyAdded()
         Updates.checkQuietly(this, lifecycleScope)
     }
@@ -126,6 +127,37 @@ class HomeActivity : AppCompatActivity() {
         showRow(R.id.row_channels, R.id.row_channels_title, channelsAdapter, channels)
         val favorites = prefs.favorites(ContentType.MOVIE) + prefs.favorites(ContentType.SERIES)
         showRow(R.id.row_favorites, R.id.row_favorites_title, favoritesAdapter, favorites)
+    }
+
+    /** "Live TV" + a small grey "5,537 channels" line on each tile (lists come from the device cache). */
+    private fun loadCounts() {
+        val tiles = listOf(
+            Triple(R.id.tile_live, ContentType.LIVE, "Live TV"),
+            Triple(R.id.tile_movies, ContentType.MOVIE, "Movies"),
+            Triple(R.id.tile_series, ContentType.SERIES, "Series"),
+        )
+        for ((id, type, name) in tiles) {
+            lifecycleScope.launch {
+                try {
+                    val key = "${type.name}:__all__"
+                    val all = Session.streamCache[key] ?: api.streams(type, null).also { Session.streamCache[key] = it }
+                    findViewById<TextView>(id).text = tileText(name, countLabel(type, all.size))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Keep the plain name.
+                }
+            }
+        }
+    }
+
+    private fun tileText(name: String, count: String): CharSequence {
+        val text = android.text.SpannableString("$name\n$count")
+        val start = name.length + 1
+        text.setSpan(android.text.style.RelativeSizeSpan(0.6f), start, text.length, 0)
+        text.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.NORMAL), start, text.length, 0)
+        text.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.text_secondary)), start, text.length, 0)
+        return text
     }
 
     private fun loadRecentlyAdded() {

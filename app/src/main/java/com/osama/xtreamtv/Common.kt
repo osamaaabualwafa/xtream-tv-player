@@ -311,6 +311,17 @@ fun accountProblem(info: UserInfo): String? {
     }
 }
 
+/** "5,537 channels", "1 movie", "2,105 series". */
+fun countLabel(type: ContentType, n: Int): String {
+    val number = java.text.NumberFormat.getIntegerInstance(Locale.US).format(n)
+    val noun = when (type) {
+        ContentType.LIVE -> if (n == 1) "channel" else "channels"
+        ContentType.MOVIE -> if (n == 1) "movie" else "movies"
+        ContentType.SERIES -> "series"
+    }
+    return "$number $noun"
+}
+
 /** Long-press on a Continue watching card: ask first, so a long OK press can't wipe progress by accident. */
 fun confirmRemoveProgress(activity: Activity, prefs: Prefs, item: StreamItem, onRemoved: () -> Unit) {
     androidx.appcompat.app.AlertDialog.Builder(activity)
