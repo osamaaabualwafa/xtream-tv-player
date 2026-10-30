@@ -96,6 +96,7 @@ class PlayerActivity : AppCompatActivity() {
         )
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
+        private const val VOD_RETRIES = 5
         private val PARSE_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
@@ -178,6 +179,14 @@ class PlayerActivity : AppCompatActivity() {
     private var isLive = false
     private var currentUrl = ""
     private var probed = false
+    /** Movies / episodes: reconnect attempts after a network or server error (reset once playing). */
+    private var vodRetries = 0
+    private val retryVod = Runnable {
+        player?.let {
+            it.prepare()
+            it.playWhenReady = true
+        }
+    }
     private var vodMimeType: String? = null
 
     // Live state
@@ -439,6 +448,7 @@ class PlayerActivity : AppCompatActivity() {
             progress.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
             if (state == Player.STATE_READY) {
                 errorView.visibility = View.GONE
+                vodRetries = 0
                 // Show what's playing for a few seconds when a movie or episode starts.
                 if (!isLive && !titleShown) {
                     titleShown = true
@@ -476,6 +486,19 @@ class PlayerActivity : AppCompatActivity() {
                 // The file extension lies about the content: look at what the server really sends.
                 probed = true
                 probeAndRetry(currentUrl, error)
+                return
+            }
+            // Movies / episodes: a dropped or refused connection (often the provider still holding
+            // the previous stream) is retried up to 5 times from the same spot before giving up.
+            if (!isLive && vodRetries < VOD_RETRIES && error.errorCode.let { it in 2000..2999 || it == PlaybackException.ERROR_CODE_TIMEOUT }) {
+                vodRetries++
+                val position = p.currentPosition
+                errorView.text = "Connection lost. Reconnecting…  ($vodRetries of $VOD_RETRIES)"
+                errorView.visibility = View.VISIBLE
+                progress.visibility = View.VISIBLE
+                if (position > 0) p.seekTo(position)
+                playerView.removeCallbacks(retryVod)
+                playerView.postDelayed(retryVod, 2_000L * vodRetries)
                 return
             }
             val fallback = fallbackUrl
@@ -956,6 +979,8 @@ class PlayerActivity : AppCompatActivity() {
     private fun playEpisodeAt(index: Int) {
         val ep = episodes.getOrNull(index) ?: return
         player?.let { saveVodPosition(it) }
+        vodRetries = 0
+        playerView.removeCallbacks(retryVod)
         episodeIndex = index
         val label = ep.label()
         resumeKey = "ep_${ep.id}"
@@ -1516,6 +1541,7 @@ class PlayerActivity : AppCompatActivity() {
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)
         if (::controls.isInitialized) controls.release()
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
+        if (::playerView.isInitialized) playerView.removeCallbacks(retryVod)
         if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()
     }
