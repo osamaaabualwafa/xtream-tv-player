@@ -32,10 +32,6 @@ class PlaylistsActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_MANAGE = "manage"
         private const val ADD_ID = "__add__"
-        private val AVATAR_COLORS = intArrayOf(
-            0xFF3D8BFD.toInt(), 0xFF8A5CF6.toInt(), 0xFF14B8A6.toInt(),
-            0xFFF97316.toInt(), 0xFFEC4899.toInt(), 0xFF22C55E.toInt(),
-        )
 
         /** Opened from Home to switch playlists: never auto-opens the only playlist. */
         fun manageIntent(context: Context): Intent =
@@ -148,7 +144,7 @@ class PlaylistsActivity : AppCompatActivity() {
         } else {
             tile.setBackgroundResource(R.drawable.bg_glass_tile)
             initial.text = p.name.trim().firstOrNull()?.uppercase() ?: "?"
-            initial.backgroundTintList = ColorStateList.valueOf(AVATAR_COLORS[Math.floorMod(p.id.hashCode(), AVATAR_COLORS.size)])
+            initial.backgroundTintList = ColorStateList.valueOf(avatarColor(p.id))
             vh.title.text = p.name
             val status = statuses[p.id]
             vh.subtitle?.text = status?.first ?: ""

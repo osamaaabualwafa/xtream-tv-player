@@ -134,16 +134,53 @@
         <item name="android:visibility">gone</item>
     </style>
 
+    <!-- Home: big tinted glass tiles with an icon, name and count. -->
     <style name="HomeTile">
-        <item name="android:layout_width">190dp</item>
-        <item name="android:layout_height">100dp</item>
-        <item name="android:layout_margin">12dp</item>
-        <item name="android:background">@drawable/bg_item</item>
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginRight">18dp</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
-        <item name="android:gravity">center</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingLeft">28dp</item>
+        <item name="android:paddingRight">16dp</item>
+    </style>
+
+    <style name="HomeTileIcon">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:layout_marginBottom">10dp</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+
+    <style name="HomeTileName">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:singleLine">true</item>
         <item name="android:textColor">@color/text</item>
-        <item name="android:textSize">24sp</item>
+        <item name="android:textSize">23sp</item>
         <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="HomeTileCount">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textColor">#FFC8D0DC</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="GlassChip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:background">@drawable/bg_glass_chip</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">15sp</item>
     </style>
 </resources>

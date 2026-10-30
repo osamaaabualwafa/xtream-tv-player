@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Home: top bar (expiry, playlist, clock), big tinted glass tiles, then the rows. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/home_scroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@drawable/bg_glow"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:orientation="vertical"
         android:paddingLeft="48dp"
         android:paddingTop="28dp"
@@ -27,54 +30,130 @@
                 android:layout_weight="1"
                 android:text="Xtream TV"
                 android:textColor="@color/text"
-                android:textSize="30sp"
+                android:textSize="28sp"
                 android:textStyle="bold" />
 
             <TextView
-                android:id="@+id/version"
+                android:id="@+id/expiry_chip"
+                style="@style/GlassChip"
+                android:focusable="false"
+                android:visibility="gone" />
+
+            <!-- Active playlist: opens the playlist chooser. -->
+            <LinearLayout
+                android:id="@+id/playlist_chip"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginLeft="10dp"
+                android:background="@drawable/bg_glass_chip"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingLeft="6dp"
+                android:paddingRight="16dp">
+
+                <TextView
+                    android:id="@+id/playlist_initial"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_avatar"
+                    android:gravity="center"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/playlist_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
+                    android:maxWidth="220dp"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/text"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/clock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
+                android:layout_marginLeft="20dp"
+                android:textColor="@color/text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <TextView
             android:id="@+id/expiry_warning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_panel"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_glass_card"
             android:padding="14dp"
             android:textColor="@color/gold"
             android:textSize="16sp"
             android:visibility="gone" />
 
+        <!-- Big tiles; Live TV is the widest. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center"
+            android:layout_height="190dp"
+            android:layout_marginTop="22dp"
+            android:clipChildren="false"
             android:orientation="horizontal">
 
-            <TextView
+            <LinearLayout
                 android:id="@+id/tile_live"
                 style="@style/HomeTile"
-                android:text="Live TV" />
+                android:layout_weight="1.3"
+                android:background="@drawable/bg_home_tile_live">
 
-            <TextView
+                <ImageView style="@style/HomeTileIcon" android:src="@drawable/ic_home_live" />
+
+                <TextView style="@style/HomeTileName" android:textSize="26sp" android:text="Live TV" />
+
+                <TextView android:id="@+id/tile_live_count" style="@style/HomeTileCount" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/tile_movies"
                 style="@style/HomeTile"
-                android:text="Movies" />
+                android:background="@drawable/bg_home_tile_movies">
 
-            <TextView
+                <ImageView style="@style/HomeTileIcon" android:src="@drawable/ic_home_movies" />
+
+                <TextView style="@style/HomeTileName" android:text="Movies" />
+
+                <TextView android:id="@+id/tile_movies_count" style="@style/HomeTileCount" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/tile_series"
                 style="@style/HomeTile"
-                android:text="Series" />
+                android:background="@drawable/bg_home_tile_series">
 
-            <TextView
+                <ImageView style="@style/HomeTileIcon" android:src="@drawable/ic_home_series" />
+
+                <TextView style="@style/HomeTileName" android:text="Series" />
+
+                <TextView android:id="@+id/tile_series_count" style="@style/HomeTileCount" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/tile_search"
                 style="@style/HomeTile"
-                android:text="Search" />
+                android:layout_weight="0.8"
+                android:layout_marginRight="0dp"
+                android:background="@drawable/bg_home_tile_search">
+
+                <ImageView style="@style/HomeTileIcon" android:src="@drawable/ic_home_search" />
+
+                <TextView style="@style/HomeTileName" android:text="Search" />
+
+                <TextView style="@style/HomeTileCount" android:text="Everything" />
+            </LinearLayout>
         </LinearLayout>
 
         <TextView
@@ -116,7 +195,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="28dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -127,24 +206,31 @@
                 android:layout_weight="1"
                 android:lineSpacingExtra="4dp"
                 android:textColor="@color/text_secondary"
-                android:textSize="15sp" />
+                android:textSize="14sp" />
 
-            <Button
+            <TextView
                 android:id="@+id/refresh_lists"
-                style="@style/TvButton"
-                android:layout_marginRight="12dp"
+                style="@style/GlassPill"
                 android:text="Refresh lists" />
 
-            <Button
+            <TextView
                 android:id="@+id/check_updates"
-                style="@style/TvButton"
-                android:layout_marginRight="12dp"
+                style="@style/GlassPill"
                 android:text="Check for updates" />
 
-            <Button
+            <TextView
                 android:id="@+id/logout"
-                style="@style/TvButton"
+                style="@style/GlassPill"
+                android:layout_marginRight="0dp"
                 android:text="Playlists" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>

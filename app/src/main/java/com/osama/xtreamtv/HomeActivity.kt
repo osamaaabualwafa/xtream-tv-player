@@ -1,6 +1,7 @@
 package com.osama.xtreamtv
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
@@ -11,7 +12,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class HomeActivity : AppCompatActivity() {
 
@@ -19,6 +25,16 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var accountView: TextView
     private lateinit var expiryWarning: TextView
+    private lateinit var clock: TextView
+    /** One download per full list, shared by the tile counts and "Recently added". */
+    private val allLists = HashMap<ContentType, Deferred<List<StreamItem>>>()
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            // Next tick right after the minute changes.
+            clock.postDelayed(this, 60_000L - System.currentTimeMillis() % 60_000L + 50)
+        }
+    }
     private lateinit var continueAdapter: ItemAdapter
     private lateinit var channelsAdapter: ItemAdapter
     private lateinit var favoritesAdapter: ItemAdapter
@@ -32,6 +48,7 @@ class HomeActivity : AppCompatActivity() {
         setContentView(R.layout.activity_home)
         accountView = findViewById(R.id.account)
         expiryWarning = findViewById(R.id.expiry_warning)
+        clock = findViewById(R.id.clock)
         findViewById<TextView>(R.id.version).text = "Version ${BuildConfig.VERSION_NAME}"
 
         val tiles = mapOf(
@@ -40,23 +57,25 @@ class HomeActivity : AppCompatActivity() {
             R.id.tile_series to ContentType.SERIES,
         )
         for ((id, type) in tiles) {
-            val tile = findViewById<TextView>(id)
+            val tile = findViewById<View>(id)
             tile.onFocusChangeListener = scaleOnFocus
             tile.setOnClickListener {
                 startActivity(Intent(this, BrowseActivity::class.java).putExtra(BrowseActivity.EXTRA_TYPE, type.name))
             }
         }
-        findViewById<TextView>(R.id.tile_search).apply {
+        findViewById<View>(R.id.tile_search).apply {
             onFocusChangeListener = scaleOnFocus
             setOnClickListener { startActivity(Intent(this@HomeActivity, SearchActivity::class.java)) }
         }
-        findViewById<TextView>(R.id.tile_live).requestFocus()
+        findViewById<View>(R.id.tile_live).requestFocus()
 
-        findViewById<TextView>(R.id.logout).setOnClickListener {
+        val openPlaylists = View.OnClickListener {
             Session.clear()
             startActivity(PlaylistsActivity.manageIntent(this))
             finish()
         }
+        findViewById<View>(R.id.logout).setOnClickListener(openPlaylists)
+        findViewById<View>(R.id.playlist_chip).setOnClickListener(openPlaylists)
         findViewById<View>(R.id.refresh_lists).setOnClickListener { refreshLists() }
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
 
@@ -80,6 +99,8 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!::continueAdapter.isInitialized) return
+        clock.removeCallbacks(clockTicker)
+        clockTicker.run()
         loadLocalRows()
         lifecycleScope.launch {
             try {
@@ -91,6 +112,11 @@ class HomeActivity : AppCompatActivity() {
             }
             showAccount()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
     }
 
     private fun row(
@@ -129,42 +155,54 @@ class HomeActivity : AppCompatActivity() {
         showRow(R.id.row_favorites, R.id.row_favorites_title, favoritesAdapter, favorites)
     }
 
-    /** "Live TV" + a small grey "5,537 channels" line on each tile (lists come from the device cache). */
-    private fun loadCounts() {
-        val tiles = listOf(
-            Triple(R.id.tile_live, ContentType.LIVE, "Live TV"),
-            Triple(R.id.tile_movies, ContentType.MOVIE, "Movies"),
-            Triple(R.id.tile_series, ContentType.SERIES, "Series"),
-        )
-        for ((id, type, name) in tiles) {
-            lifecycleScope.launch {
-                try {
-                    val key = "${type.name}:__all__"
-                    val all = Session.streamCache[key] ?: api.streams(type, null).also { Session.streamCache[key] = it }
-                    findViewById<TextView>(id).text = tileText(name, countLabel(type, all.size))
+    /**
+     * The whole list of one type, downloaded once (the tile count and "Recently added" both
+     * need the movie list; two parallel downloads of a big list could fail or time out).
+     */
+    private fun allStreams(type: ContentType): Deferred<List<StreamItem>> {
+        allLists[type]?.let { if (!it.isCancelled) return it } // a failed download is tried again
+        val key = "${type.name}:__all__"
+        return lifecycleScope.async {
+            Session.streamCache[key] ?: run {
+                // One retry: big lists sometimes fail on the first try.
+                val list = try {
+                    api.streams(type, null)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // Keep the plain name.
+                    api.streams(type, null)
+                }
+                list.also { Session.streamCache[key] = it }
+            }
+        }.also { allLists[type] = it }
+    }
+
+    /** "5,537 channels" under each tile's name (lists come from the device cache). */
+    private fun loadCounts() {
+        val tiles = listOf(
+            R.id.tile_live_count to ContentType.LIVE,
+            R.id.tile_movies_count to ContentType.MOVIE,
+            R.id.tile_series_count to ContentType.SERIES,
+        )
+        for ((id, type) in tiles) {
+            val countView = findViewById<TextView>(id)
+            countView.text = "Loading…"
+            lifecycleScope.launch {
+                countView.text = try {
+                    countLabel(type, allStreams(type).await().size)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ""
                 }
             }
         }
     }
 
-    private fun tileText(name: String, count: String): CharSequence {
-        val text = android.text.SpannableString("$name\n$count")
-        val start = name.length + 1
-        text.setSpan(android.text.style.RelativeSizeSpan(0.6f), start, text.length, 0)
-        text.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.NORMAL), start, text.length, 0)
-        text.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.text_secondary)), start, text.length, 0)
-        return text
-    }
-
     private fun loadRecentlyAdded() {
         lifecycleScope.launch {
             try {
-                val all = Session.streamCache["MOVIE:__all__"]
-                    ?: api.streams(ContentType.MOVIE, null).also { Session.streamCache["MOVIE:__all__"] = it }
+                val all = allStreams(ContentType.MOVIE).await()
                 val recent = all.filter { it.added > 0 }.sortedByDescending { it.added }.take(25)
                 recentAdapter.favorites = prefs.favoriteIds(ContentType.MOVIE)
                 showRow(R.id.row_recent, R.id.row_recent_title, recentAdapter, recent)
@@ -189,7 +227,9 @@ class HomeActivity : AppCompatActivity() {
         api.clearListCache()
         Session.streamCache.clear()
         Session.categoryCache.clear()
+        allLists.clear()
         Toast.makeText(this, "Lists will reload from the server", Toast.LENGTH_SHORT).show()
+        loadCounts()
         loadRecentlyAdded()
     }
 
@@ -197,6 +237,17 @@ class HomeActivity : AppCompatActivity() {
         val info = Session.userInfo
         val host = api.account.base.substringAfter("://")
         val playlistName = prefs.activePlaylist?.name ?: host
+        // Top bar: playlist chip and expiry chip.
+        findViewById<TextView>(R.id.playlist_name).text = playlistName
+        findViewById<TextView>(R.id.playlist_initial).apply {
+            text = playlistName.trim().firstOrNull()?.uppercase() ?: "?"
+            backgroundTintList = ColorStateList.valueOf(avatarColor(prefs.activePlaylist?.id ?: host))
+        }
+        findViewById<TextView>(R.id.expiry_chip).apply {
+            val exp = info?.expDate
+            text = if (exp != null) "Expires " + SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date(exp * 1000)) else "No expiry date"
+            visibility = if (info == null) View.GONE else View.VISIBLE
+        }
         if (info == null) {
             accountView.text = "$playlistName  ·  ${api.account.username} @ $host"
             return

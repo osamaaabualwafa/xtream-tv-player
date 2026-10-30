@@ -363,6 +363,14 @@ fun Activity.goToLogin() {
     finish()
 }
 
+private val AVATAR_COLORS = intArrayOf(
+    0xFF3D8BFD.toInt(), 0xFF8A5CF6.toInt(), 0xFF14B8A6.toInt(),
+    0xFFF97316.toInt(), 0xFFEC4899.toInt(), 0xFF22C55E.toInt(),
+)
+
+/** Colour of a playlist's initial circle (stable per playlist). */
+fun avatarColor(playlistId: String): Int = AVATAR_COLORS[Math.floorMod(playlistId.hashCode(), AVATAR_COLORS.size)]
+
 val scaleOnFocus = View.OnFocusChangeListener { v, hasFocus ->
     val scale = if (hasFocus) 1.06f else 1f
     v.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
