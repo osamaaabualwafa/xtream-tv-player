@@ -89,6 +89,8 @@ object Updates {
             .setPositiveButton("Install") { _, _ -> download(activity, scope, release) }
             .setNegativeButton("Later", null)
             .show()
+            // Highlight Install straight away, so OK on the remote installs.
+            .getButton(AlertDialog.BUTTON_POSITIVE)?.let { it.post { it.requestFocus() } }
     }
 
     private fun download(activity: Activity, scope: LifecycleCoroutineScope, release: Release) {
