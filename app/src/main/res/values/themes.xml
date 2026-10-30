@@ -57,6 +57,43 @@
         <item name="android:imeOptions">actionNext|flagNoExtractUi</item>
     </style>
 
+    <!-- Player controls: white text with a soft shadow, readable on bright video. -->
+    <style name="VcText">
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:shadowColor">#D9000000</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">6</item>
+    </style>
+
+    <style name="VcCircle">
+        <item name="android:layout_width">@dimen/vc_button</item>
+        <item name="android:layout_height">@dimen/vc_button</item>
+        <item name="android:layout_marginLeft">@dimen/vc_gap</item>
+        <item name="android:layout_marginRight">@dimen/vc_gap</item>
+        <item name="android:background">@drawable/bg_vc_circle</item>
+        <item name="android:padding">@dimen/vc_icon_pad</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+
+    <style name="VcPill">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">@dimen/vc_button</item>
+        <item name="android:layout_marginLeft">@dimen/vc_gap</item>
+        <item name="android:layout_marginRight">@dimen/vc_gap</item>
+        <item name="android:background">@drawable/bg_vc_pill</item>
+        <item name="android:paddingLeft">@dimen/vc_pill_pad</item>
+        <item name="android:paddingRight">@dimen/vc_pill_pad</item>
+        <item name="android:gravity">center</item>
+        <item name="android:drawablePadding">4dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textSize">@dimen/vc_pill_text</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
     <style name="HomeRowTitle">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

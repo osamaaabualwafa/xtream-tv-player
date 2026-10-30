@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Player toolbar sizes: compact buttons inside one glass capsule. -->
+<resources>
+    <dimen name="vc_button">34dp</dimen>
+    <dimen name="vc_gap">2dp</dimen>
+    <dimen name="vc_icon_pad">8dp</dimen>
+    <dimen name="vc_pill_pad">10dp</dimen>
+    <dimen name="vc_pill_text">13sp</dimen>
+    <dimen name="vc_play">42dp</dimen>
+    <dimen name="vc_play_pad">10dp</dimen>
+    <dimen name="vc_row_pad">5dp</dimen>
+    <color name="vc_button_idle">#00000000</color>
+    <color name="vc_row_fill">#24FFFFFF</color>
+    <color name="vc_row_stroke">#4DFFFFFF</color>
+    <color name="vc_button_focus">#803D8BFD</color> <!-- accent at 50% -->
+</resources>

@@ -114,15 +114,16 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var overlayName: TextView
     private lateinit var overlayNow: TextView
     private lateinit var overlayNext: TextView
-    private lateinit var topBar: View
-    private lateinit var playerTitle: TextView
-    private lateinit var btnEpisodes: View
-    private lateinit var btnNext: View
+    private lateinit var controls: VodControls
+    private lateinit var overlayClock: TextView
+    private lateinit var overlayQuality: TextView
+    private lateinit var overlayProgress: ProgressBar
+    /** The start-up title has been shown for the current video. */
+    private var titleShown = false
     private lateinit var episodesPanel: View
     private lateinit var episodesSeries: TextView
     private lateinit var episodesList: RecyclerView
     private lateinit var episodeAdapter: TextAdapter<Episode>
-    private lateinit var btnTracks: View
     private lateinit var channelsPanel: View
     private lateinit var channelsTitle: TextView
     private lateinit var channelsList: RecyclerView
@@ -196,8 +197,10 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    /** The controller's own "fully visible" flag is unreliable on some TVs; the top bar mirrors it. */
-    private fun controlsShown() = playerView.isControllerFullyVisible || topBar.visibility == View.VISIBLE
+    private fun controlsShown() = ::controls.isInitialized && controls.isShown
+    private var hoverX = 0f
+    private var hoverY = 0f
+    private var lastMouseClick = 0L
 
     // VOD state
     private var vodUrl = ""
@@ -230,14 +233,13 @@ class PlayerActivity : AppCompatActivity() {
         overlayName = findViewById(R.id.overlay_name)
         overlayNow = findViewById(R.id.overlay_now)
         overlayNext = findViewById(R.id.overlay_next)
-        topBar = findViewById(R.id.top_bar)
-        playerTitle = findViewById(R.id.player_title)
-        btnEpisodes = findViewById(R.id.btn_episodes)
-        btnNext = findViewById(R.id.btn_next)
+        overlayClock = findViewById(R.id.overlay_clock)
+        overlayQuality = findViewById(R.id.overlay_quality)
+        overlayProgress = findViewById(R.id.overlay_progress)
+        controls = VodControls(findViewById(R.id.vod_controls), controlsHost)
         episodesPanel = findViewById(R.id.episodes_panel)
         episodesSeries = findViewById(R.id.episodes_series)
         episodesList = findViewById(R.id.episodes_list)
-        btnTracks = findViewById(R.id.btn_tracks)
         channelsPanel = findViewById(R.id.channels_panel)
         channelsTitle = findViewById(R.id.channels_title)
         channelsList = findViewById(R.id.channels_list)
@@ -274,10 +276,22 @@ class PlayerActivity : AppCompatActivity() {
             askResume = intent.getBooleanExtra(EXTRA_ASK_RESUME, true)
             // Catch-up streams are plain MPEG-TS; the HLS guess only applies to movies/episodes.
             if (prefs.vodIsHls && !isCatchup) vodMimeType = MimeTypes.APPLICATION_M3U8
-            playerView.useController = true
-            playerView.controllerShowTimeoutMs = 5_000
-            // Pausing (e.g. the remote play/pause button) shows a small icon, not the full controls.
-            playerView.controllerAutoShow = false
+            // Our own controls (VodControls) replace the standard ones.
+            playerView.useController = false
+            // After using the mouse, the first remote key only leaves touch mode and focuses the
+            // video; with the controls open, pass that focus on to Pause.
+            playerView.setOnFocusChangeListener { _, hasFocus -> if (hasFocus && controlsShown()) controls.show() }
+            // Mouse click on the video shows / hides them (PlayerView ignores clicks without its controller).
+            playerView.setOnTouchListener { v, ev ->
+                if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                    v.performClick()
+                    lastMouseClick = SystemClock.uptimeMillis()
+                    hoverX = ev.x
+                    hoverY = ev.y
+                    if (controlsShown()) controls.hide() else controls.show()
+                }
+                true
+            }
             playerView.requestFocus()
             setupVodChrome()
             resetEpisodePrompts()
@@ -290,7 +304,7 @@ class PlayerActivity : AppCompatActivity() {
                     channelsPanel.visibility == View.VISIBLE -> closeChannels()
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
                     !isLive && cardAction != CardAction.NONE && !controlsShown() -> dismissCard()
-                    !isLive && controlsShown() -> playerView.hideController()
+                    !isLive && controlsShown() -> controls.hide()
                     else -> finish()
                 }
             }
@@ -421,7 +435,14 @@ class PlayerActivity : AppCompatActivity() {
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             progress.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
-            if (state == Player.STATE_READY) errorView.visibility = View.GONE
+            if (state == Player.STATE_READY) {
+                errorView.visibility = View.GONE
+                // Show what's playing for a few seconds when a movie or episode starts.
+                if (!isLive && !titleShown) {
+                    titleShown = true
+                    controls.showTitleOnly()
+                }
+            }
             if (state == Player.STATE_ENDED && !isLive) {
                 if (!isCatchup) {
                     prefs.removeProgress(resumeKey)
@@ -430,6 +451,10 @@ class PlayerActivity : AppCompatActivity() {
                 // Series: carry on with the next episode, like a TV binge (unless the sleep timer says stop).
                 if (hasNextEpisode && !sleepAtEnd) playEpisodeAt(episodeIndex + 1) else finish()
             }
+        }
+
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+            if (isLive) showLiveQuality()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -507,7 +532,7 @@ class PlayerActivity : AppCompatActivity() {
         val hint = if (isLive) "\n\nPress Up/Down to change channel." else ""
         errorView.text = "$what\n$reason$hint"
         errorView.visibility = View.VISIBLE
-        if (!isLive) playerView.hideController()
+        if (!isLive) controls.hide()
     }
 
     private fun describe(error: PlaybackException): String {
@@ -571,6 +596,9 @@ class PlayerActivity : AppCompatActivity() {
         }
         overlayNow.text = "Loading programme guide…"
         overlayNext.text = ""
+        overlayClock.text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        overlayProgress.visibility = View.GONE
+        showLiveQuality()
         overlay.visibility = View.VISIBLE
         overlay.removeCallbacks(hideOverlay)
         overlay.postDelayed(hideOverlay, OVERLAY_TIMEOUT_MS)
@@ -582,6 +610,13 @@ class PlayerActivity : AppCompatActivity() {
                 val now = epg.getOrNull(0)
                 val next = epg.getOrNull(1)
                 overlayNow.text = now?.let { "Now   ${timeRange(it)}   ${it.title}" } ?: "No programme information"
+                val start = now?.start
+                val end = now?.end
+                if (start != null && end != null && end > start) {
+                    val nowSec = System.currentTimeMillis() / 1000
+                    overlayProgress.progress = ((nowSec - start) * 1000 / (end - start)).toInt().coerceIn(0, 1000)
+                    overlayProgress.visibility = View.VISIBLE
+                }
                 overlayNext.text = next?.let { "Next   ${timeRange(it)}   ${it.title}" } ?: ""
             } catch (e: CancellationException) {
                 throw e
@@ -589,6 +624,20 @@ class PlayerActivity : AppCompatActivity() {
                 overlayNow.text = "No programme information"
             }
         }
+    }
+
+    /** Glass "1080p" tag next to the channel name. */
+    private fun showLiveQuality() {
+        val h = player?.videoSize?.height ?: 0
+        val label = when {
+            h <= 0 -> ""
+            h >= 2000 -> "4K"
+            h >= 1000 -> "1080p"
+            h >= 700 -> "720p"
+            else -> "${h}p"
+        }
+        overlayQuality.text = label
+        overlayQuality.visibility = if (label.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun timeRange(entry: EpgEntry): String {
@@ -621,29 +670,9 @@ class PlayerActivity : AppCompatActivity() {
                 if (event.action == KeyEvent.ACTION_UP) swallowOkRelease = false
                 return true
             }
-            // The episode list and the top bar are normal focusable views: plain D-pad navigation.
+            // The episode list is a normal focusable list: plain D-pad navigation.
             if (episodesPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
-            if (topBar.hasFocus()) {
-                playerView.showController()
-                if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    if (event.action == KeyEvent.ACTION_DOWN) {
-                        val playPause = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
-                        if (playPause?.requestFocus() != true) playerView.requestFocus()
-                    }
-                    return true
-                }
-                return super.dispatchKeyEvent(event)
-            }
-            // Up from the player controls jumps to the top bar (the controller ignores nextFocusUp).
-            // The seek bar keeps its own Up handling.
-            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && controlsShown() &&
-                playerView.hasFocus() && currentFocus?.id != androidx.media3.ui.R.id.exo_progress &&
-                firstTopButton() != null
-            ) {
-                if (event.action == KeyEvent.ACTION_DOWN) firstTopButton()?.requestFocus()
-                return true
-            }
-            // Remote play/pause acts on the first press, with a small center icon instead of the controls.
+            // Remote play/pause acts on the first press; with the controls hidden a small icon shows.
             val playKey = event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
                 event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE || event.keyCode == KeyEvent.KEYCODE_SPACE
             if (playKey) {
@@ -654,59 +683,100 @@ class PlayerActivity : AppCompatActivity() {
                             KeyEvent.KEYCODE_MEDIA_PAUSE -> false
                             else -> !p.playWhenReady
                         }
-                        showPlayPauseFlash(p.playWhenReady)
+                        if (controlsShown()) {
+                            controls.poke()
+                            controls.refresh()
+                        } else {
+                            showPlayPauseFlash(p.playWhenReady)
+                        }
                     }
                 }
                 return true
             }
-            // Right = +10 s, Left = −5 s without opening the controls (unless a player button has focus).
-            val seekDelta = when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (currentFocus?.id in controlIds) 0L else 10_000L
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (currentFocus?.id in controlIds) 0L else -5_000L
-                // Remote ⏩/⏪ buttons (remotes send different codes for them).
+            // Remote ⏩/⏪ buttons (remotes send different codes for them) always seek.
+            val mediaSeek = when (event.keyCode) {
                 KeyEvent.KEYCODE_FORWARD, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
                 KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD, KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> 10_000L
                 KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
                 KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> -5_000L
                 else -> 0L
             }
+            if (mediaSeek != 0L) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (controlsShown()) {
+                        seekVod(mediaSeek)
+                        controls.poke()
+                        controls.refresh()
+                    } else {
+                        quickSeek(mediaSeek)
+                    }
+                }
+                return true
+            }
+            if (episodes.isNotEmpty() && event.action == KeyEvent.ACTION_DOWN) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                        if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        if (hasPreviousEpisode) playEpisodeAt(episodeIndex - 1)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_GUIDE -> {
+                        openEpisodes()
+                        return true
+                    }
+                }
+            }
+            if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    if (episodes.isNotEmpty()) openEpisodes() else showSettings()
+                }
+                return true
+            }
+            // Controls open: normal D-pad navigation between the buttons; every key restarts the 5 s.
+            if (controlsShown()) {
+                controls.poke()
+                // Opened with the mouse: nothing has focus yet, so the first key lands on Pause.
+                if (!controls.hasFocus) {
+                    if (event.action == KeyEvent.ACTION_DOWN) controls.show()
+                    return true
+                }
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (event.action == KeyEvent.ACTION_DOWN && controls.moveFocus(event.keyCode)) return true
+                    if (event.action == KeyEvent.ACTION_UP) return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+            // Controls hidden: Right = +10 s, Left = −5 s without opening them.
+            val seekDelta = when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_RIGHT -> 10_000L
+                KeyEvent.KEYCODE_DPAD_LEFT -> -5_000L
+                else -> 0L
+            }
             if (seekDelta != 0L) {
                 if (event.action == KeyEvent.ACTION_DOWN) quickSeek(seekDelta)
                 return true
             }
-            // OK answers the "Next episode" prompt while the controls are hidden.
-            if (cardAction != CardAction.NONE && !controlsShown() &&
-                (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)
-            ) {
+            val isOk = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER ||
+                event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+            // OK answers the "Next episode" prompt.
+            if (cardAction != CardAction.NONE && isOk) {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     swallowOkRelease = true
                     performCardAction()
                 }
                 return true
             }
-            if (episodes.isNotEmpty() && event.action == KeyEvent.ACTION_DOWN) {
-                when (event.keyCode) {
-                    KeyEvent.KEYCODE_CHANNEL_UP -> {
-                        if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
-                        return true
-                    }
-                    KeyEvent.KEYCODE_CHANNEL_DOWN -> {
-                        if (hasPreviousEpisode) playEpisodeAt(episodeIndex - 1)
-                        return true
-                    }
-                    KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_GUIDE -> {
-                        openEpisodes()
-                        return true
-                    }
+            // OK / Up / Down open the controls with focus on Pause (the OK release must not press it).
+            if (isOk || event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    if (isOk) swallowOkRelease = true
+                    controls.show()
                 }
-            }
-            // Menu on a movie (no episode list) opens Settings.
-            if (event.keyCode == KeyEvent.KEYCODE_MENU) {
-                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) showSettings()
                 return true
             }
-            // Let PlayerView show its controller and handle D-pad/media keys first.
-            if (playerView.dispatchKeyEvent(event)) return true
             return super.dispatchKeyEvent(event)
         }
         if (channelsPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
@@ -759,35 +829,36 @@ class PlayerActivity : AppCompatActivity() {
         return true
     }
 
-    // ---- Movies & episodes: title bar, next/previous, episode list ----
+    // ---- Movies & episodes: controls, next/previous, episode list ----
 
-    private val controlIds = listOf(
-        androidx.media3.ui.R.id.exo_play_pause,
-        androidx.media3.ui.R.id.exo_prev,
-        androidx.media3.ui.R.id.exo_next,
-        androidx.media3.ui.R.id.exo_rew,
-        androidx.media3.ui.R.id.exo_ffwd,
-    )
+    private val controlsHost = object : VodControls.Host {
+        override val player: Player? get() = this@PlayerActivity.player
+        override fun seekBy(deltaMs: Long) = seekVod(deltaMs)
+        override fun togglePlay() {
+            player?.let { it.playWhenReady = !it.playWhenReady }
+        }
+        override fun previousEpisode() {
+            if (hasPreviousEpisode) playEpisodeAt(episodeIndex - 1)
+        }
+        override fun nextEpisode() {
+            if (hasNextEpisode) playEpisodeAt(episodeIndex + 1)
+        }
+        override fun openEpisodes() = this@PlayerActivity.openEpisodes()
+        override fun openTracks() = showTrackPicker()
+        override fun openSettings() = showSettings()
+        override fun onControlsHidden() {
+            playerView.requestFocus()
+        }
+    }
+
+    private fun seekVod(deltaMs: Long) {
+        val p = player ?: return
+        val duration = p.duration
+        val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
+        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
+    }
 
     private fun setupVodChrome() {
-        playerTitle.text = vodTitle
-        playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            topBar.visibility = if (episodesPanel.visibility == View.VISIBLE) View.GONE else visibility
-        })
-        // Keep the controls up while the user is in the top bar.
-        val keepVisible = View.OnFocusChangeListener { _, hasFocus -> if (hasFocus) playerView.showController() }
-        btnEpisodes.onFocusChangeListener = keepVisible
-        btnNext.onFocusChangeListener = keepVisible
-        btnEpisodes.setOnClickListener { openEpisodes() }
-        btnTracks.onFocusChangeListener = keepVisible
-        btnTracks.visibility = View.VISIBLE
-        btnTracks.setOnClickListener { showSettings() }
-        btnNext.setOnClickListener { if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) }
-        // Up from the player controls reaches the top bar; Down comes back.
-        btnEpisodes.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
-        btnNext.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
-        controlIds.mapNotNull { playerView.findViewById<View>(it) }.forEach { it.nextFocusUpId = R.id.btn_episodes }
-
         episodeAdapter = TextAdapter(
             R.layout.item_episode,
             bind = { vh, ep -> bindEpisodeRow(vh, ep) },
@@ -840,13 +911,18 @@ class PlayerActivity : AppCompatActivity() {
         updateEpisodeButtons()
     }
 
+    /** Titles and episode buttons on the controls (series name + episode, or the movie name). */
     private fun updateEpisodeButtons() {
-        val hasList = episodes.isNotEmpty()
-        btnEpisodes.visibility = if (hasList) View.VISIBLE else View.GONE
-        btnNext.visibility = if (hasNextEpisode) View.VISIBLE else View.GONE
-        // The controller's previous/next buttons mean previous/next episode; movies don't show them.
-        playerView.setShowPreviousButton(hasList)
-        playerView.setShowNextButton(hasList)
+        val entry = watchEntry
+        val isEpisode = entry?.type == ContentType.SERIES
+        val titleText = when {
+            isCatchup -> vodTitle
+            isEpisode -> seriesName.ifEmpty { entry?.title ?: vodTitle }
+            else -> vodTitle
+        }
+        val episodeText = if (isEpisode) episodes.getOrNull(episodeIndex)?.label() ?: entry?.subtitle else null
+        val upNext = if (hasNextEpisode) episodes[episodeIndex + 1].label() else null
+        controls.bind(titleText, episodeText, episodes.isNotEmpty(), hasPreviousEpisode, hasNextEpisode, upNext)
     }
 
     private fun bindEpisodeRow(vh: TextAdapter.VH, ep: Episode) {
@@ -882,7 +958,7 @@ class PlayerActivity : AppCompatActivity() {
         resumeKey = "ep_${ep.id}"
         vodUrl = api.episodeUrl(ep.id, ep.ext)
         vodTitle = "$seriesName  ·  $label"
-        playerTitle.text = vodTitle
+        titleShown = false
         watchEntry = WatchEntry(resumeKey, ContentType.SERIES, ep.id, ep.ext, seriesName, label, seriesCover, seriesId = seriesId)
         startPosition = prefs.position(resumeKey)
         askResume = true
@@ -893,14 +969,11 @@ class PlayerActivity : AppCompatActivity() {
         resetEpisodePrompts()
         player?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().clearOverrides().build() }
         startVod()
-        playerView.showController()
     }
 
     private fun openEpisodes() {
         if (episodes.isEmpty()) return
-        playerView.hideController()
-        playerView.useController = false
-        topBar.visibility = View.GONE
+        controls.hide()
         episodesPanel.visibility = View.VISIBLE
         episodeAdapter.activeIndex = episodeIndex
         episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount, "progress")
@@ -910,7 +983,6 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun closeEpisodes() {
         episodesPanel.visibility = View.GONE
-        playerView.useController = true
         playerView.requestFocus()
     }
 
@@ -1075,8 +1147,23 @@ class PlayerActivity : AppCompatActivity() {
         seekForward.postDelayed(hideSeekRipple, 1_000)
     }
 
-    /** Mouse side buttons: back = −5 s, forward = +10 s (handled before Android turns "back" into Back). */
+    /**
+     * Mouse: moving it shows the controls (and keeps them up); side buttons back = −5 s,
+     * forward = +10 s (handled before Android turns "back" into Back).
+     */
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        if (!isLive && ::controls.isInitialized && ev.actionMasked == MotionEvent.ACTION_HOVER_MOVE &&
+            episodesPanel.visibility != View.VISIBLE && actionCard.visibility != View.VISIBLE
+        ) {
+            // Only a real move counts: a click also sends a hover at the same spot, which
+            // would bring back the controls the click just hid.
+            val moved = Math.abs(ev.x - hoverX) + Math.abs(ev.y - hoverY) > 12f
+            hoverX = ev.x
+            hoverY = ev.y
+            if (moved && SystemClock.uptimeMillis() - lastMouseClick > 600) {
+                if (controlsShown()) controls.poke() else controls.show()
+            }
+        }
         if (!isLive && ::playerView.isInitialized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             (ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || ev.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE) &&
             episodesPanel.visibility != View.VISIBLE
@@ -1094,8 +1181,6 @@ class PlayerActivity : AppCompatActivity() {
         return super.dispatchGenericMotionEvent(ev)
     }
 
-    private fun firstTopButton(): View? =
-        listOf(btnTracks, btnEpisodes, btnNext).firstOrNull { it.visibility == View.VISIBLE }
 
     // ---- Next episode prompt ----
 
@@ -1426,6 +1511,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)
+        if (::controls.isInitialized) controls.release()
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
         if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()

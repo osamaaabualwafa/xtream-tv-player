@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Behind the button row (transparent unless the row sits in a glass capsule). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/vc_row_fill" />
+    <stroke android:width="1dp" android:color="@color/vc_row_stroke" />
+    <corners android:radius="40dp" />
+</shape>
