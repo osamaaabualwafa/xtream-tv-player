@@ -233,6 +233,7 @@ class BrowseActivity : AppCompatActivity() {
         when (item.type) {
             ContentType.LIVE -> {
                 Session.zapList = itemAdapter.items
+                Session.zapTitle = currentCategory?.name
                 startActivity(PlayerActivity.liveIntent(this, index))
             }
             ContentType.MOVIE, ContentType.SERIES -> startActivity(DetailsActivity.intent(this, item))

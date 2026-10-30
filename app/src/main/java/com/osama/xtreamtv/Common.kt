@@ -106,6 +106,16 @@ class Prefs(context: Context) {
         get() = sp.getString("formats", "") ?: ""
         set(value) = sp.edit().putString("formats", value).apply()
 
+    /** Audio language picked last time (ISO code), applied to the next videos. */
+    var audioLanguage: String?
+        get() = global.getString("audio_lang", null)
+        set(value) = global.edit().putString("audio_lang", value).apply()
+
+    /** Subtitle language picked last time, or SUBTITLES_OFF. */
+    var subtitleLanguage: String?
+        get() = global.getString("sub_lang", null)
+        set(value) = global.edit().putString("sub_lang", value).apply()
+
     /** Learned per provider: movies/episodes are HLS playlists despite their .mkv/.mp4 names. */
     var vodIsHls: Boolean
         get() = sp.getBoolean("vod_hls", false)
@@ -236,6 +246,7 @@ object Session {
     private var api: XtreamApi? = null
     var userInfo: UserInfo? = null
     var zapList: List<StreamItem> = emptyList()
+    var zapTitle: String? = null
     var seriesQueue: SeriesQueue? = null
     val streamCache = HashMap<String, List<StreamItem>>()
     val categoryCache = HashMap<ContentType, List<Category>>()

@@ -3,6 +3,7 @@ package com.osama.xtreamtv
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -10,7 +11,9 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
@@ -19,10 +22,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.ui.DefaultTrackNameProvider
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -59,6 +65,8 @@ class PlayerActivity : AppCompatActivity() {
                 .putExtra(EXTRA_WATCH, entry.toJson().toString())
 
         private const val EXTRA_WATCH = "watch"
+        const val SUBTITLES_OFF = "off"
+        private const val NEXT_PROMPT_MS = 30_000L
         private val PARSE_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
@@ -84,6 +92,27 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var episodesSeries: TextView
     private lateinit var episodesList: RecyclerView
     private lateinit var episodeAdapter: TextAdapter<Episode>
+    private lateinit var btnTracks: View
+    private lateinit var channelsPanel: View
+    private lateinit var channelsTitle: TextView
+    private lateinit var channelsList: RecyclerView
+    private lateinit var channelAdapter: ItemAdapter
+    private lateinit var actionCard: View
+    private lateinit var actionText: TextView
+    private lateinit var actionButton: TextView
+
+    // "Next episode in Ns" prompt near the end of an episode.
+    private enum class CardAction { NONE, NEXT_EPISODE }
+    private var cardAction = CardAction.NONE
+    /** Back hid the prompt for this episode: don't show it again (it still moves on at the end). */
+    private var nextDismissed = false
+    private var swallowOkRelease = false
+    private val ticker = object : Runnable {
+        override fun run() {
+            updateEpisodePrompts()
+            playerView.postDelayed(this, 500)
+        }
+    }
 
     private var player: ExoPlayer? = null
     private var isLive = false
@@ -148,6 +177,13 @@ class PlayerActivity : AppCompatActivity() {
         episodesPanel = findViewById(R.id.episodes_panel)
         episodesSeries = findViewById(R.id.episodes_series)
         episodesList = findViewById(R.id.episodes_list)
+        btnTracks = findViewById(R.id.btn_tracks)
+        channelsPanel = findViewById(R.id.channels_panel)
+        channelsTitle = findViewById(R.id.channels_title)
+        channelsList = findViewById(R.id.channels_list)
+        actionCard = findViewById(R.id.action_card)
+        actionText = findViewById(R.id.action_text)
+        actionButton = findViewById(R.id.action_button)
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -155,6 +191,7 @@ class PlayerActivity : AppCompatActivity() {
             channelIndex = (savedInstanceState?.getInt(EXTRA_INDEX) ?: intent.getIntExtra(EXTRA_INDEX, 0))
                 .coerceIn(0, Session.zapList.size - 1)
             playerView.useController = false
+            setupChannelPanel()
         } else {
             vodUrl = intent.getStringExtra(EXTRA_URL) ?: return finish()
             vodTitle = intent.getStringExtra(EXTRA_TITLE) ?: ""
@@ -168,13 +205,16 @@ class PlayerActivity : AppCompatActivity() {
             playerView.controllerShowTimeoutMs = 5_000
             playerView.requestFocus()
             setupVodChrome()
+            resetEpisodePrompts()
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
                     episodesPanel.visibility == View.VISIBLE -> closeEpisodes()
+                    channelsPanel.visibility == View.VISIBLE -> closeChannels()
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
+                    !isLive && cardAction != CardAction.NONE && !controlsShown() -> dismissCard()
                     !isLive && controlsShown() -> playerView.hideController()
                     else -> finish()
                 }
@@ -191,7 +231,10 @@ class PlayerActivity : AppCompatActivity() {
         super.onStart()
         if (!::playerView.isInitialized) return
         initPlayer()
-        if (!isLive) playerView.postDelayed(autoSave, 30_000)
+        if (!isLive) {
+            playerView.postDelayed(autoSave, 30_000)
+            playerView.post(ticker)
+        }
     }
 
     override fun onPause() {
@@ -203,7 +246,10 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (::playerView.isInitialized) playerView.removeCallbacks(autoSave)
+        if (::playerView.isInitialized) {
+            playerView.removeCallbacks(autoSave)
+            playerView.removeCallbacks(ticker)
+        }
         releasePlayer()
     }
 
@@ -221,6 +267,7 @@ class PlayerActivity : AppCompatActivity() {
             .setMediaSourceFactory(sources)
             .build()
         p.addListener(playerListener)
+        applyTrackPreferences(p)
         player = p
         playerView.player = if (isLive) p else EpisodeAwarePlayer(p)
 
@@ -275,6 +322,10 @@ class PlayerActivity : AppCompatActivity() {
                 // Series: carry on with the next episode, like a TV binge.
                 if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) else finish()
             }
+        }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            if (!isLive) updateTracksButton(tracks)
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -441,6 +492,11 @@ class PlayerActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!isLive) {
             if (!::playerView.isInitialized || event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+            // The OK that answered a prompt must not also "click" play/pause when it is released.
+            if (swallowOkRelease && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                if (event.action == KeyEvent.ACTION_UP) swallowOkRelease = false
+                return true
+            }
             // The episode list and the top bar are normal focusable views: plain D-pad navigation.
             if (episodesPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
             if (topBar.hasFocus()) {
@@ -458,9 +514,29 @@ class PlayerActivity : AppCompatActivity() {
             // The seek bar keeps its own Up handling.
             if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && controlsShown() &&
                 playerView.hasFocus() && currentFocus?.id != androidx.media3.ui.R.id.exo_progress &&
-                btnEpisodes.visibility == View.VISIBLE
+                firstTopButton() != null
             ) {
-                if (event.action == KeyEvent.ACTION_DOWN) btnEpisodes.requestFocus()
+                if (event.action == KeyEvent.ACTION_DOWN) firstTopButton()?.requestFocus()
+                return true
+            }
+            // Left/Right seek (faster when pressed repeatedly) unless a player button has focus.
+            if ((event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) &&
+                currentFocus?.id !in controlIds
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    val step = seekStep()
+                    seekBy(if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) step else -step)
+                }
+                return true
+            }
+            // OK answers the "Next episode" prompt while the controls are hidden.
+            if (cardAction != CardAction.NONE && !controlsShown() &&
+                (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    swallowOkRelease = true
+                    performCardAction()
+                }
                 return true
             }
             if (episodes.isNotEmpty() && event.action == KeyEvent.ACTION_DOWN) {
@@ -482,6 +558,11 @@ class PlayerActivity : AppCompatActivity() {
             // Let PlayerView show its controller and handle D-pad/media keys first.
             if (playerView.dispatchKeyEvent(event)) return true
             return super.dispatchKeyEvent(event)
+        }
+        if (channelsPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+        if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+            if (event.action == KeyEvent.ACTION_DOWN) openChannels()
+            return true
         }
         val handled = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP,
@@ -520,6 +601,8 @@ class PlayerActivity : AppCompatActivity() {
         btnEpisodes.onFocusChangeListener = keepVisible
         btnNext.onFocusChangeListener = keepVisible
         btnEpisodes.setOnClickListener { openEpisodes() }
+        btnTracks.onFocusChangeListener = keepVisible
+        btnTracks.setOnClickListener { showTrackPicker() }
         btnNext.setOnClickListener { if (hasNextEpisode) playEpisodeAt(episodeIndex + 1) }
         // Up from the player controls reaches the top bar; Down comes back.
         btnEpisodes.nextFocusDownId = androidx.media3.ui.R.id.exo_play_pause
@@ -614,6 +697,8 @@ class PlayerActivity : AppCompatActivity() {
         probed = false
         errorView.visibility = View.GONE
         updateEpisodeButtons()
+        resetEpisodePrompts()
+        player?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().clearOverrides().build() }
         startVod()
         playerView.showController()
     }
@@ -672,6 +757,204 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         override fun seekToPreviousMediaItem() = seekToPrevious()
+    }
+
+    // ---- Audio & subtitles ----
+
+    private fun applyTrackPreferences(p: ExoPlayer) {
+        val builder = p.trackSelectionParameters.buildUpon()
+        prefs.audioLanguage?.let { builder.setPreferredAudioLanguage(it) }
+        when (val sub = prefs.subtitleLanguage) {
+            null -> {}
+            SUBTITLES_OFF -> builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            else -> builder.setPreferredTextLanguage(sub)
+        }
+        p.trackSelectionParameters = builder.build()
+    }
+
+    /** Shown only when there is something to choose: several audio tracks or any subtitles. */
+    private fun updateTracksButton(tracks: Tracks) {
+        val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.sumOf { g -> (0 until g.length).count { g.isTrackSupported(it) } }
+        val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.sumOf { g -> (0 until g.length).count { g.isTrackSupported(it) } }
+        btnTracks.visibility = if (audio > 1 || text > 0) View.VISIBLE else View.GONE
+    }
+
+    private fun showTrackPicker() {
+        val p = player ?: return
+        val names = DefaultTrackNameProvider(resources)
+        val labels = ArrayList<String>()
+        val actions = ArrayList<() -> Unit>()
+        val groups = p.currentTracks.groups
+
+        for (group in groups.filter { it.type == C.TRACK_TYPE_AUDIO }) {
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val format = group.getTrackFormat(i)
+                labels += (if (group.isTrackSelected(i)) "●  " else "○  ") + "Audio:  " + names.getTrackName(format)
+                actions += {
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
+                        .build()
+                    format.language?.let { prefs.audioLanguage = it }
+                }
+            }
+        }
+
+        val textGroups = groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        val subtitlesOff = C.TRACK_TYPE_TEXT in p.trackSelectionParameters.disabledTrackTypes || textGroups.none { it.isSelected }
+        labels += (if (subtitlesOff) "●  " else "○  ") + "Subtitles:  Off"
+        actions += {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+            prefs.subtitleLanguage = SUBTITLES_OFF
+        }
+        var untagged = 0
+        for (group in textGroups) {
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val format = group.getTrackFormat(i)
+                val selected = !subtitlesOff && group.isTrackSelected(i)
+                // Untagged tracks would read "Unknown": number them instead.
+                var name = names.getTrackName(format)
+                if (name == getString(androidx.media3.ui.R.string.exo_track_unknown)) name = "Track ${++untagged}"
+                labels += (if (selected) "●  " else "○  ") + "Subtitles:  " + name
+                actions += {
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
+                        .build()
+                    prefs.subtitleLanguage = format.language
+                }
+            }
+        }
+
+        if (labels.size <= 1) {
+            Toast.makeText(this, "This video has no other audio or subtitles", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Audio & subtitles")
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .show()
+    }
+
+    // ---- D-pad seeking ----
+
+    private var seekStreak = 0
+    private var lastSeekAt = 0L
+
+    /** 10 s per press, growing to 30 s, 1 min and 2 min when pressed in quick succession. */
+    private fun seekStep(): Long {
+        val now = SystemClock.uptimeMillis()
+        seekStreak = if (now - lastSeekAt < 700) seekStreak + 1 else 0
+        lastSeekAt = now
+        return when {
+            seekStreak < 3 -> 10_000L
+            seekStreak < 8 -> 30_000L
+            seekStreak < 15 -> 60_000L
+            else -> 120_000L
+        }
+    }
+
+    private fun seekBy(deltaMs: Long) {
+        val p = player ?: return
+        val duration = p.duration
+        val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
+        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, max))
+        playerView.showController()
+    }
+
+    private fun firstTopButton(): View? =
+        listOf(btnTracks, btnEpisodes, btnNext).firstOrNull { it.visibility == View.VISIBLE }
+
+    // ---- Next episode prompt ----
+
+    private fun resetEpisodePrompts() {
+        nextDismissed = false
+        hideCard()
+    }
+
+    private fun updateEpisodePrompts() {
+        val p = player
+        if (p == null || watchEntry?.type != ContentType.SERIES || errorView.visibility == View.VISIBLE ||
+            episodesPanel.visibility == View.VISIBLE
+        ) {
+            hideCard()
+            return
+        }
+        val pos = p.currentPosition
+        val duration = p.duration
+        val remaining = if (duration != C.TIME_UNSET && duration > 0) duration - pos else Long.MAX_VALUE
+        if (hasNextEpisode && !nextDismissed && remaining <= NEXT_PROMPT_MS && p.playbackState == Player.STATE_READY) {
+            val next = episodes[episodeIndex + 1]
+            showCard(
+                CardAction.NEXT_EPISODE,
+                "Next: ${next.label()}  in ${(remaining / 1000).coerceAtLeast(0)}s   ·   Back to hide",
+                "OK  ▶  Play now",
+            )
+        } else {
+            hideCard()
+        }
+    }
+
+    private fun showCard(action: CardAction, text: String?, button: String) {
+        cardAction = action
+        actionText.text = text ?: ""
+        actionText.visibility = if (text == null) View.GONE else View.VISIBLE
+        actionButton.text = button
+        actionButton.isSelected = true
+        actionCard.visibility = View.VISIBLE
+    }
+
+    private fun hideCard() {
+        if (cardAction == CardAction.NONE && actionCard.visibility == View.GONE) return
+        cardAction = CardAction.NONE
+        actionCard.visibility = View.GONE
+    }
+
+    private fun performCardAction() {
+        if (cardAction == CardAction.NEXT_EPISODE && hasNextEpisode) playEpisodeAt(episodeIndex + 1)
+    }
+
+    /** Back: hide the prompt for the rest of this episode; the next one still starts at the end. */
+    private fun dismissCard() {
+        nextDismissed = true
+        hideCard()
+    }
+
+    // ---- Live: channel list ----
+
+    private fun setupChannelPanel() {
+        channelAdapter = ItemAdapter(
+            grid = false,
+            onClick = { index, _ ->
+                closeChannels()
+                if (index != channelIndex) playChannel(index)
+            },
+            onLongClick = null,
+        )
+        channelsList.layoutManager = LinearLayoutManager(this)
+        channelsList.adapter = channelAdapter
+    }
+
+    private fun openChannels() {
+        val list = Session.zapList
+        if (list.isEmpty()) return
+        overlay.removeCallbacks(hideOverlay)
+        overlay.visibility = View.GONE
+        channelsTitle.text = Session.zapTitle ?: "Channels"
+        channelAdapter.favorites = prefs.favoriteIds(ContentType.LIVE)
+        // Mark the channel that is playing.
+        channelAdapter.submit(list.mapIndexed { i, c -> if (i == channelIndex) c.copy(note = "▶") else c })
+        channelsPanel.visibility = View.VISIBLE
+        (channelsList.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(channelIndex, 200)
+        channelsList.post { channelsList.findViewHolderForAdapterPosition(channelIndex)?.itemView?.requestFocus() }
+    }
+
+    private fun closeChannels() {
+        channelsPanel.visibility = View.GONE
+        playerView.requestFocus()
     }
 
     override fun onDestroy() {

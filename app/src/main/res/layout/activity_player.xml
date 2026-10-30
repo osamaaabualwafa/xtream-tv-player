@@ -88,7 +88,86 @@
                 android:singleLine="true"
                 android:textColor="@color/text_secondary"
                 android:textSize="15sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="◀  Channel list     ▲ ▼  Change channel"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
         </LinearLayout>
+    </LinearLayout>
+
+    <!-- Live: channel list slides in from the left. -->
+    <LinearLayout
+        android:id="@+id/channels_panel"
+        android:layout_width="560dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/overlay"
+        android:orientation="vertical"
+        android:paddingLeft="24dp"
+        android:paddingTop="28dp"
+        android:paddingRight="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/channels_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textAlignment="viewStart"
+            android:textColor="@color/text"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/channels_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingTop="4dp"
+            android:paddingBottom="24dp" />
+    </LinearLayout>
+
+    <!-- Episodes: "Skip intro" / "Next episode in 20s" prompt; OK triggers it. -->
+    <LinearLayout
+        android:id="@+id/action_card"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginRight="48dp"
+        android:layout_marginBottom="140dp"
+        android:background="@drawable/bg_panel"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/action_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="16dp"
+            android:textColor="@color/text"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/action_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_button"
+            android:duplicateParentState="false"
+            android:paddingLeft="18dp"
+            android:paddingTop="10dp"
+            android:paddingRight="18dp"
+            android:paddingBottom="10dp"
+            android:textColor="@color/text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Movies/episodes: shown together with the player controls. -->
@@ -118,6 +197,13 @@
             android:textColor="@color/text"
             android:textSize="22sp"
             android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_tracks"
+            style="@style/TvButton"
+            android:layout_marginRight="12dp"
+            android:text="Audio &amp; subtitles"
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/btn_episodes"
