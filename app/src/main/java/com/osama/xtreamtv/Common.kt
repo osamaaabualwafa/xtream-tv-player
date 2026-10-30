@@ -202,6 +202,16 @@ class Prefs(context: Context) {
         get() = global.getInt("player_menu_style", 0)
         set(value) = global.edit().putInt("player_menu_style", value).apply()
 
+    /** Back from the player keeps it playing in a corner (picture-in-picture) instead of closing. */
+    var miniPlayer: Boolean
+        get() = global.getBoolean("mini_player", true)
+        set(value) = global.edit().putBoolean("mini_player", value).apply()
+
+    /** Poster, title and clock after a minute paused. */
+    var pauseScreensaver: Boolean
+        get() = global.getBoolean("pause_screensaver", true)
+        set(value) = global.edit().putBoolean("pause_screensaver", value).apply()
+
     /** Live stream type: 0 automatic (what the server offers), 1 HLS (m3u8), 2 MPEG-TS. */
     var streamType: Int
         get() = global.getInt("stream_type", 0)
@@ -234,6 +244,30 @@ class Prefs(context: Context) {
 
     // Favorites keep the whole item so the list shows without downloading the full catalogue.
     fun favorites(type: ContentType): List<StreamItem> = readList("favorites_${type.name}").mapNotNull { streamItemFromJson(it) }
+
+    /** When the user last looked at a followed series (provider "last_modified" seconds). */
+    fun seriesSeen(seriesId: String): Long? = sp.getLong("series_seen_$seriesId", -1L).takeIf { it >= 0 }
+
+    fun markSeriesSeen(seriesId: String, seconds: Long) = sp.edit().putLong("series_seen_$seriesId", seconds).apply()
+
+    /** Series in favorites or Continue watching. */
+    fun followedSeriesIds(): Set<String> =
+        favoriteIds(ContentType.SERIES) + continueWatching(ContentType.SERIES).mapNotNull { it.seriesId }
+
+    /**
+     * Followed series the provider changed since the user last opened them ("NEW" badge).
+     * A series seen for the first time is just remembered, so nothing old shows as new.
+     */
+    fun newEpisodeSeries(all: List<StreamItem>): Set<String> {
+        val followed = followedSeriesIds()
+        val result = HashSet<String>()
+        for (item in all) {
+            if (item.id !in followed || item.added <= 0) continue
+            val seen = seriesSeen(item.id)
+            if (seen == null) markSeriesSeen(item.id, item.added) else if (item.added > seen) result.add(item.id)
+        }
+        return result
+    }
 
     fun favoriteIds(type: ContentType): Set<String> = favorites(type).mapTo(HashSet()) { it.id }
 
@@ -574,6 +608,8 @@ class ItemAdapter(
     var items: List<StreamItem> = emptyList()
         private set
     var favorites: Set<String> = emptySet()
+    /** Series with new episodes ("NEW" badge on the poster). */
+    var newIds: Set<String> = emptySet()
 
     fun submit(list: List<StreamItem>) {
         items = list
@@ -606,6 +642,7 @@ class ItemAdapter(
             visibility = if (item.progress >= 0f) View.VISIBLE else View.GONE
             progress = (item.progress.coerceAtLeast(0f) * 1000).toInt()
         }
+        holder.itemView.findViewById<View?>(R.id.new_badge)?.visibility = if (item.id in newIds) View.VISIBLE else View.GONE
         onBindExtra?.invoke(holder, item)
         val focusCallback = onFocusItem
         if (focusCallback != null) {

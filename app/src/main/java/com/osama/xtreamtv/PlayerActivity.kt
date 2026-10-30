@@ -97,6 +97,8 @@ class PlayerActivity : AppCompatActivity() {
         )
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
+        /** The player on screen (full or mini); a new video closes the old one first. */
+        private var current: java.lang.ref.WeakReference<PlayerActivity>? = null
         private const val VOD_RETRIES = 5
         private const val STILL_WATCHING_AFTER = 3
         private val PARSE_ERRORS = setOf(
@@ -240,6 +242,9 @@ class PlayerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
+        // A mini player still running elsewhere: close it (one stream at a time).
+        current?.get()?.takeIf { it !== this }?.finish()
+        current = java.lang.ref.WeakReference(this)
         Appearance.apply(this)
         setContentView(R.layout.activity_player)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -356,7 +361,7 @@ class PlayerActivity : AppCompatActivity() {
                     isLive && overlay.visibility == View.VISIBLE -> overlay.visibility = View.GONE
                     !isLive && cardAction != CardAction.NONE && !controlsShown() -> dismissCard()
                     !isLive && controlsShown() -> controls.hide()
-                    else -> finish()
+                    else -> if (!enterMiniPlayer()) finish()
                 }
             }
         })
@@ -391,6 +396,11 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // The mini player was closed (or the TV went to its home screen): stop for good.
+        if (wasMini) {
+            wasMini = false
+            finish()
+        }
         if (::playerView.isInitialized) {
             playerView.removeCallbacks(autoSave)
             playerView.removeCallbacks(ticker)
@@ -508,6 +518,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = scheduleScreensaver()
+
         override fun onPlaybackStateChanged(state: Int) {
             progress.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
             if (state == Player.STATE_READY) {
@@ -765,7 +777,103 @@ class PlayerActivity : AppCompatActivity() {
             .show()
     }
 
+    // ---- Mini player (picture-in-picture) ----
+
+    private var wasMini = false
+
+    /** Back with nothing open: keep playing in a corner (Settings > Player). False if not possible. */
+    private fun enterMiniPlayer(): Boolean {
+        if (!prefs.miniPlayer || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        if (player?.isPlaying != true) return false
+        return try {
+            val params = android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
+            enterPictureInPictureMode(params)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            wasMini = true
+            // Only the picture in the corner.
+            if (::controls.isInitialized && !isLive) controls.hide()
+            closePanels(refocus = false)
+            if (::overlay.isInitialized) overlay.visibility = View.GONE
+            hideScreensaver()
+            channelsPanel.visibility = View.GONE
+            actionCard.visibility = View.GONE
+        } else {
+            wasMini = false
+            playerView.requestFocus()
+        }
+    }
+
+    // ---- Screensaver when paused ----
+
+    private var screensaver: View? = null
+    private val showScreensaver = Runnable { showScreensaverNow() }
+
+    /** Movies / episodes paused for a minute: poster, title and clock instead of a still frame. */
+    private fun scheduleScreensaver() {
+        if (!::playerView.isInitialized) return
+        playerView.removeCallbacks(showScreensaver)
+        val p = player ?: return
+        if (isLive || !prefs.pauseScreensaver || p.isPlaying || p.playbackState != Player.STATE_READY) {
+            if (p.isPlaying) hideScreensaver()
+            return
+        }
+        playerView.postDelayed(showScreensaver, 60_000)
+    }
+
+    private fun showScreensaverNow() {
+        val p = player ?: return
+        if (p.isPlaying || isInPictureInPictureModeCompat()) return
+        closePanels(refocus = false)
+        if (::controls.isInitialized) controls.hide()
+        val view = screensaver ?: layoutInflater.inflate(R.layout.view_screensaver, findViewById(android.R.id.content), false).also {
+            (findViewById<android.view.ViewGroup>(android.R.id.content)).addView(it)
+            screensaver = it
+        }
+        view.findViewById<android.widget.ImageView>(R.id.saver_poster).load(watchEntry?.image ?: seriesCover) { crossfade(true) }
+        view.findViewById<TextView>(R.id.saver_title).text = vodTitle
+        val total = p.duration.takeIf { it > 0 }
+        view.findViewById<TextView>(R.id.saver_where).text =
+            "Paused at ${formatDuration(p.currentPosition)}" + (total?.let { " of ${formatDuration(it)}" } ?: "")
+        view.findViewById<TextView>(R.id.saver_clock).text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        view.alpha = 0f
+        view.visibility = View.VISIBLE
+        view.animate().alpha(1f).setDuration(600).start()
+        // Keep the clock right while it is up.
+        view.postDelayed(object : Runnable {
+            override fun run() {
+                if (view.visibility != View.VISIBLE) return
+                view.findViewById<TextView>(R.id.saver_clock).text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                view.postDelayed(this, 30_000)
+            }
+        }, 30_000)
+    }
+
+    private fun hideScreensaver(): Boolean {
+        val view = screensaver ?: return false
+        if (view.visibility != View.VISIBLE) return false
+        view.visibility = View.GONE
+        return true
+    }
+
+    private fun isInPictureInPictureModeCompat() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Screensaver up: any key just takes it away (and the minute starts again).
+        if (screensaver?.visibility == View.VISIBLE) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                hideScreensaver()
+                scheduleScreensaver()
+            }
+            return true
+        }
         // Somebody is there: start counting episodes again.
         if (event.action == KeyEvent.ACTION_DOWN) autoEpisodes = 0
         // Menu open: plain D-pad navigation; Back (remote or mouse) closes it.
@@ -1825,6 +1933,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (current?.get() === this) current = null
+        if (::playerView.isInitialized) playerView.removeCallbacks(showScreensaver)
         if (::overlay.isInitialized) overlay.removeCallbacks(hideOverlay)
         if (::controls.isInitialized) controls.release()
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)

@@ -3,6 +3,7 @@ package com.osama.xtreamtv
 import android.net.Uri
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -214,6 +215,9 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
 
     companion object {
         private const val LIST_CACHE_MS = 12 * 60 * 60 * 1000L
+        /** Lists being refreshed in the background (cache file names). */
+        private val refreshing = HashSet<String>()
+        private val backgroundScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         private val CACHED_ACTIONS = setOf(
             "get_live_categories", "get_vod_categories", "get_series_categories",
             "get_live_streams", "get_vod_streams", "get_series",
@@ -452,6 +456,10 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
         val fresh = cacheFile != null && cacheFile.exists() && System.currentTimeMillis() - cacheFile.lastModified() < LIST_CACHE_MS
         val text = if (fresh) {
             cacheFile!!.readText()
+        } else if (cacheFile != null && cacheFile.exists()) {
+            // Old list: show it straight away and fetch the new one in the background for next time.
+            refreshInBackground(url.toString(), cacheFile)
+            cacheFile.readText()
         } else {
             try {
                 httpGet(url.toString()).also { body -> cacheFile?.let { f -> runCatching { f.writeText(body) } } }
@@ -467,6 +475,24 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 JSONTokener(text).nextValue()
             } catch (e: Exception) {
                 throw IOException("Server returned an invalid response")
+            }
+        }
+    }
+
+    private fun refreshInBackground(url: String, file: File) {
+        synchronized(refreshing) { if (!refreshing.add(file.name)) return }
+        backgroundScope.launch {
+            try {
+                val body = httpGet(url)
+                if (body.isNotBlank()) {
+                    val tmp = File(file.parentFile, file.name + ".tmp")
+                    tmp.writeText(body)
+                    tmp.renameTo(file)
+                }
+            } catch (e: Exception) {
+                // Keep the old list; try again next time.
+            } finally {
+                synchronized(refreshing) { refreshing.remove(file.name) }
             }
         }
     }

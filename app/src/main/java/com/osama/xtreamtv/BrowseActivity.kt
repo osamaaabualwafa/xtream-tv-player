@@ -512,6 +512,9 @@ class BrowseActivity : AppCompatActivity() {
         val query = search.text.toString().trim()
         val list = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
         itemAdapter.favorites = prefs.favoriteIds(type)
+        if (type == ContentType.SERIES) {
+            Session.streamCache["SERIES:__all__"]?.let { itemAdapter.newIds = prefs.newEpisodeSeries(it) }
+        }
         itemAdapter.submit(list)
         if (scrollToTop) itemsView.scrollToPosition(0)
         if (list.isEmpty()) findViewById<View>(R.id.info_strip).visibility = if (style == Appearance.BROWSE_PREVIEW) View.INVISIBLE else View.GONE

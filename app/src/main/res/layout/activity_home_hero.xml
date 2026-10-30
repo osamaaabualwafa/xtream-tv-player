@@ -237,6 +237,15 @@
         </LinearLayout>
 
         <TextView
+            android:id="@+id/row_new_title"
+            style="@style/HomeRowTitle"
+            android:text="New episodes" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_new"
+            style="@style/HomeRow" />
+
+        <TextView
             android:id="@+id/row_continue_title"
             style="@style/HomeRowTitle"
             android:text="Continue watching" />

@@ -40,6 +40,7 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var channelsAdapter: ItemAdapter
     private lateinit var favoritesAdapter: ItemAdapter
     private lateinit var recentAdapter: ItemAdapter
+    private lateinit var newAdapter: ItemAdapter
     private var expiryShown = false
     /** Layout and colour this screen was built with; rebuilt when Settings changes them. */
     private var builtLook = ""
@@ -109,6 +110,7 @@ class HomeActivity : AppCompatActivity() {
         })
         favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
 
         showAccount()
         loadCounts()
@@ -136,6 +138,7 @@ class HomeActivity : AppCompatActivity() {
         clock.removeCallbacks(clockTicker)
         clockTicker.run()
         loadLocalRows()
+        loadNewEpisodes()
         lifecycleScope.launch {
             try {
                 Session.userInfo = api.userInfo()
@@ -251,6 +254,25 @@ class HomeActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     ""
                 }
+            }
+        }
+    }
+
+    /** "New episodes": followed series the provider updated since they were last opened. */
+    private fun loadNewEpisodes() {
+        lifecycleScope.launch {
+            try {
+                val all = allStreams(ContentType.SERIES).await()
+                val ids = prefs.newEpisodeSeries(all)
+                val items = all.filter { it.id in ids }.sortedByDescending { it.added }
+                newAdapter.newIds = ids
+                favoritesAdapter.newIds = ids
+                favoritesAdapter.notifyItemRangeChanged(0, favoritesAdapter.itemCount)
+                showRow(R.id.row_new, R.id.row_new_title, newAdapter, items)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The row just stays hidden.
             }
         }
     }

@@ -185,6 +185,8 @@ class SettingsActivity : AppCompatActivity() {
         )
         option("Episodes list", listOf(0 to "Side panel", 1 to "Bottom shelf"), { prefs.episodesStyle }, { prefs.episodesStyle = it })
         option("Player menu", listOf(0 to "Small pop-up", 1 to "Side panel"), { prefs.playerMenuStyle }, { prefs.playerMenuStyle = it })
+        option("Back from the player", listOf(true to "Keep playing in a corner", false to "Close the video"), { prefs.miniPlayer }, { prefs.miniPlayer = it })
+        option("Screensaver when paused", listOf(true to "On", false to "Off"), { prefs.pauseScreensaver }, { prefs.pauseScreensaver = it })
         option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
         heading("Picture and sound")
         option("Picture size", listOf(0 to "Fit", 1 to "Zoom (fill screen)", 2 to "Stretch"), { prefs.pictureSize }, { prefs.pictureSize = it })

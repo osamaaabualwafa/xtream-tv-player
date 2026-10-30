@@ -111,6 +111,10 @@ class DetailsActivity : AppCompatActivity() {
         }
         updateFavoriteButton()
 
+        if (!isMovie) {
+            val modified = Session.streamCache["SERIES:__all__"]?.firstOrNull { it.id == item.id }?.added ?: 0L
+            prefs.markSeriesSeen(item.id, maxOf(modified, System.currentTimeMillis() / 1000))
+        }
         if (isMovie) setupMovie() else setupSeries()
     }
 
