@@ -3,14 +3,14 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_activated="true">
         <shape android:shape="oval">
-            <solid android:color="#FFE5484D" />
+            <solid android:color="?attr/appLive" />
             <stroke android:width="5dp" android:color="#40E5484D" />
         </shape>
     </item>
     <item android:state_focused="true">
         <shape android:shape="oval">
             <solid android:color="?attr/appAccent80" />
-            <stroke android:width="2dp" android:color="@android:color/white" />
+            <stroke android:width="?attr/appFocusStrokeThin" android:color="?attr/appFocusStroke" />
         </shape>
     </item>
     <item>

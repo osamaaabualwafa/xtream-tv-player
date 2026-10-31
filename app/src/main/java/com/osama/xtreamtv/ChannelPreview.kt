@@ -61,7 +61,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
         status = TextView(context).apply {
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER or Gravity.BOTTOM)
                 .apply { bottomMargin = dp(14) }
-            setTextColor(context.getColor(R.color.text_secondary))
+            setTextColor(context.themeColor(R.attr.appTextSecondary))
             textSize = 14f
         }
         val box = FrameLayout(context).apply {
@@ -76,7 +76,7 @@ class ChannelPreview(private val context: Context, private val api: XtreamApi, p
             }
         }
         label = TextView(context).apply {
-            setTextColor(context.getColor(R.color.text))
+            setTextColor(context.themeColor(R.attr.appText))
             textSize = 15f
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END

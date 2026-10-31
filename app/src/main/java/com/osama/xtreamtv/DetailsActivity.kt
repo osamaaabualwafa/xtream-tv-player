@@ -202,7 +202,7 @@ class DetailsActivity : AppCompatActivity() {
         for (v in values.filter { it.isNotBlank() }) {
             meta.addView(TextView(this).apply {
                 text = v
-                setTextColor(getColor(R.color.text))
+                setTextColor(themeColor(R.attr.appText))
                 textSize = 14f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -407,10 +407,7 @@ class DetailsActivity : AppCompatActivity() {
             },
             ep.duration?.let { durationText(it) },
         ).joinToString("   ·   ")
-        vh.itemView.findViewById<ImageView?>(R.id.image)?.load(posterUrl) {
-            crossfade(false)
-            error(R.drawable.placeholder)
-        }
+        vh.itemView.findViewById<ImageView?>(R.id.image)?.loadEpisodeImage(ep, posterUrl)
         vh.itemView.findViewById<ProgressBar?>(R.id.watch_progress)?.apply {
             val fraction = when {
                 watched -> 1f

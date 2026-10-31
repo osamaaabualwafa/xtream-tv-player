@@ -3,7 +3,7 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="oval">
-            <stroke android:width="3dp" android:color="@android:color/white" />
+            <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
         </shape>
     </item>
     <item android:state_activated="true">

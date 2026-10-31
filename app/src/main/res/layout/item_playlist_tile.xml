@@ -29,13 +29,14 @@
 
     <TextView
         android:id="@+id/title"
+        android:duplicateParentState="true"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:ellipsize="end"
         android:gravity="center"
         android:singleLine="true"
-        android:textColor="@color/text"
+        android:textColor="@color/text_focus_primary"
         android:textSize="18sp"
         android:textStyle="bold" />
 
@@ -47,6 +48,6 @@
         android:ellipsize="end"
         android:gravity="center"
         android:singleLine="true"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/appTextSecondary"
         android:textSize="14sp" />
 </LinearLayout>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Main text on something that can be highlighted: the theme's highlight text colour while focused
+     (white in Default; dark on Coastal's light highlight). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/appFocusText" android:state_focused="true" />
+    <item android:color="?attr/appText" />
+</selector>

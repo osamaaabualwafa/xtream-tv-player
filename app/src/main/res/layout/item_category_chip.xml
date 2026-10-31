@@ -14,12 +14,13 @@
 
     <TextView
         android:id="@+id/title"
+        android:duplicateParentState="true"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:maxWidth="280dp"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textColor="@color/text"
+        android:textColor="@color/text_focus_primary"
         android:textSize="16sp" />
 
     <TextView
@@ -28,6 +29,6 @@
         android:layout_height="wrap_content"
         android:layout_marginLeft="8dp"
         android:singleLine="true"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/appTextSecondary"
         android:textSize="14sp" />
 </LinearLayout>

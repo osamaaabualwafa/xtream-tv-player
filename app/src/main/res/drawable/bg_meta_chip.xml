@@ -2,6 +2,6 @@
 <!-- Details page: rating / year / length / genre chip. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <solid android:color="#14FFFFFF" />
-    <stroke android:width="1dp" android:color="#29FFFFFF" />
+    <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
     <corners android:radius="16dp" />
 </shape>

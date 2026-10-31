@@ -116,6 +116,7 @@ class HomeActivity : AppCompatActivity() {
         findViewById<View>(R.id.playlist_chip).setOnClickListener(openPlaylists)
         findViewById<View>(R.id.refresh_lists).setOnClickListener { refreshLists() }
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
+        pinPageEdges()
 
         continueAdapter = row(R.id.row_continue, R.layout.item_poster_row, { _, item -> resume(item.id) }) { _, item ->
             confirmRemoveProgress(this, prefs, item) { loadLocalRows() }
@@ -163,6 +164,7 @@ class HomeActivity : AppCompatActivity() {
         }
         loadLocalRows()
         loadNewEpisodes()
+        prepareSections()
         lifecycleScope.launch {
             try {
                 Session.userInfo = api.userInfo()
@@ -175,13 +177,33 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
         MiniPlayerBar.detach(this)
         findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
+    }
+
+    private val bottomRow = intArrayOf(R.id.refresh_lists, R.id.check_updates, R.id.logout)
+    private val topBar = intArrayOf(R.id.playlist_chip, R.id.settings_button)
+
+    /**
+     * Scrolling Home layouts: the bottom buttons bring the whole page end into view (account and
+     * version below them), the top bar the very top; one more Down / Up there does nothing.
+     */
+    private fun pinPageEdges() {
+        val scroll = (findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as? android.widget.ScrollView) ?: return
+        for (id in bottomRow) findViewById<View?>(id)?.setOnFocusChangeListener { _, has -> if (has) scroll.post { scroll.smoothScrollTo(0, scroll.getChildAt(0).height) } }
+        for (id in topBar) findViewById<View?>(id)?.setOnFocusChangeListener { _, has -> if (has) scroll.post { scroll.smoothScrollTo(0, 0) } }
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val id = currentFocus?.id
+        val stop = (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && id != null && id in bottomRow) ||
+            (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && id != null && id in topBar)
+        return if (stop) true else super.dispatchKeyEvent(event)
     }
 
     private fun row(
@@ -374,6 +396,28 @@ class HomeActivity : AppCompatActivity() {
     }
 
     /** "New episodes": followed series the provider updated since they were last opened. */
+    private var prepareJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * While Home is showing, quietly get Movies, Series and Live TV ready (one after another, after
+     * a short pause so Home itself appears first). Skipped on TVs short of memory.
+     */
+    private fun prepareSections() {
+        if (prepareJob?.isActive == true || Look.isLightDevice(this)) return
+        prepareJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(1500)
+            for (type in listOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE)) {
+                try {
+                    Session.prepare(api, type)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Not reachable now: the section loads as usual when opened.
+                }
+            }
+        }
+    }
+
     private fun loadNewEpisodes() {
         lifecycleScope.launch {
             try {

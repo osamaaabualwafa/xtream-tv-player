@@ -26,11 +26,12 @@
             android:paddingRight="6dp">
 
             <TextView
+        android:tag="screen_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Xtream TV"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="22sp"
                 android:textStyle="bold" />
 
@@ -38,7 +39,7 @@
                 android:id="@+id/clock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="18sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -60,7 +61,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Live TV"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
 
                 <TextView
@@ -68,7 +69,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="#FFC8D0DC"
+                    android:textColor="?attr/appTileCount"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -89,7 +90,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Movies"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
 
                 <TextView
@@ -97,7 +98,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="#FFC8D0DC"
+                    android:textColor="?attr/appTileCount"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -118,7 +119,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Series"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
 
                 <TextView
@@ -126,7 +127,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="#FFC8D0DC"
+                    android:textColor="?attr/appTileCount"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -147,7 +148,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Search"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
             </LinearLayout>
 
@@ -161,7 +162,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="⚙   Settings"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
             </LinearLayout>
 
@@ -175,7 +176,7 @@
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="☰   Playlists"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="18sp" />
             </LinearLayout>
 
@@ -218,7 +219,7 @@
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="15sp" />
 
                 <TextView
@@ -226,7 +227,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/appTextSecondary"
                     android:textSize="12sp"
                     android:visibility="gone" />
             </LinearLayout>
@@ -257,7 +258,7 @@
             android:layout_marginTop="14dp"
             android:background="@drawable/bg_glass_card"
             android:padding="14dp"
-            android:textColor="@color/gold"
+            android:textColor="?attr/appGold"
             android:textSize="16sp"
             android:visibility="gone" />
 
@@ -321,7 +322,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:lineSpacingExtra="4dp"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="14sp" />
 
             <TextView
@@ -340,7 +341,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/appTextSecondary"
             android:textSize="13sp" />
 
         </LinearLayout>

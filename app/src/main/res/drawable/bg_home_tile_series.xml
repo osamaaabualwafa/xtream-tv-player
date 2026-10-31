@@ -3,16 +3,16 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <gradient android:angle="315" android:endColor="#1A8A5CF6" android:startColor="#6B8A5CF6" />
-            <stroke android:width="3dp" android:color="@android:color/white" />
-            <corners android:radius="22dp" />
+            <gradient android:angle="315" android:endColor="?attr/appTileFocusSeriesEnd" android:startColor="?attr/appTileFocusSeriesStart" />
+            <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
+            <corners android:radius="?attr/appCorner22" />
         </shape>
     </item>
     <item>
         <shape>
-            <gradient android:angle="315" android:endColor="#0AFFFFFF" android:startColor="#408A5CF6" />
-            <stroke android:width="1dp" android:color="#29FFFFFF" />
-            <corners android:radius="22dp" />
+            <gradient android:angle="315" android:endColor="#0AFFFFFF" android:startColor="?attr/appTile3_40" />
+            <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
+            <corners android:radius="?attr/appCorner22" />
         </shape>
     </item>
 </selector>

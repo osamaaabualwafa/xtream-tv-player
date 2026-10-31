@@ -69,6 +69,7 @@ class Prefs(context: Context) {
     fun deletePlaylist(id: String) {
         writePlaylists(playlists().filter { it.id != id })
         if (activeId == id) activeId = null
+        if (global.getString("default_playlist", null) == id) defaultPlaylistId = null
         if (id == LEGACY_ID) {
             val e = global.edit()
             global.all.keys.filter { k -> DATA_PREFIXES.any { k.startsWith(it) } }.forEach { e.remove(it) }
@@ -77,6 +78,11 @@ class Prefs(context: Context) {
             dataFile(id).edit().clear().apply()
         }
     }
+
+    /** Playlist that opens straight away at start when there are several (null: ask). */
+    var defaultPlaylistId: String?
+        get() = global.getString("default_playlist", null)?.takeIf { id -> playlists().any { it.id == id } }
+        set(value) = global.edit().putString("default_playlist", value).apply()
 
     var activeId: String?
         get() = global.getString("active", null)
@@ -100,6 +106,47 @@ class Prefs(context: Context) {
         if (base == null || user == null || pass == null) return
         writePlaylists(listOf(Playlist(LEGACY_ID, base.substringAfter("://"), base, user, pass)))
         global.edit().putString("active", LEGACY_ID).remove("base").remove("user").remove("pass").apply()
+    }
+
+    /**
+     * After an update: write down every setting's current value, so a later version that changes
+     * a default can never change what this user already has. Runs once per app version.
+     */
+    fun pinSettings(versionCode: Int) {
+        if (global.getInt("settings_pinned_for", -1) == versionCode) return
+        val e = global.edit()
+        if (!global.contains("home_style")) e.putInt("home_style", Appearance.HOME_TILES)
+        if (!global.contains("browse_style")) e.putInt("browse_style", Appearance.BROWSE_SIDEBAR)
+        if (!global.contains("accent")) e.putInt("accent", 0)
+        if (!global.contains("sub_size")) e.putInt("sub_size", 1)
+        if (!global.contains("sub_bg")) e.putBoolean("sub_bg", false)
+        if (!global.contains("seek_fwd")) e.putInt("seek_fwd", 10)
+        if (!global.contains("seek_back")) e.putInt("seek_back", 5)
+        if (!global.contains("resume_mode")) e.putInt("resume_mode", 0)
+        if (!global.contains("auto_next")) e.putBoolean("auto_next", true)
+        if (!global.contains("next_countdown")) e.putInt("next_countdown", 30)
+        if (!global.contains("controls_hide")) e.putInt("controls_hide", 5)
+        if (!global.contains("channel_preview")) e.putBoolean("channel_preview", true)
+        if (!global.contains("vod_player")) e.putInt("vod_player", 0)
+        if (!global.contains("episodes_style")) e.putInt("episodes_style", 0)
+        if (!global.contains("player_menu_style")) e.putInt("player_menu_style", 0)
+        if (!global.contains("mini_player")) e.putBoolean("mini_player", true)
+        if (!global.contains("pause_screensaver")) e.putBoolean("pause_screensaver", true)
+        if (!global.contains("match_frame_rate")) e.putBoolean("match_frame_rate", false)
+        if (!global.contains("decoder_mode")) e.putInt("decoder_mode", 0)
+        if (!global.contains("buffer_size")) e.putInt("buffer_size", 1)
+        if (!global.contains("palette")) e.putInt("palette", 0)
+        if (!global.contains("background_style")) e.putInt("background_style", 0)
+        if (!global.contains("ui_size")) e.putInt("ui_size", 0)
+        if (!global.contains("text_size")) e.putInt("text_size", 1)
+        if (!global.contains("backdrop_follows")) e.putBoolean("backdrop_follows", false)
+        if (!global.contains("poster_glow")) e.putBoolean("poster_glow", !Look.isLightDevice(app))
+        if (!global.contains("featured_banner")) e.putBoolean("featured_banner", false)
+        if (!global.contains("stream_type")) e.putInt("stream_type", 0)
+        if (!global.contains("picture_size")) e.putInt("picture_size", 0)
+        if (!global.contains("theme")) e.putInt("theme", 0)
+        e.putInt("settings_pinned_for", versionCode)
+        e.apply()
     }
 
     /** Comma-separated allowed_output_formats from the last login. */
@@ -228,6 +275,16 @@ class Prefs(context: Context) {
         set(value) = global.edit().putInt("buffer_size", value).apply()
 
     // Settings > Look.
+    /** Settings > Look > Theme: 0 Default, 1 Cinema, 2 Coastal, 3 Coconut (Appearance.THEME_NAMES). */
+    var themeIndex: Int
+        get() = global.getInt("theme", 0)
+        set(value) = global.edit().putInt("theme", value).apply()
+
+    /** Whole-app palette: 0 Default (theme colour + background apply), 1 Coastal, 2 Coconut. */
+    var paletteIndex: Int
+        get() = global.getInt("palette", 0)
+        set(value) = global.edit().putInt("palette", value).apply()
+
     var backgroundStyle: Int
         get() = global.getInt("background_style", 0)
         set(value) = global.edit().putInt("background_style", value).apply()
@@ -249,7 +306,7 @@ class Prefs(context: Context) {
 
     /** Highlighted poster rises with a glow, the others dim. */
     var posterGlow: Boolean
-        get() = global.getBoolean("poster_glow", true)
+        get() = global.getBoolean("poster_glow", !Look.isLightDevice(app))
         set(value) = global.edit().putBoolean("poster_glow", value).apply()
 
     /** Rotating banner at the top of Home. */
@@ -476,6 +533,22 @@ object Session {
     val streamCache = HashMap<String, List<StreamItem>>()
     val categoryCache = HashMap<ContentType, List<Category>>()
 
+    /**
+     * Get a section ready before it is opened (from Home): its categories, its full list, and that
+     * list sorted into every category, all in the background, so opening it is instant.
+     */
+    suspend fun prepare(api: XtreamApi, type: ContentType) {
+        val allKey = "${type.name}:__all__"
+        if (categoryCache[type] == null) categoryCache[type] = api.categories(type)
+        val all = streamCache[allKey] ?: api.streams(type, null).also { streamCache[allKey] = it }
+        val byCategory = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val lists = HashMap<String, ArrayList<StreamItem>>()
+            for (item in all) for (id in item.categoryIds) lists.getOrPut(id) { ArrayList() }.add(item)
+            lists
+        }
+        for ((id, list) in byCategory) streamCache.getOrPut("${type.name}:$id") { list }
+    }
+
     fun api(context: Context): XtreamApi? {
         api?.let { return it }
         val account = Prefs(context).account ?: return null
@@ -623,16 +696,41 @@ val scaleOnFocus = View.OnFocusChangeListener { v, hasFocus ->
  * TV graphics chips can't keep up with. The overlay looks the same and costs nothing.
  */
 fun dimCard(card: View, dim: Boolean) {
-    if (android.os.Build.VERSION.SDK_INT < 23) {
+    // Only the poster picture fades (an image draws its own transparency directly, no extra layer),
+    // so dimming costs nothing while the grid scrolls; the card's frame and text stay put.
+    val image = card.findViewById<ImageView?>(R.id.image)
+    if (image == null) {
         card.animate().alpha(if (dim) 0.72f else 1f).setDuration(140).start()
         return
     }
-    if (card.alpha != 1f) card.alpha = 1f
-    val shade = (card.foreground as? android.graphics.drawable.ColorDrawable)
-        ?: android.graphics.drawable.ColorDrawable(0xFF000000.toInt()).also { it.alpha = 0; card.foreground = it }
-    val target = if (dim) 72 else 0
-    if (shade.alpha == target) return
-    android.animation.ObjectAnimator.ofInt(shade, "alpha", shade.alpha, target).setDuration(140).start()
+    val to = if (dim) 0.55f else 1f
+    if (image.alpha == to) return
+    image.animate().alpha(to).setDuration(140).start()
+}
+
+/**
+ * Episode picture in a wide card: the episode's own still fills it; without one, the series'
+ * portrait poster is shown whole (not cropped) on a dark backing.
+ */
+fun ImageView.loadEpisodeImage(episode: Episode, poster: String?) {
+    val still = episode.image
+    scaleType = if (still != null) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+    load(still ?: poster) {
+        crossfade(false)
+        error(R.drawable.placeholder)
+        // The poster didn't come through as a still: fall back to it.
+        if (still != null && poster != null) listener(onError = { _, _ ->
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            load(poster) { crossfade(false) }
+        })
+    }
+}
+
+/** A colour from the screen's theme (Settings > Look > Theme): text, surfaces, accent… */
+fun Context.themeColor(attr: Int): Int {
+    val value = android.util.TypedValue()
+    theme.resolveAttribute(attr, value, true)
+    return if (value.resourceId != 0) androidx.core.content.ContextCompat.getColor(this, value.resourceId) else value.data
 }
 
 /** Simple list of focusable rows with a title and optional subtitle. */
@@ -736,11 +834,23 @@ class ItemAdapter(
 
     override fun getItemCount() = items.size
 
+    private var recycler: RecyclerView? = null
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        recycler = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        if (recycler === recyclerView) recycler = null
+    }
+
     /** Pictures already asked for (so scrolling back and forth doesn't ask again). */
     private val prefetched = HashSet<String>()
 
     /** Start the picture two rows ahead now, at the size it will be shown. */
     private fun prefetchAhead(holder: VH, position: Int) {
+        // Only while moving inside the list: a newly shown category loads its own posters first.
+        if (recycler?.hasFocus() != true) return
         val w = holder.image.width
         val h = holder.image.height
         if (w <= 0 || h <= 0) return
@@ -781,7 +891,11 @@ class ItemAdapter(
         // Recycled rows may still be dimmed from the focus effect.
         if (!holder.itemView.hasFocus()) {
             holder.itemView.alpha = 1f
-            (holder.itemView.foreground as? android.graphics.drawable.ColorDrawable)?.alpha = 0
+            // A poster scrolling into view while the grid has the highlight arrives already dimmed
+            // (Settings > Look > Highlighted poster: glow), like the others around the highlight.
+            holder.image.animate().cancel()
+            val dim = grid && recycler?.hasFocus() == true && Prefs(holder.itemView.context).posterGlow
+            holder.image.alpha = if (dim) 0.55f else 1f
         }
         holder.itemView.findViewById<View?>(R.id.new_badge)?.visibility = if (item.id in newIds) View.VISIBLE else View.GONE
         onBindExtra?.invoke(holder, item)
@@ -845,6 +959,19 @@ class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyc
     override fun requestChildRectangleOnScreen(
         parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
     ): Boolean = centerOnFocus(parent, child, immediate)
+
+    /**
+     * Keep the next row ready above and below the screen (built and its posters loading), so the
+     * row sliding in is already drawn. Not on TVs short of memory.
+     */
+    private val light = Look.isLightDevice(context)
+
+    override fun calculateExtraLayoutSpace(state: RecyclerView.State, extraLayoutSpace: IntArray) {
+        if (light) return super.calculateExtraLayoutSpace(state, extraLayoutSpace)
+        val extra = height / 3
+        extraLayoutSpace[0] = extra
+        extraLayoutSpace[1] = extra
+    }
 }
 
 /** Smooth list settings for TV lists and grids. */
@@ -862,7 +989,7 @@ fun RecyclerView.tuneForTv() {
  * the row and scrolls it, instead of jumping out to whatever is nearest when the next item isn't
  * on screen yet. At the ends the highlight stays put.
  */
-class RowLayoutManager(context: android.content.Context, orientation: Int = HORIZONTAL, private val center: Boolean = false) :
+class RowLayoutManager(context: android.content.Context, @RecyclerView.Orientation orientation: Int = HORIZONTAL, private val center: Boolean = false) :
     LinearLayoutManager(context, orientation, false) {
 
     override fun requestChildRectangleOnScreen(
@@ -875,12 +1002,31 @@ class RowLayoutManager(context: android.content.Context, orientation: Int = HORI
         val backward = if (orientation == HORIZONTAL) View.FOCUS_LEFT else View.FOCUS_UP
         if (direction != forward && direction != backward) return null
         val item = findContainingItemView(focused) ?: return null
-        val next = getPosition(item) + if (direction == forward) 1 else -1
+        // Count from a move still waiting for its row to appear, so quick presses all add up.
+        val from = if (pending != RecyclerView.NO_POSITION) pending else getPosition(item)
+        val next = from + if (direction == forward) 1 else -1
         // Ends: along a row, stay. A list's last item stays too (Down would jump to whatever is
         // nearest, often another list); Up from its first item leaves normally (search, tabs).
         if (next < 0 || next >= itemCount) return if (orientation == HORIZONTAL || next >= itemCount) focused else null
-        findViewByPosition(next)?.let { return it }
+        findViewByPosition(next)?.let { pending = RecyclerView.NO_POSITION; return it }
+        // Not drawn yet: bring it in, then move the highlight there once it is (the press isn't lost).
+        pending = next
         scrollToPosition(next)
+        focused.post {
+            if (pending == next) {
+                pending = RecyclerView.NO_POSITION
+                findViewByPosition(next)?.requestFocus()
+            }
+        }
         return focused
+    }
+
+    private var pending = RecyclerView.NO_POSITION
+
+    // Rows redrawn (highlight, counts, progress) while the list slides would glide over each
+    // other for a moment: these remote-driven lists change in place, without row animations.
+    override fun onAttachedToWindow(view: RecyclerView) {
+        super.onAttachedToWindow(view)
+        view.itemAnimator = null
     }
 }

@@ -129,6 +129,14 @@ class PlaylistsActivity : AppCompatActivity() {
                     open(playlists[0])
                     return
                 }
+                else -> {
+                    // Several: the one chosen to open at start (playlist options or Settings).
+                    playlists.firstOrNull { it.id == prefs.defaultPlaylistId }?.let { p ->
+                        showList(playlists)
+                        open(p)
+                        return
+                    }
+                }
             }
         }
         showList(playlists)
@@ -160,8 +168,9 @@ class PlaylistsActivity : AppCompatActivity() {
             Appearance.bindAvatar(initial, prefs, p.id, p.name, letterSizeSp = 36f, emojiSizeSp = 40f)
             vh.title.text = p.name
             val status = statuses[p.id]
-            vh.subtitle?.text = status?.first ?: ""
-            vh.subtitle?.setTextColor(getColor(if (status?.second == true) R.color.error else R.color.text_secondary))
+            // The one that opens at start gets a star in front of its status.
+            vh.subtitle?.text = (if (p.id == prefs.defaultPlaylistId) "★ Opens at start" + (status?.first?.let { "  ·  $it" } ?: "") else status?.first) ?: ""
+            vh.subtitle?.setTextColor(themeColor(if (status?.second == true) R.attr.appError else R.attr.appTextSecondary))
         }
         // The focused tile grows a little.
         vh.itemView.setOnFocusChangeListener { v, hasFocus ->
@@ -311,13 +320,23 @@ class PlaylistsActivity : AppCompatActivity() {
 
     private fun showOptions(p: Playlist) {
         if (busy) return
+        val isDefault = prefs.defaultPlaylistId == p.id
         AlertDialog.Builder(this)
             .setTitle(p.name)
-            .setItems(arrayOf("Edit", "Change avatar", "Delete")) { _, which ->
+            .setItems(arrayOf("Edit", "Change avatar", if (isDefault) "Stop opening at start" else "Open at start", "Delete")) { _, which ->
                 when (which) {
                     0 -> startActivity(LoginActivity.editIntent(this, p.id))
                     1 -> AvatarPicker.show(this, p) { showList(prefs.playlists()) }
-                    2 -> confirmDelete(p)
+                    2 -> {
+                        prefs.defaultPlaylistId = if (isDefault) null else p.id
+                        android.widget.Toast.makeText(
+                            this,
+                            if (isDefault) "The app will ask which playlist to open" else "${p.name} will open at start",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        showList(prefs.playlists())
+                    }
+                    3 -> confirmDelete(p)
                 }
             }
             .setNegativeButton("Cancel", null)

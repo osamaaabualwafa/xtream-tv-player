@@ -14,18 +14,20 @@
 
     <TextView
         android:id="@+id/title"
+        android:duplicateParentState="true"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:singleLine="true"
-        android:textColor="@color/text"
+        android:textColor="@color/text_focus_primary"
         android:textSize="17sp" />
 
     <TextView
         android:id="@+id/subtitle"
+        android:duplicateParentState="true"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="?attr/appAccent"
+        android:textColor="@color/accent_focus"
         android:textSize="16sp" />
 </LinearLayout>

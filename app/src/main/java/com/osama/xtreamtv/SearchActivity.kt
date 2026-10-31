@@ -96,7 +96,7 @@ class SearchActivity : AppCompatActivity() {
         when {
             listening -> stopListening()
             !android.speech.SpeechRecognizer.isRecognitionAvailable(this) -> openSpeechWindow()
-            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED -> startListening()
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED -> startListening()
             else -> askMic.launch(android.Manifest.permission.RECORD_AUDIO)
         }
     }

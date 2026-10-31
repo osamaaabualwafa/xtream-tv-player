@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- One sound bar next to the mic while listening. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#FFE5484D" />
+    <solid android:color="?attr/appLive" />
     <corners android:radius="2dp" />
 </shape>

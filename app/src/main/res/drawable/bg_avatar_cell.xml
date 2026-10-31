@@ -4,7 +4,7 @@
     <item android:state_focused="true">
         <shape android:shape="oval">
             <solid android:color="?attr/appAccent80" />
-            <stroke android:width="3dp" android:color="@android:color/white" />
+            <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
         </shape>
     </item>
     <item android:state_activated="true">
@@ -15,8 +15,8 @@
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#12FFFFFF" />
-            <stroke android:width="1dp" android:color="#29FFFFFF" />
+            <solid android:color="?attr/appGlassFill" />
+            <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
         </shape>
     </item>
 </selector>

@@ -3,14 +3,14 @@
     <item android:state_focused="true">
         <shape>
             <solid android:color="?attr/appAccent" />
-            <stroke android:width="2dp" android:color="@color/text" />
-            <corners android:radius="8dp" />
+            <stroke android:width="2dp" android:color="?attr/appText" />
+            <corners android:radius="?attr/appCorner8" />
         </shape>
     </item>
     <item>
         <shape>
-            <solid android:color="@color/surface" />
-            <corners android:radius="8dp" />
+            <solid android:color="?attr/appSurface" />
+            <corners android:radius="?attr/appCorner8" />
         </shape>
     </item>
 </selector>

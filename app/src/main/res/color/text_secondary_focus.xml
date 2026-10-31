@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Secondary text on a row: bright while the row is highlighted (readable on the accent fill). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/appFocusText" android:state_focused="true" />
+    <item android:color="?attr/appTextSecondary" />
+</selector>

@@ -1,7 +1,7 @@
 <resources>
     <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
-        <item name="colorPrimary">@color/surface</item>
-        <item name="colorPrimaryDark">@color/bg</item>
+        <item name="colorPrimary">?attr/appSurface</item>
+        <item name="colorPrimaryDark">?attr/appBg</item>
         <item name="appAccent">#FF3D8BFD</item>
         <item name="appAccent0D">#0D3D8BFD</item>
         <item name="appAccent26">#263D8BFD</item>
@@ -14,20 +14,66 @@
         <item name="appAccentCC">#CC3D8BFD</item>
         <item name="appGlow">#FF182D4A</item>
         <item name="colorAccent">#FF3D8BFD</item>
-        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:windowBackground">?attr/appBg</item>
         <item name="appBackground">@drawable/bg_glow</item>
-        <item name="android:textColorPrimary">@color/text</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-        <item name="android:textColorHint">@color/text_secondary</item>
+        <item name="android:textColorPrimary">?attr/appText</item>
+        <item name="android:textColorSecondary">?attr/appTextSecondary</item>
+        <item name="android:textColorHint">?attr/appTextSecondary</item>
         <item name="alertDialogTheme">@style/TvDialog</item>
+        <!-- Palette colours: today's look (Settings > Look > Theme > Default). -->
+        <item name="appBg">#FF101418</item>
+        <item name="appSurface">#FF1C232B</item>
+        <item name="appSurfaceFocus">#FF2B3A4D</item>
+        <item name="appSurfaceActive">#FF24303C</item>
+        <item name="appOverlay">#E6101418</item>
+        <item name="appGlassFill">#12FFFFFF</item>
+        <item name="appGlassStroke">#29FFFFFF</item>
+        <item name="appFocusStroke">#FFFFFFFF</item>
+        <item name="appText">#FFFFFFFF</item>
+        <item name="appTextSecondary">#FFA0A8B0</item>
+        <item name="appTileCount">#FFC8D0DC</item>
+        <item name="appGold">#FFFFC94D</item>
+        <item name="appError">#FFFF6B6B</item>
+        <item name="appLive">#FFE5484D</item>
+        <item name="appOnAccent">#FFFFFFFF</item>
+        <item name="appTile2_1A">#1AEC4899</item>
+        <item name="appTile2_38">#38EC4899</item>
+        <item name="appTile2_66">#66EC4899</item>
+        <item name="appTile3_1A">#1A8A5CF6</item>
+        <item name="appTile3_40">#408A5CF6</item>
+        <item name="appTile3_6B">#6B8A5CF6</item>
+        <!-- Shapes and highlight: today's look (Default theme). -->
+        <item name="appCorner8">8dp</item>
+        <item name="appCorner10">10dp</item>
+        <item name="appCorner12">12dp</item>
+        <item name="appCorner16">16dp</item>
+        <item name="appCorner20">20dp</item>
+        <item name="appCorner22">22dp</item>
+        <item name="appCorner23">23dp</item>
+        <item name="appCorner24">24dp</item>
+        <item name="appCorner26">26dp</item>
+        <item name="appCorner28">28dp</item>
+        <item name="appFocusFill">?attr/appAccent59</item>
+        <item name="appFocusText">?attr/appText</item>
+        <item name="appFocusStrokeThin">2dp</item>
+        <item name="appFocusStrokeThick">3dp</item>
+        <!-- Home tiles while highlighted (gradient start / end). -->
+        <item name="appTileFocusLiveStart">?attr/appAccent73</item>
+        <item name="appTileFocusLiveEnd">?attr/appAccent26</item>
+        <item name="appTileFocusMoviesStart">?attr/appTile2_66</item>
+        <item name="appTileFocusMoviesEnd">?attr/appTile2_1A</item>
+        <item name="appTileFocusSeriesStart">?attr/appTile3_6B</item>
+        <item name="appTileFocusSeriesEnd">?attr/appTile3_1A</item>
+        <item name="appTileFocusSearchStart">#4DFFFFFF</item>
+        <item name="appTileFocusSearchEnd">#1AFFFFFF</item>
     </style>
 
     <!-- Dialog buttons get the same strong focus highlight as the rest of the app (D-pad only). -->
     <style name="TvDialog" parent="Theme.AppCompat.Dialog.Alert">
         <item name="colorAccent">?attr/appAccent</item>
         <item name="android:windowBackground">@drawable/bg_glass_dialog</item>
-        <item name="android:textColorPrimary">@color/text</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorPrimary">?attr/appText</item>
+        <item name="android:textColorSecondary">?attr/appTextSecondary</item>
         <item name="buttonBarPositiveButtonStyle">@style/TvDialogButton</item>
         <item name="buttonBarNegativeButtonStyle">@style/TvDialogButton</item>
     </style>
@@ -38,7 +84,7 @@
         <item name="android:paddingLeft">22dp</item>
         <item name="android:paddingRight">22dp</item>
         <item name="android:stateListAnimator">@null</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:minWidth">120dp</item>
         <item name="android:textAllCaps">false</item>
     </style>
@@ -55,7 +101,7 @@
         <item name="android:paddingLeft">24dp</item>
         <item name="android:paddingRight">24dp</item>
         <item name="android:background">@drawable/bg_button</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">16sp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:focusable">true</item>
@@ -68,8 +114,8 @@
         <item name="android:background">@drawable/bg_input</item>
         <item name="android:paddingLeft">16dp</item>
         <item name="android:paddingRight">16dp</item>
-        <item name="android:textColor">@color/text</item>
-        <item name="android:textColorHint">@color/text_secondary</item>
+        <item name="android:textColor">?attr/appText</item>
+        <item name="android:textColorHint">?attr/appTextSecondary</item>
         <item name="android:textSize">17sp</item>
         <item name="android:singleLine">true</item>
         <item name="android:imeOptions">actionNext|flagNoExtractUi</item>
@@ -125,7 +171,7 @@
         <item name="android:background">@drawable/bg_glass_pill</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">16sp</item>
     </style>
 
@@ -164,7 +210,7 @@
         <item name="android:clickable">true</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:paddingLeft">16dp</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">17sp</item>
     </style>
 
@@ -179,7 +225,7 @@
         <item name="android:gravity">center</item>
         <item name="android:paddingLeft">20dp</item>
         <item name="android:paddingRight">20dp</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">16sp</item>
     </style>
 
@@ -192,7 +238,7 @@
         <item name="android:paddingLeft">24dp</item>
         <item name="android:paddingRight">24dp</item>
         <item name="android:background">@drawable/bg_glass_pill</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">16sp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:focusable">true</item>
@@ -208,7 +254,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">18dp</item>
         <item name="android:layout_marginBottom">4dp</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">?attr/appText</item>
         <item name="android:textSize">19sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:visibility">gone</item>
@@ -241,13 +287,16 @@
         <item name="android:layout_height">30dp</item>
         <item name="android:layout_marginBottom">6dp</item>
         <item name="android:importantForAccessibility">no</item>
+        <item name="android:duplicateParentState">true</item>
+        <item name="android:tint">@color/text_focus_primary</item>
     </style>
 
     <style name="HomeTileName">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:singleLine">true</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:duplicateParentState">true</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">19sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -257,7 +306,8 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">2dp</item>
         <item name="android:singleLine">true</item>
-        <item name="android:textColor">#FFC8D0DC</item>
+        <item name="android:duplicateParentState">true</item>
+        <item name="android:textColor">@color/tile_count_focus</item>
         <item name="android:textSize">13sp</item>
     </style>
 
@@ -268,7 +318,7 @@
         <item name="android:gravity">center</item>
         <item name="android:paddingLeft">16dp</item>
         <item name="android:paddingRight">16dp</item>
-        <item name="android:textColor">@color/text</item>
+        <item name="android:textColor">@color/text_focus_primary</item>
         <item name="android:textSize">15sp</item>
     </style>
 </resources>

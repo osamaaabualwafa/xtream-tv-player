@@ -68,7 +68,7 @@
                 android:paddingTop="2dp"
                 android:paddingRight="9dp"
                 android:paddingBottom="2dp"
-                android:textColor="@android:color/white"
+                android:textColor="?attr/appText"
                 android:textSize="13sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
@@ -138,7 +138,7 @@
                     android:maxWidth="320dp"
                     android:singleLine="true"
                     android:ellipsize="end"
-                    android:textColor="@android:color/white"
+                    android:textColor="?attr/appText"
                     android:textSize="15sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -213,7 +213,7 @@
                     android:paddingTop="2dp"
                     android:paddingRight="10dp"
                     android:paddingBottom="2dp"
-                    android:textColor="@android:color/white"
+                    android:textColor="?attr/appText"
                     android:textSize="15sp"
                     android:textStyle="bold"
                     android:visibility="invisible" />

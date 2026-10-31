@@ -24,6 +24,38 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
     private var section: Section? = null
+    /** Left-hand menu: entry id and the section it opens. */
+    private var menu: List<Pair<Int, Section>> = emptyList()
+
+    /**
+     * Left from the options: back to the menu entry of the section that is open (Android would
+     * pick whichever entry happens to sit beside the row, e.g. About from a low Player option).
+     * Left inside a row of the options (colour dots, layout cards) still moves along the row.
+     */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+            val focused = currentFocus
+            if (focused != null && isInside(focused, body)) {
+                val next = focused.focusSearch(View.FOCUS_LEFT)
+                if (next == null || !isInside(next, body)) {
+                    if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                        menu.firstOrNull { it.second == section }?.let { findViewById<View>(it.first).requestFocus() }
+                    }
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun isInside(v: View, parent: View): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p === parent) return true
+            p = p.parent as? View
+        }
+        return false
+    }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -34,7 +66,7 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
         body = findViewById(R.id.section_body)
 
-        val menu = listOf(
+        menu = listOf(
             R.id.menu_home to Section.HOME,
             R.id.menu_browse to Section.BROWSE,
             R.id.menu_player to Section.PLAYER,
@@ -46,12 +78,26 @@ class SettingsActivity : AppCompatActivity() {
         for ((id, s) in menu) {
             val item = findViewById<View>(id)
             item.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) show(s) }
-            item.setOnClickListener { show(s); body.getChildAt(0)?.let { firstFocusable(it)?.requestFocus() } }
+            item.setOnClickListener { show(s); focusFirstOption() }
+            // Right from the menu: the section's first option, not whichever row is beside it.
+            item.setOnKeyListener { _, keyCode, event ->
+                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_RIGHT) return@setOnKeyListener false
+                if (event.action == android.view.KeyEvent.ACTION_DOWN) focusFirstOption()
+                true
+            }
         }
         // After changing the colour the screen is rebuilt: come back to the same section.
         val start = savedInstanceState?.getString("section")?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
         show(start)
-        findViewById<View>(menu.first { it.second == start }.first).requestFocus()
+        // Rebuilt after a Look change: back on the section's first option (where the change was made).
+        if (savedInstanceState != null) body.post { chosenDot?.takeIf { section == Section.COLOR }?.requestFocus() ?: focusFirstOption() }
+        else findViewById<View>(menu.first { it.second == start }.first).requestFocus()
+    }
+
+    /** First option of the shown section, scrolled into view at the top. */
+    private fun focusFirstOption() {
+        (body.parent as? android.widget.ScrollView)?.scrollTo(0, 0)
+        firstFocusable(body)?.requestFocus()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -91,13 +137,25 @@ class SettingsActivity : AppCompatActivity() {
             }
             Section.COLOR -> {
                 title.text = "Look"
-                hint.text = "Colours, background, text size and effects"
-                colors()
+                hint.text = "Theme, colours, background, text size and effects"
+                option("Theme", Appearance.THEME_NAMES.mapIndexed { i, n -> i to n }, { prefs.themeIndex }, { prefs.themeIndex = it; recreate() })
+                // A theme sets its own colours and background.
+                if (prefs.themeIndex == 0) colors()
                 lookOptions()
             }
             Section.AVATARS -> {
-                title.text = "Playlist avatars"
-                hint.text = "Without an avatar, a playlist shows the first letter of its name"
+                title.text = "Playlists"
+                hint.text = "Which playlist opens at start, and each playlist's avatar"
+                val playlists = prefs.playlists()
+                if (playlists.size > 1) {
+                    option(
+                        "Open at start",
+                        listOf<Pair<String?, String>>(null to "Ask every time") + playlists.map { it.id to it.name },
+                        { prefs.defaultPlaylistId },
+                        { prefs.defaultPlaylistId = it },
+                    )
+                    heading("Avatars")
+                }
                 avatars()
             }
             Section.CONNECTION -> {
@@ -148,7 +206,7 @@ class SettingsActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             })
             val label = TextView(this).apply {
-                setTextColor(getColor(R.color.text))
+                setTextColor(themeColor(R.attr.appText))
                 textSize = 17f
                 gravity = Gravity.CENTER
                 setPadding(0, dp(8), 0, 0)
@@ -219,7 +277,7 @@ class SettingsActivity : AppCompatActivity() {
                 text = value
                 when (good) {
                     true -> setTextColor(0xFF4ADE80.toInt())
-                    false -> setTextColor(getColor(R.color.error))
+                    false -> setTextColor(themeColor(R.attr.appError))
                     null -> {}
                 }
             }
@@ -333,7 +391,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun heading(text: String) {
         body.addView(TextView(this).apply {
             this.text = text
-            setTextColor(getColor(R.color.text_secondary))
+            setTextColor(themeColor(R.attr.appTextSecondary))
             textSize = 15f
             setPadding(dp(6), if (body.childCount == 0) 0 else dp(16), 0, dp(6))
         })
@@ -366,7 +424,9 @@ class SettingsActivity : AppCompatActivity() {
     /** Settings > Look: background, text size and the visual effects. */
     private fun lookOptions() {
         heading("Screen")
-        option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
+        if (prefs.paletteIndex == 0 && prefs.themeIndex == 0) {
+            option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
+        }
         option("Interface size", Look.UI_SIZES, { prefs.uiSize }, { prefs.uiSize = it; recreate() })
         option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
         heading("Effects")
@@ -376,29 +436,48 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /** The theme colours; picking one rebuilds this screen in the new colour. */
+    /** The selected colour dot (the highlight returns to it after the screen is rebuilt). */
+    private var chosenDot: View? = null
+
     private fun colors() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val name = TextView(this).apply {
-            setTextColor(getColor(R.color.text_secondary))
+            setTextColor(themeColor(R.attr.appTextSecondary))
             textSize = 16f
             setPadding(dp(4), dp(12), 0, 0)
-            text = "Current: " + Appearance.ACCENT_NAMES[prefs.accentIndex.coerceIn(0, Appearance.ACCENT_NAMES.size - 1)]
+            text = "Current: " + if (prefs.paletteIndex != 0) Appearance.PALETTE_NAMES[prefs.paletteIndex] else
+                Appearance.ACCENT_NAMES[prefs.accentIndex.coerceIn(0, Appearance.ACCENT_NAMES.size - 1)]
         }
-        Appearance.ACCENT_COLORS.forEachIndexed { index, color ->
+        fun addDot(color: Int, label: String, active: Boolean, pick: () -> Unit) {
             val dot = AvatarPicker.colorDot(this, color)
-            dot.layoutParams = LinearLayout.LayoutParams(dp(58), dp(58)).apply { rightMargin = dp(10) }
-            (dot.getChildAt(0).layoutParams as android.widget.FrameLayout.LayoutParams).apply { width = dp(42); height = dp(42) }
-            dot.isActivated = index == prefs.accentIndex
-            dot.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) name.text = Appearance.ACCENT_NAMES[index] }
-            dot.setOnClickListener {
-                if (prefs.accentIndex != index) {
-                    prefs.accentIndex = index
-                    recreate()
-                }
-            }
+            dot.layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply { rightMargin = dp(8) }
+            (dot.getChildAt(0).layoutParams as android.widget.FrameLayout.LayoutParams).apply { width = dp(38); height = dp(38) }
+            dot.isActivated = active
+            if (active) chosenDot = dot
+            dot.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) name.text = label }
+            dot.setOnClickListener { if (!active) { pick(); recreate() } }
             row.addView(dot)
         }
-        body.addView(row)
+        // Theme colours: the accent only (background chosen below)…
+        Appearance.ACCENT_COLORS.forEachIndexed { index, color ->
+            addDot(color, Appearance.ACCENT_NAMES[index], prefs.paletteIndex == 0 && index == prefs.accentIndex) {
+                prefs.paletteIndex = 0
+                prefs.accentIndex = index
+            }
+        }
+        // …and palettes, which recolour the whole app, background included.
+        for (i in 1 until Appearance.PALETTE_NAMES.size) {
+            addDot(Appearance.PALETTE_DOTS[i], Appearance.PALETTE_NAMES[i] + " (whole app)", prefs.paletteIndex == i) {
+                prefs.paletteIndex = i
+            }
+        }
+        // Scrolls sideways, so every colour stays reachable at large interface and text sizes.
+        val scroller = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            addView(row)
+        }
+        body.addView(scroller)
         body.addView(name)
     }
 
@@ -408,7 +487,7 @@ class SettingsActivity : AppCompatActivity() {
         if (playlists.isEmpty()) {
             body.addView(TextView(this).apply {
                 text = "No playlists yet."
-                setTextColor(getColor(R.color.text_secondary))
+                setTextColor(themeColor(R.attr.appTextSecondary))
                 textSize = 16f
             })
             return

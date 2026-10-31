@@ -15,11 +15,12 @@
         android:orientation="horizontal">
 
         <TextView
+        android:tag="screen_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginRight="24dp"
             android:text="Search"
-            android:textColor="@color/text"
+            android:textColor="?attr/appText"
             android:textSize="28sp"
             android:textStyle="bold" />
 
@@ -99,7 +100,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:layout_marginBottom="6dp"
-        android:textColor="@color/text_secondary"
+        android:textColor="?attr/appTextSecondary"
         android:textSize="15sp" />
 
     <!-- Sections: All / Live TV / Movies / Series, each with its count. -->

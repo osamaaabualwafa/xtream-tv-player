@@ -24,7 +24,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="☰"
-            android:textColor="@color/text"
+            android:textColor="?attr/appText"
             android:textSize="24sp" />
 
         <TextView
@@ -32,7 +32,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:text="‹"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/appTextSecondary"
             android:textSize="28sp" />
     </LinearLayout>
 
@@ -49,12 +49,13 @@
         android:paddingBottom="10dp">
 
         <TextView
+        android:tag="screen_title"
             android:id="@+id/type_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"
             android:paddingLeft="8dp"
-            android:textColor="@color/text"
+            android:textColor="?attr/appText"
             android:textSize="24sp"
             android:textStyle="bold" />
 
@@ -89,7 +90,7 @@
                 android:ellipsize="end"
                 android:singleLine="true"
                 android:textAlignment="viewStart"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -141,7 +142,7 @@
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="2"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="32sp"
                     android:textStyle="bold" />
 
@@ -151,7 +152,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:singleLine="true"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/appTextSecondary"
                     android:textSize="17sp" />
 
                 <TextView
@@ -162,7 +163,7 @@
                     android:ellipsize="end"
                     android:lineSpacingExtra="3dp"
                     android:maxLines="3"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/appTextSecondary"
                     android:textSize="16sp"
                     android:visibility="gone" />
             </LinearLayout>
@@ -195,7 +196,7 @@
                 android:layout_gravity="center"
                 android:gravity="center"
                 android:padding="24dp"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="17sp"
                 android:visibility="gone" />
         </FrameLayout>

@@ -1482,10 +1482,7 @@ class PlayerActivity : AppCompatActivity() {
             },
             ep.duration,
         ).joinToString("   ·   ")
-        vh.itemView.findViewById<android.widget.ImageView?>(R.id.image)?.load(seriesCover) {
-            crossfade(false)
-            error(R.drawable.placeholder)
-        }
+        vh.itemView.findViewById<android.widget.ImageView?>(R.id.image)?.loadEpisodeImage(ep, seriesCover)
         vh.itemView.findViewById<android.widget.ProgressBar?>(R.id.watch_progress)?.apply {
             val total = if (playing) player?.duration?.takeIf { it > 0 } else null
             val length = total ?: parseDuration(ep.duration)

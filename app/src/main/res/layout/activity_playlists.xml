@@ -6,13 +6,14 @@
     android:background="?attr/appBackground">
 
     <TextView
+        android:tag="screen_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:layout_marginLeft="48dp"
         android:layout_marginTop="36dp"
         android:text="Xtream TV"
-        android:textColor="@color/text"
+        android:textColor="?attr/appText"
         android:textSize="26sp"
         android:textStyle="bold" />
 
@@ -25,11 +26,12 @@
         android:orientation="vertical">
 
         <TextView
+        android:tag="screen_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="28dp"
             android:text="Choose a playlist"
-            android:textColor="@color/text"
+            android:textColor="?attr/appText"
             android:textSize="30sp"
             android:textStyle="bold" />
 
@@ -51,7 +53,7 @@
             android:layout_marginTop="16dp"
             android:gravity="center"
             android:maxWidth="760dp"
-            android:textColor="@color/error"
+            android:textColor="?attr/appError"
             android:textSize="15sp"
             android:visibility="gone" />
 

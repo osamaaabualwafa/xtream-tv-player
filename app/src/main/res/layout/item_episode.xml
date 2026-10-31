@@ -16,19 +16,21 @@
 
     <TextView
         android:id="@+id/title"
+        android:duplicateParentState="true"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textColor="@color/text"
+        android:textColor="@color/text_focus_primary"
         android:textSize="17sp" />
 
     <TextView
         android:id="@+id/subtitle"
+        android:duplicateParentState="true"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:maxLines="2"
-        android:textColor="@color/text_secondary"
+        android:textColor="@color/text_secondary_focus"
         android:textSize="13sp" />
 </LinearLayout>

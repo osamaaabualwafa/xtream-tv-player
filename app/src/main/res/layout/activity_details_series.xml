@@ -48,12 +48,13 @@
             android:orientation="vertical">
 
             <TextView
+        android:tag="screen_title"
                 android:id="@+id/title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="32sp"
                 android:textStyle="bold" />
 
@@ -72,7 +73,7 @@
                 android:ellipsize="end"
                 android:lineSpacingExtra="3dp"
                 android:maxLines="3"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="15sp" />
 
             <TextView
@@ -82,7 +83,7 @@
                 android:layout_marginTop="6dp"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="13sp"
                 android:visibility="gone" />
 
@@ -99,6 +100,7 @@
                     style="@style/GlassButton"
                     android:layout_marginLeft="0dp"
                     android:background="@drawable/bg_glass_button"
+                    android:textColor="?attr/appOnAccent"
                     android:visibility="gone" />
 
                 <Button
@@ -106,6 +108,7 @@
                     style="@style/GlassButton"
                     android:layout_marginLeft="0dp"
                     android:background="@drawable/bg_glass_button"
+                    android:textColor="?attr/appOnAccent"
                     android:visibility="gone" />
 
                 <Button
@@ -131,7 +134,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:textColor="@color/error"
+                android:textColor="?attr/appError"
                 android:textSize="15sp"
                 android:visibility="gone" />
         </LinearLayout>

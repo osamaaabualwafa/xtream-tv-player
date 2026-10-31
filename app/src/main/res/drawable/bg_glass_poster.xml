@@ -3,16 +3,16 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <solid android:color="?attr/appAccent59" />
-            <stroke android:width="3dp" android:color="@android:color/white" />
-            <corners android:radius="12dp" />
+            <solid android:color="?attr/appFocusFill" />
+            <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
+            <corners android:radius="?attr/appCorner12" />
         </shape>
     </item>
     <item>
         <shape>
             <solid android:color="#0FFFFFFF" />
             <stroke android:width="1dp" android:color="#1FFFFFFF" />
-            <corners android:radius="12dp" />
+            <corners android:radius="?attr/appCorner12" />
         </shape>
     </item>
 </selector>

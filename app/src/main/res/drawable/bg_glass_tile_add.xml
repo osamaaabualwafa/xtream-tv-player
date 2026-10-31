@@ -4,15 +4,15 @@
     <item android:state_focused="true">
         <shape>
             <solid android:color="?attr/appAccent4D" />
-            <stroke android:width="3dp" android:color="@android:color/white" />
-            <corners android:radius="28dp" />
+            <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
+            <corners android:radius="?attr/appCorner28" />
         </shape>
     </item>
     <item>
         <shape>
             <solid android:color="#08FFFFFF" />
             <stroke android:width="2dp" android:color="#4DFFFFFF" android:dashWidth="10dp" android:dashGap="7dp" />
-            <corners android:radius="28dp" />
+            <corners android:radius="?attr/appCorner28" />
         </shape>
     </item>
 </selector>

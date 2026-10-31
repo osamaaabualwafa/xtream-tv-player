@@ -14,4 +14,49 @@
     <attr name="appGlow" format="color" />
     <!-- Settings > Look > Background. -->
     <attr name="appBackground" format="reference" />
+    <!-- Settings > Look > Theme (palette): every colour of the screens. -->
+    <attr name="appBg" format="color" />
+    <attr name="appSurface" format="color" />
+    <attr name="appSurfaceFocus" format="color" />
+    <attr name="appSurfaceActive" format="color" />
+    <attr name="appOverlay" format="color" />
+    <attr name="appGlassFill" format="color" />
+    <attr name="appGlassStroke" format="color" />
+    <attr name="appFocusStroke" format="color" />
+    <attr name="appText" format="color" />
+    <attr name="appTextSecondary" format="color" />
+    <attr name="appTileCount" format="color" />
+    <attr name="appGold" format="color" />
+    <attr name="appError" format="color" />
+    <attr name="appLive" format="color" />
+    <attr name="appOnAccent" format="color" />
+    <attr name="appTile2_1A" format="color" />
+    <attr name="appTile2_38" format="color" />
+    <attr name="appTile2_66" format="color" />
+    <attr name="appTile3_1A" format="color" />
+    <attr name="appTile3_40" format="color" />
+    <attr name="appTile3_6B" format="color" />
+    <!-- Settings > Look > Theme: shapes and highlight style. -->
+    <attr name="appCorner8" format="dimension" />
+    <attr name="appCorner10" format="dimension" />
+    <attr name="appCorner12" format="dimension" />
+    <attr name="appCorner16" format="dimension" />
+    <attr name="appCorner20" format="dimension" />
+    <attr name="appCorner22" format="dimension" />
+    <attr name="appCorner23" format="dimension" />
+    <attr name="appCorner24" format="dimension" />
+    <attr name="appCorner26" format="dimension" />
+    <attr name="appCorner28" format="dimension" />
+    <attr name="appFocusFill" format="color" />
+    <attr name="appFocusText" format="color" />
+    <attr name="appFocusStrokeThin" format="dimension" />
+    <attr name="appFocusStrokeThick" format="dimension" />
+    <attr name="appTileFocusLiveStart" format="color" />
+    <attr name="appTileFocusLiveEnd" format="color" />
+    <attr name="appTileFocusMoviesStart" format="color" />
+    <attr name="appTileFocusMoviesEnd" format="color" />
+    <attr name="appTileFocusSeriesStart" format="color" />
+    <attr name="appTileFocusSeriesEnd" format="color" />
+    <attr name="appTileFocusSearchStart" format="color" />
+    <attr name="appTileFocusSearchEnd" format="color" />
 </resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme background (coconut): base colour, one soft glow, and the theme's art. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="?attr/appBg" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.22"
+                android:centerY="0.12"
+                android:endColor="#00000000"
+                android:gradientRadius="620dp"
+                android:startColor="?attr/appGlow"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/art_wood" />
+</layer-list>

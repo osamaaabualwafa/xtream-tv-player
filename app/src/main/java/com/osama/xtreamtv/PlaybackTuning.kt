@@ -122,6 +122,7 @@ object PlaybackTuning {
     }
 
     /** Lowest refresh rate that is a whole multiple of the frame rate (within 1 %), at least 23 Hz. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.M)
     private fun pick(modes: List<Display.Mode>, fps: Float): Display.Mode? = modes
         .filter { it.refreshRate >= 23f }
         .mapNotNull { mode ->

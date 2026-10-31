@@ -41,10 +41,36 @@ object Appearance {
         "Fun" to listOf("🎮", "🎵", "🌙", "🔥", "🚀", "💎", "🌍", "☕"),
     )
 
-    /** Call in onCreate before setContentView: applies the chosen theme colour. */
+    /** Palettes offered with the theme colours in Settings > Look (0 = none: accent + background). */
+    val PALETTE_NAMES = listOf("Default", "Coastal", "Coconut")
+    private val PALETTE_STYLES = intArrayOf(0, R.style.Palette_Coastal, R.style.Palette_Coconut)
+    /** Colour of each palette's dot in Settings > Look (its accent). */
+    val PALETTE_DOTS = intArrayOf(0, 0xFF8FB0C4.toInt(), 0xFFC9A88A.toInt())
+
+    /** Settings > Look > Theme: whole looks (colours, shapes, highlight, font, background art). */
+    val THEME_NAMES = listOf("Default", "Cinema", "Coastal", "Coconut")
+    private val THEME_STYLES = arrayOf(
+        intArrayOf(),
+        intArrayOf(R.style.Palette_Cinema, R.style.Look_Cinema),
+        intArrayOf(R.style.Palette_Coastal, R.style.Look_Coastal),
+        intArrayOf(R.style.Palette_Coconut, R.style.Look_Coconut),
+    )
+    const val THEME_CINEMA = 1
+
+    /** Call in onCreate before setContentView: applies the chosen theme colour and palette. */
     fun apply(activity: Activity) {
-        val index = Prefs(activity).accentIndex.coerceIn(0, ACCENT_STYLES.size - 1)
+        val prefs = Prefs(activity)
+        val index = prefs.accentIndex.coerceIn(0, ACCENT_STYLES.size - 1)
         activity.theme.applyStyle(ACCENT_STYLES[index], true)
+        val theme = prefs.themeIndex.coerceIn(0, THEME_STYLES.size - 1)
+        if (theme != 0) {
+            // A theme brings everything: its colours win over the colour dots and background.
+            for (style in THEME_STYLES[theme]) activity.theme.applyStyle(style, true)
+        } else {
+            // Last, so a palette wins over the colour and background (which stay saved for Default).
+            val palette = PALETTE_STYLES.getOrElse(prefs.paletteIndex) { 0 }
+            if (palette != 0) activity.theme.applyStyle(palette, true)
+        }
         Look.applyBackground(activity)
     }
 

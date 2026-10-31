@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 class BrowseActivity : AppCompatActivity() {
@@ -94,7 +95,15 @@ class BrowseActivity : AppCompatActivity() {
         rail = findViewById(R.id.category_rail)
 
         categoriesView = findViewById(R.id.categories)
+        // Rows half scrolled out fade away at the edges instead of showing as a cut-off strip.
+        // No row animations: rows redrawn (highlight, counts) while the list slides would glide
+        // over each other for a moment.
+        categoriesView.itemAnimator = null
+        categoriesView.isVerticalFadingEdgeEnabled = true
+        categoriesView.setFadingEdgeLength((28 * resources.displayMetrics.density).toInt())
         itemsView = findViewById(R.id.items)
+        // No change animations: a new category replaces the posters in one step.
+        itemsView.itemAnimator = null
         categoryTitle = findViewById(R.id.category_title)
         search = findViewById(R.id.search)
         progress = findViewById(R.id.progress)
@@ -125,9 +134,9 @@ class BrowseActivity : AppCompatActivity() {
             // scrolling quickly past many categories doesn't load each of them).
             onFocus = { _, cat ->
                 categoriesView.removeCallbacks(selectFocused)
+                stopNeighbours()
                 focusedCategory = cat
                 if (cat.id != CAT_HIDDEN) categoryAdapter.activeIndex = categoryAdapter.items.indexOf(cat)
-                warmPosters(cat)
                 if (cat.id != CAT_HIDDEN && cat != currentCategory) categoriesView.postDelayed(selectFocused, 180)
             },
         )
@@ -317,6 +326,96 @@ class BrowseActivity : AppCompatActivity() {
         (itemsView.layoutManager as? GridLayoutManager)?.spanCount = if (panel?.visibility == View.VISIBLE) 6 else 8
     }
 
+    private var neighbourJob: Job? = null
+    private val neighbourPosters = ArrayList<coil.request.Disposable>()
+
+    private fun stopNeighbours() {
+        neighbourJob?.cancel()
+        neighbourJob = null
+        for (d in neighbourPosters) d.dispose()
+        neighbourPosters.clear()
+    }
+
+    /**
+     * While a category is on screen, get the two below it (and the one above) ready: their lists
+     * into memory and their first posters downloading, so landing on them shows everything at once.
+     * Moving on cancels it and starts again around the new category.
+     */
+    private fun prepareNeighbours(category: Category) {
+        stopNeighbours()
+        val list = categoryAdapter.items
+        val index = list.indexOf(category)
+        if (index < 0) return
+        val around = listOf(index + 1, index + 2, index - 1).mapNotNull { list.getOrNull(it) }
+            .filter { it.id != CAT_FAV && it.id != CAT_CONTINUE && it.id != CAT_HIDDEN }
+        if (around.isEmpty()) return
+        val sample = (0 until itemsView.childCount).asSequence()
+            .mapNotNull { itemsView.getChildAt(it).findViewById<android.widget.ImageView?>(R.id.image) }
+            .firstOrNull { it.width > 0 && it.height > 0 }
+        val screenful = itemsView.childCount.coerceIn(6, 24)
+        neighbourJob = lifecycleScope.launch {
+            // A moment's pause: while the remote is held down nothing is fetched for categories flown past.
+            kotlinx.coroutines.delay(400)
+            val loader = coil.Coil.imageLoader(this@BrowseActivity)
+            for (c in around) {
+                val items = try {
+                    loadStreams(if (c.id == CAT_ALL) null else c.id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    continue
+                }
+                if (sample == null) continue
+                for (item in items.take(screenful)) {
+                    val url = item.image?.takeIf { it.isNotBlank() } ?: continue
+                    neighbourPosters += loader.enqueue(coil.request.ImageRequest.Builder(this@BrowseActivity).data(url).size(sample.width, sample.height).build())
+                }
+            }
+        }
+    }
+
+    /**
+     * Load the first screenful of [list]'s posters at the size the cards draw them (so they come
+     * straight from memory when the grid swaps), waiting at most about half a second.
+     */
+    private suspend fun warmPosters(list: List<StreamItem>) {
+        val sample = (0 until itemsView.childCount).asSequence()
+            .mapNotNull { itemsView.getChildAt(it).findViewById<android.widget.ImageView?>(R.id.image) }
+            .firstOrNull { it.width > 0 && it.height > 0 } ?: return
+        val w = sample.width
+        val h = sample.height
+        val urls = list.asSequence().mapNotNull { it.image?.takeIf { u -> u.isNotBlank() } }
+            .take(itemsView.childCount.coerceIn(6, 24)).toList()
+        if (urls.isEmpty()) return
+        val loader = coil.Coil.imageLoader(this)
+        kotlinx.coroutines.withTimeoutOrNull(350) {
+            kotlinx.coroutines.coroutineScope {
+                urls.map { url ->
+                    async {
+                        loader.execute(coil.request.ImageRequest.Builder(this@BrowseActivity).data(url).size(w, h).build())
+                    }
+                }.forEach { it.await() }
+            }
+        }
+    }
+
+    private fun isInside(v: View, parent: View): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p === parent) return true
+            p = p.parent as? View
+        }
+        return false
+    }
+
+    /** The open category's row (scrolled into view if needed). */
+    private fun focusOpenCategory() {
+        val index = categoryAdapter.activeIndex.coerceAtLeast(0)
+        categoriesView.findViewHolderForAdapterPosition(index)?.itemView?.let { it.requestFocus(); return }
+        categoriesView.scrollToPosition(index)
+        categoriesView.post { categoriesView.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus() }
+    }
+
     private fun focusFirstItem() {
         itemsView.post {
             val lm = itemsView.layoutManager as? LinearLayoutManager
@@ -339,6 +438,46 @@ class BrowseActivity : AppCompatActivity() {
             event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
         ) {
             if (event.action == android.view.KeyEvent.ACTION_DOWN) closePanel()
+            return true
+        }
+        // Side category list (not the chips row): like Settings, Left from the items returns to the
+        // open category and Right from a category goes to the first item on screen, instead of
+        // whichever one happens to sit beside the highlight.
+        val sideList = style != Appearance.BROWSE_CHIPS && panel?.visibility != View.GONE
+        // Up from the first row: the search box above the items, not the category list beside them.
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && itemsView.hasFocus() && search.visibility == View.VISIBLE) {
+            val next = currentFocus?.focusSearch(View.FOCUS_UP)
+            if (next == null || !isInside(next, itemsView)) {
+                if (event.action == android.view.KeyEvent.ACTION_DOWN) search.requestFocus()
+                return true
+            }
+        }
+        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT && itemsView.hasFocus()) {
+            val next = currentFocus?.focusSearch(View.FOCUS_LEFT)
+            if (next == null || !isInside(next, itemsView)) {
+                if (event.action == android.view.KeyEvent.ACTION_DOWN) focusOpenCategory()
+                return true
+            }
+        }
+        // Up from the top row goes to Search (above the grid), not across to the categories.
+        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && itemsView.hasFocus() && search.visibility == View.VISIBLE) {
+            val next = currentFocus?.focusSearch(View.FOCUS_UP)
+            if (next == null || !isInside(next, itemsView)) {
+                val focusedPos = currentFocus?.let { itemsView.findContainingViewHolder(it)?.bindingAdapterPosition } ?: -1
+                val span = (itemsView.layoutManager as? androidx.recyclerview.widget.GridLayoutManager)?.spanCount ?: 1
+                if (focusedPos in 0 until span) {
+                    if (event.action == android.view.KeyEvent.ACTION_DOWN) search.requestFocus()
+                    return true
+                }
+            }
+        }
+        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && categoriesView.hasFocus() && itemAdapter.itemCount > 0) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                // Show the highlighted category first if it isn't open yet.
+                categoriesView.removeCallbacks(selectFocused)
+                focusedCategory?.takeIf { it != currentCategory && it.id != CAT_HIDDEN }?.let { selectCategory(it) }
+                focusFirstItem()
+            }
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -472,7 +611,8 @@ class BrowseActivity : AppCompatActivity() {
         // The strip described the old category's item: blank it (keeping its space) until one is highlighted.
         findViewById<View>(R.id.info_strip).visibility = View.INVISIBLE
         categoryAdapter.activeIndex = categoryAdapter.items.indexOf(category)
-        showCategoryTitle(category, counts[category.id])
+        // A list already in memory changes title and posters together (after its posters are ready).
+        if (cachedStreams(if (category.id == CAT_ALL) null else category.id) == null) showCategoryTitle(category, counts[category.id])
         loadJob?.cancel()
         message.visibility = View.GONE
         if (category.id == CAT_FAV || category.id == CAT_CONTINUE) {
@@ -484,18 +624,26 @@ class BrowseActivity : AppCompatActivity() {
         }
         // Already on the device (most categories once the full list is in): show it at once,
         // without a loading pause or an empty grid in between.
+        // Already on the device (most categories once the full list is in): no loading pause.
         cachedStreams(if (category.id == CAT_ALL) null else category.id)?.let { cached ->
             showLoading(false)
-            allItems = cached
-            showCategoryTitle(category, cached.size)
-            applyFilter()
+            loadJob = lifecycleScope.launch {
+                // The current posters stay until the new ones are ready, then the grid swaps in one
+                // go: no blank (dark) tiles flashing while moving through the categories.
+                warmPosters(cached)
+                allItems = cached
+                showCategoryTitle(category, cached.size)
+                applyFilter()
+                prepareNeighbours(category)
+            }
             return
         }
         loadJob = lifecycleScope.launch {
             showLoading(true)
-            itemAdapter.submit(emptyList())
             try {
-                allItems = loadStreams(if (category.id == CAT_ALL) null else category.id)
+                val loaded = loadStreams(if (category.id == CAT_ALL) null else category.id)
+                warmPosters(loaded)
+                allItems = loaded
                 showCategoryTitle(category, allItems.size)
                 // Categories the full list doesn't cover get their count once opened.
                 if (counts.isNotEmpty() && counts[category.id] != allItems.size) {
@@ -504,6 +652,7 @@ class BrowseActivity : AppCompatActivity() {
                 }
                 showLoading(false)
                 applyFilter()
+                prepareNeighbours(category)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -533,7 +682,10 @@ class BrowseActivity : AppCompatActivity() {
                     for (item in all) for (id in item.categoryIds) lists.getOrPut(id) { ArrayList() }.add(item)
                     lists
                 }
-                for ((id, list) in byCategory) Session.streamCache.putIfAbsent("${type.name}:$id", list)
+                for ((id, list) in byCategory) {
+                    val key = "${type.name}:$id"
+                    if (key !in Session.streamCache) Session.streamCache[key] = list
+                }
                 val map = HashMap<String, Int>()
                 for ((id, list) in byCategory) map[id] = list.size
                 map[CAT_ALL] = all.size
@@ -567,39 +719,10 @@ class BrowseActivity : AppCompatActivity() {
         currentCategory?.let { if (counts[it.id] != null && it.id != CAT_FAV && it.id != CAT_CONTINUE) showCategoryTitle(it, counts[it.id]) }
     }
 
-    /** Poster size seen in this grid (for loading pictures ahead at the right size). */
-    private var posterW = 0
-    private var posterH = 0
-
-    /**
-     * A category just got the highlight: start its first screen of posters now, so they are
-     * ready (in memory) when the grid switches to it a moment later.
-     */
-    private fun warmPosters(cat: Category) {
-        if (type == ContentType.LIVE || cat.id == CAT_HIDDEN) return
-        if (posterW <= 0) {
-            itemsView.getChildAt(0)?.findViewById<View>(R.id.image)?.let { posterW = it.width; posterH = it.height }
-        }
-        if (posterW <= 0 || posterH <= 0) return
-        val list = when (cat.id) {
-            CAT_FAV, CAT_CONTINUE -> localItems(cat.id)
-            else -> cachedStreams(if (cat.id == CAT_ALL) null else cat.id)
-        } ?: return
-        val loader = coil.Coil.imageLoader(this)
-        for (item in list.take(18)) {
-            val url = item.image ?: continue
-            loader.enqueue(coil.request.ImageRequest.Builder(this).data(url).size(posterW, posterH).build())
-        }
-    }
-
     /** The list from memory when we have it (no network), else null. */
-    private fun cachedStreams(categoryId: String?): List<StreamItem>? {
-        val key = "${type.name}:${categoryId ?: CAT_ALL}"
-        Session.streamCache[key]?.let { return it }
-        if (categoryId == null) return null
-        val all = Session.streamCache["${type.name}:$CAT_ALL"] ?: return null
-        return all.filter { categoryId in it.categoryIds }.takeIf { it.isNotEmpty() }?.also { Session.streamCache[key] = it }
-    }
+    /** The category's list if it is already sorted out in memory (instant, no searching). */
+    private fun cachedStreams(categoryId: String?): List<StreamItem>? =
+        Session.streamCache["${type.name}:${categoryId ?: CAT_ALL}"]
 
     private suspend fun loadStreams(categoryId: String?): List<StreamItem> {
         val key = "${type.name}:${categoryId ?: CAT_ALL}"
@@ -607,7 +730,10 @@ class BrowseActivity : AppCompatActivity() {
         // Reuse a full list if we already have it instead of hitting the server again.
         if (categoryId != null) {
             Session.streamCache["${type.name}:$CAT_ALL"]?.let { all ->
-                val local = all.filter { categoryId in it.categoryIds }
+                // Searching tens of thousands of items: off the screen's thread, so the remote stays responsive.
+                val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    all.filter { categoryId in it.categoryIds }
+                }
                 // Some panels list items under categories the full list doesn't mention: ask the server then.
                 if (local.isNotEmpty()) return local.also { Session.streamCache[key] = it }
             }

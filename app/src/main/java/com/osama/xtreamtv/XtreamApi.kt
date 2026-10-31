@@ -97,6 +97,8 @@ data class Episode(
     val ext: String,
     val plot: String?,
     val duration: String?,
+    /** The episode's own still (wide), when the provider has one. */
+    val image: String? = null,
 )
 
 data class SeriesInfo(
@@ -165,7 +167,7 @@ fun parseServerInput(raw: String): ServerInput? {
 /** What a stream URL really returns: status, content type and the first bytes. */
 data class StreamProbe(val code: Int, val contentType: String?, val head: String) {
     val isHls: Boolean
-        get() = head.trimStart('﻿', ' ', '\r', '\n').startsWith("#EXTM3U") ||
+        get() = head.trimStart('\uFEFF', ' ', '\r', '\n').startsWith("#EXTM3U") ||
             contentType?.contains("mpegurl", ignoreCase = true) == true
     val isHtml: Boolean
         get() = contentType?.contains("html", ignoreCase = true) == true || head.trimStart().startsWith("<")
@@ -349,7 +351,8 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             val number = o.int("episode_num")
             val epInfo = o.optJSONObject("info")
             val title = o.str("title") ?: (if (number != null) "Episode $number" else "Episode")
-            val ep = Episode(id, title, season, number, o.str("container_extension") ?: "mp4", epInfo?.str("plot"), epInfo?.str("duration"))
+            val still = epInfo?.str("movie_image")?.takeIf { it.startsWith("http") }
+            val ep = Episode(id, title, season, number, o.str("container_extension") ?: "mp4", epInfo?.str("plot"), epInfo?.str("duration"), still)
             seasons.getOrPut(season) { ArrayList() }.add(ep)
         }
 
@@ -452,7 +455,7 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 // Offline or server hiccup: an old list is better than none.
                 if (cacheFile != null && cacheFile.exists()) cacheFile.readText() else throw e
             }
-        }.trim().trimStart('﻿')
+        }.trim().trimStart('\uFEFF')
         if (text.isEmpty()) {
             null
         } else {

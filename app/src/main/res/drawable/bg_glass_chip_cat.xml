@@ -4,22 +4,22 @@
     <item android:state_focused="true">
         <shape>
             <solid android:color="?attr/appAccent80" />
-            <stroke android:width="2dp" android:color="@android:color/white" />
-            <corners android:radius="23dp" />
+            <stroke android:width="?attr/appFocusStrokeThin" android:color="?attr/appFocusStroke" />
+            <corners android:radius="?attr/appCorner23" />
         </shape>
     </item>
     <item android:state_activated="true">
         <shape>
             <solid android:color="#1AFFFFFF" />
             <stroke android:width="2dp" android:color="?attr/appAccent" />
-            <corners android:radius="23dp" />
+            <corners android:radius="?attr/appCorner23" />
         </shape>
     </item>
     <item>
         <shape>
-            <solid android:color="#12FFFFFF" />
-            <stroke android:width="1dp" android:color="#29FFFFFF" />
-            <corners android:radius="23dp" />
+            <solid android:color="?attr/appGlassFill" />
+            <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
+            <corners android:radius="?attr/appCorner23" />
         </shape>
     </item>
 </selector>

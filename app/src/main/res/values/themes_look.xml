@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings > Look > Theme: what makes each theme more than its colours (applied after its
+     palette): corner shapes, highlight style, font and background art. -->
+<resources>
+    <style name="Look" />
+
+    <!-- Cinema: crisp corners, red frame highlight, condensed type, dark stage glow. -->
+    <style name="Look.Cinema">
+        <item name="appCorner8">3dp</item>
+        <item name="appCorner10">4dp</item>
+        <item name="appCorner12">4dp</item>
+        <item name="appCorner16">4dp</item>
+        <item name="appCorner20">4dp</item>
+        <item name="appCorner22">6dp</item>
+        <item name="appCorner23">4dp</item>
+        <item name="appCorner24">4dp</item>
+        <item name="appCorner26">4dp</item>
+        <item name="appCorner28">6dp</item>
+        <item name="appFocusFill">#4DC42530</item>
+        <item name="appFocusText">#FFFFFFFF</item>
+        <item name="appFocusStrokeThin">2dp</item>
+        <item name="appFocusStrokeThick">3dp</item>
+        <item name="android:fontFamily">sans-serif-condensed</item>
+        <item name="appBackground">@drawable/bg_theme_cinema</item>
+            <item name="appTileFocusLiveStart">#4DC42530</item>
+        <item name="appTileFocusLiveEnd">#4DC42530</item>
+        <item name="appTileFocusMoviesStart">#4DC42530</item>
+        <item name="appTileFocusMoviesEnd">#4DC42530</item>
+        <item name="appTileFocusSeriesStart">#4DC42530</item>
+        <item name="appTileFocusSeriesEnd">#4DC42530</item>
+        <item name="appTileFocusSearchStart">#4DC42530</item>
+        <item name="appTileFocusSearchEnd">#4DC42530</item>
+    </style>
+
+    <!-- Coastal: round pills, solid sea-glass highlight with dark text (no outline), waves. -->
+    <style name="Look.Coastal">
+        <item name="appCorner8">20dp</item>
+        <item name="appCorner10">26dp</item>
+        <item name="appCorner12">18dp</item>
+        <item name="appCorner16">24dp</item>
+        <item name="appCorner20">26dp</item>
+        <item name="appCorner22">34dp</item>
+        <item name="appCorner23">26dp</item>
+        <item name="appCorner24">26dp</item>
+        <item name="appCorner26">28dp</item>
+        <item name="appCorner28">36dp</item>
+        <item name="appFocusFill">#FFE3ECF1</item>
+        <item name="appFocusText">#FF141B20</item>
+        <item name="appFocusStrokeThin">0dp</item>
+        <item name="appFocusStrokeThick">0dp</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="appBackground">@drawable/bg_theme_coastal</item>
+            <item name="appTileFocusLiveStart">#FFE3ECF1</item>
+        <item name="appTileFocusLiveEnd">#FFE3ECF1</item>
+        <item name="appTileFocusMoviesStart">#FFE3ECF1</item>
+        <item name="appTileFocusMoviesEnd">#FFE3ECF1</item>
+        <item name="appTileFocusSeriesStart">#FFE3ECF1</item>
+        <item name="appTileFocusSeriesEnd">#FFE3ECF1</item>
+        <item name="appTileFocusSearchStart">#FFE3ECF1</item>
+        <item name="appTileFocusSearchEnd">#FFE3ECF1</item>
+    </style>
+
+    <!-- Coconut: square cards, gold frame highlight on warm wood, serif type, wood grain. -->
+    <style name="Look.Coconut">
+        <item name="appCorner8">3dp</item>
+        <item name="appCorner10">4dp</item>
+        <item name="appCorner12">3dp</item>
+        <item name="appCorner16">4dp</item>
+        <item name="appCorner20">4dp</item>
+        <item name="appCorner22">5dp</item>
+        <item name="appCorner23">4dp</item>
+        <item name="appCorner24">4dp</item>
+        <item name="appCorner26">4dp</item>
+        <item name="appCorner28">5dp</item>
+        <item name="appFocusFill">#FF3A2617</item>
+        <item name="appFocusStroke">#FFD9A766</item>
+        <item name="appFocusText">#FFF1E6D8</item>
+        <item name="appFocusStrokeThin">2dp</item>
+        <item name="appFocusStrokeThick">3dp</item>
+        <item name="android:fontFamily">serif</item>
+        <item name="appBackground">@drawable/bg_theme_coconut</item>
+            <item name="appTileFocusLiveStart">#FF3A2617</item>
+        <item name="appTileFocusLiveEnd">#FF3A2617</item>
+        <item name="appTileFocusMoviesStart">#FF3A2617</item>
+        <item name="appTileFocusMoviesEnd">#FF3A2617</item>
+        <item name="appTileFocusSeriesStart">#FF3A2617</item>
+        <item name="appTileFocusSeriesEnd">#FF3A2617</item>
+        <item name="appTileFocusSearchStart">#FF3A2617</item>
+        <item name="appTileFocusSearchEnd">#FF3A2617</item>
+    </style>
+</resources>

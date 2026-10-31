@@ -34,15 +34,49 @@ object Look {
 
     /** In onCreate before setContentView (with the theme colour). */
     fun applyBackground(activity: Activity) {
-        val index = Prefs(activity).backgroundStyle.coerceIn(0, BACKGROUND_STYLES.size - 1)
-        activity.theme.applyStyle(BACKGROUND_STYLES[index], true)
+        val prefs = Prefs(activity)
+        // A palette or theme brings its own background.
+        if (prefs.paletteIndex == 0 && prefs.themeIndex == 0) {
+            val index = prefs.backgroundStyle.coerceIn(0, BACKGROUND_STYLES.size - 1)
+            activity.theme.applyStyle(BACKGROUND_STYLES[index], true)
+        }
         // Once the screen has its size (after setContentView and the first layout).
         val decor = activity.window.decorView
         decor.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            private var titlesDone = false
             override fun onGlobalLayout() {
+                if (!titlesDone) titlesDone = styleTitles(activity)
                 if (flattenBackground(activity)) decor.viewTreeObserver.removeOnGlobalLayoutListener(this)
             }
         })
+    }
+
+    /**
+     * Screen titles (tagged "screen_title") in the theme's title style: Cinema bold spaced
+     * capitals, Coastal light wide capitals, Coconut serif italic. True once done.
+     */
+    private fun styleTitles(activity: Activity): Boolean {
+        val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return false
+        if (content.childCount == 0) return false
+        val theme = Prefs(activity).themeIndex
+        if (theme == 0) return true
+        fun walk(v: View) {
+            if (v.tag == "screen_title" && v is android.widget.TextView) {
+                when (theme) {
+                    1 -> { v.isAllCaps = true; v.letterSpacing = 0.12f; v.typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD) }
+                    2 -> { v.isAllCaps = true; v.letterSpacing = 0.2f; v.typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL) }
+                    3 -> {
+                        v.typeface = android.graphics.Typeface.create("serif", android.graphics.Typeface.BOLD_ITALIC)
+                        // Italic letters lean past the text box: a little room so the edge letter isn't cut.
+                        val extra = (8 * v.resources.displayMetrics.density).toInt()
+                        v.setPadding(v.paddingLeft + extra, v.paddingTop, v.paddingRight + extra, v.paddingBottom)
+                    }
+                }
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+        }
+        walk(content)
+        return true
     }
 
     /** The screen background painted once, shared by every screen (same style, colour and size). */
@@ -70,7 +104,7 @@ object Look {
             return true
         }
         val prefs = Prefs(activity)
-        val key = "${prefs.backgroundStyle}/${prefs.accentIndex}/${w}x$h"
+        val key = "${prefs.themeIndex}/${prefs.paletteIndex}/${prefs.backgroundStyle}/${prefs.accentIndex}/${w}x$h"
         val bitmap = flatBitmap.takeIf { flatKey == key } ?: try {
             android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
                 bg.setBounds(0, 0, w, h)
@@ -84,6 +118,18 @@ object Look {
         holder.background = android.graphics.drawable.BitmapDrawable(activity.resources, bitmap)
         activity.window.setBackgroundDrawable(null)
         return true
+    }
+
+    private var light: Boolean? = null
+
+    /**
+     * A TV short of memory (Android's low-RAM flag, or about 1 GB or less): heavier effects start off
+     * there (poster glow, sections prepared from Home); Settings can still turn the glow on.
+     */
+    fun isLightDevice(context: Context): Boolean = light ?: run {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        (am.isLowRamDevice || info.totalMem < 1100L * 1024 * 1024).also { light = it }
     }
 
     /** In attachBaseContext: the chosen text size on top of the TV's own. */
@@ -149,7 +195,7 @@ class ShimmerDrawable : Drawable() {
  * V1: the screen's background becomes a faded copy of the highlighted poster, changing smoothly
  * as the highlight moves. Off in Settings > Look.
  */
-class FocusBackdrop private constructor(private val image: ImageView) {
+class FocusBackdrop private constructor(private val image: ImageView, private val strength: Float = 0.42f) {
 
     private var shown: String? = null
     private val pending = Runnable { load() }
@@ -169,7 +215,7 @@ class FocusBackdrop private constructor(private val image: ImageView) {
         image.animate().alpha(0f).setDuration(150).withEndAction {
             image.load(url) {
                 crossfade(false)
-                listener(onSuccess = { _, _ -> image.animate().alpha(0.42f).setDuration(350).start() })
+                listener(onSuccess = { _, _ -> image.animate().alpha(strength).setDuration(350).start() })
             }
         }.start()
     }
@@ -177,7 +223,9 @@ class FocusBackdrop private constructor(private val image: ImageView) {
     companion object {
         /** Puts the backdrop behind the screen's content (null when turned off). */
         fun attach(activity: Activity): FocusBackdrop? {
-            if (!Prefs(activity).backdropFollows) return null
+            // Cinema: the highlighted item's artwork always fills the screen.
+            val cinema = Prefs(activity).themeIndex == Appearance.THEME_CINEMA
+            if (!Prefs(activity).backdropFollows && !cinema) return null
             val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return null
             val root = content.getChildAt(0) ?: return null
             // The app background moves behind the picture; the screen itself becomes see-through.
@@ -195,7 +243,7 @@ class FocusBackdrop private constructor(private val image: ImageView) {
             }
             content.addView(image, 0)
             content.addView(shade, 1)
-            return FocusBackdrop(image)
+            return FocusBackdrop(image, if (cinema) 0.62f else 0.42f)
         }
     }
 }

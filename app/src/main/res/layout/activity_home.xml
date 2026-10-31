@@ -25,11 +25,12 @@
             android:orientation="horizontal">
 
             <TextView
+        android:tag="screen_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Xtream TV"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="28sp"
                 android:textStyle="bold" />
 
@@ -72,7 +73,7 @@
                     android:maxWidth="220dp"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="15sp" />
             </LinearLayout>
 
@@ -90,7 +91,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginLeft="20dp"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="22sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -102,7 +103,7 @@
             android:layout_marginTop="14dp"
             android:background="@drawable/bg_glass_card"
             android:padding="14dp"
-            android:textColor="@color/gold"
+            android:textColor="?attr/appGold"
             android:textSize="16sp"
             android:visibility="gone" />
 
@@ -226,7 +227,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:lineSpacingExtra="4dp"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="14sp" />
 
             <TextView
@@ -251,7 +252,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:textColor="@color/text_secondary"
+            android:textColor="?attr/appTextSecondary"
             android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>

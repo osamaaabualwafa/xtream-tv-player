@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coastal theme: three soft waves along the bottom of the screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1920dp" android:height="1080dp"
+    android:viewportWidth="1920" android:viewportHeight="1080">
+    <path android:fillColor="#FF1B303D" android:pathData="M0,800 C360,720 660,880 1020,790 C1380,700 1680,760 1920,790 L1920,1080 L0,1080 Z" />
+    <path android:fillColor="#FF203B4A" android:pathData="M0,890 C420,820 750,960 1140,880 C1500,810 1740,860 1920,880 L1920,1080 L0,1080 Z" />
+    <path android:fillColor="#FF264757" android:pathData="M0,980 C480,930 900,1040 1380,970 C1620,940 1800,960 1920,975 L1920,1080 L0,1080 Z" />
+</vector>

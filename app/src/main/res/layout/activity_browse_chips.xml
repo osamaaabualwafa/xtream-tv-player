@@ -14,11 +14,12 @@
             android:orientation="horizontal">
 
             <TextView
+        android:tag="screen_title"
                 android:id="@+id/type_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginRight="18dp"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="26sp"
                 android:textStyle="bold" />
 
@@ -31,7 +32,7 @@
                 android:ellipsize="end"
                 android:singleLine="true"
                 android:textAlignment="viewStart"
-                android:textColor="@color/text"
+                android:textColor="?attr/appText"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -88,7 +89,7 @@
                 android:layout_gravity="center"
                 android:gravity="center"
                 android:padding="24dp"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="17sp"
                 android:visibility="gone" />
         </FrameLayout>
@@ -120,7 +121,7 @@
                     android:maxWidth="520dp"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/appText"
                     android:textSize="17sp"
                     android:textStyle="bold" />
 
@@ -132,7 +133,7 @@
                     android:layout_weight="1"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="@color/text_secondary"
+                    android:textColor="?attr/appTextSecondary"
                     android:textSize="15sp" />
             </LinearLayout>
 
@@ -143,7 +144,7 @@
                 android:layout_marginTop="2dp"
                 android:ellipsize="end"
                 android:singleLine="true"
-                android:textColor="@color/text_secondary"
+                android:textColor="?attr/appTextSecondary"
                 android:textSize="14sp"
                 android:visibility="gone" />
         </LinearLayout>

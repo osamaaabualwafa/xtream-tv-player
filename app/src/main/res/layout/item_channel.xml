@@ -16,10 +16,11 @@
 
     <TextView
         android:id="@+id/subtitle"
+        android:duplicateParentState="true"
         android:layout_width="52dp"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="@color/text_secondary"
+        android:textColor="@color/text_secondary_focus"
         android:textSize="15sp" />
 
     <ImageView
@@ -34,26 +35,29 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:duplicateParentState="true"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/title"
+        android:duplicateParentState="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="2"
             android:lineSpacingExtra="-2dp"
-            android:textColor="@color/text"
+            android:textColor="@color/text_focus_primary"
             android:textSize="17sp" />
 
         <TextView
             android:id="@+id/epg_now"
+        android:duplicateParentState="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:singleLine="true"
-            android:textColor="@color/text_secondary"
+            android:textColor="@color/text_secondary_focus"
             android:textSize="14sp"
             android:visibility="gone" />
 
@@ -73,7 +77,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="★"
-        android:textColor="@color/gold"
+        android:textColor="?attr/appGold"
         android:textSize="20sp"
         android:visibility="gone" />
 </LinearLayout>

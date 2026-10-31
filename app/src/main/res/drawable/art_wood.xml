@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coconut theme: faint wood grain across the screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1920dp" android:height="1080dp"
+    android:viewportWidth="1920" android:viewportHeight="1080">
+    <path android:strokeColor="#FF2A1B11" android:strokeWidth="6" android:pathData="M0,90 C480,60 960,120 1440,84 C1680,70 1820,92 1920,86" />
+    <path android:strokeColor="#FF281A10" android:strokeWidth="4" android:pathData="M0,230 C520,200 900,262 1420,226 C1700,206 1840,236 1920,228" />
+    <path android:strokeColor="#FF2A1B11" android:strokeWidth="7" android:pathData="M0,380 C460,350 1000,410 1460,372 C1700,352 1850,382 1920,374" />
+    <path android:strokeColor="#FF281A10" android:strokeWidth="4" android:pathData="M0,520 C540,494 960,556 1400,516 C1680,494 1830,526 1920,518" />
+    <path android:strokeColor="#FF2A1B11" android:strokeWidth="6" android:pathData="M0,670 C480,640 1020,704 1480,664 C1720,644 1860,672 1920,666" />
+    <path android:strokeColor="#FF281A10" android:strokeWidth="4" android:pathData="M0,820 C500,792 940,852 1440,814 C1700,794 1840,822 1920,816" />
+    <path android:strokeColor="#FF2A1B11" android:strokeWidth="6" android:pathData="M0,970 C460,942 1000,1004 1460,964 C1700,946 1850,972 1920,966" />
+</vector>
