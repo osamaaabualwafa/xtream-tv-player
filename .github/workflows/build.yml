@@ -29,11 +29,17 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk xtream-tv-player.apk
 
+      # Release title shows the app's version (from app/build.gradle.kts); the tag stays build-N,
+      # which the in-app update compares by number.
+      - name: Read version name
+        id: version
+        run: echo "name=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
+          name: Version ${{ steps.version.outputs.name }} (build ${{ github.run_number }})
           body: "Android TV APK. Direct link: https://github.com/${{ github.repository }}/releases/latest/download/xtream-tv-player.apk"
           files: xtream-tv-player.apk
           make_latest: true
