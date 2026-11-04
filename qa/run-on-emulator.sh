@@ -67,7 +67,7 @@ if [ "${QA_MONKEY:-1}" = "1" ]; then
   adb shell monkey -p "$PKG" -s 20261104 --throttle 120 \
     --pct-touch 0 --pct-motion 0 --pct-trackball 0 --pct-pinchzoom 0 --pct-rotation 0 --pct-flip 0 \
     --pct-syskeys 0 --pct-anyevent 0 --pct-permission 0 --pct-appswitch 2 --pct-nav 60 --pct-majornav 38 \
-    --ignore-security-exceptions -v -v 4000 > "$OUT/monkey.txt" 2>&1
+    --ignore-security-exceptions --ignore-crashes --ignore-timeouts -v -v 4000 > "$OUT/monkey.txt" 2>&1
   adb exec-out screencap -p > "$OUT/monkey_end.png" || true
   sleep 2
 fi

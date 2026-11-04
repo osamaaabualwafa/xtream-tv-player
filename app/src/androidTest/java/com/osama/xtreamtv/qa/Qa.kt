@@ -348,7 +348,12 @@ object Qa {
      */
     fun focus(label: String, maxPresses: Int = 40, target: () -> View?): Boolean {
         // After a dialog or the keyboard closes, the screen takes the remote back a moment later.
-        waitUntil(3000) { main { current()?.hasWindowFocus() == true } }
+        if (!waitUntil(3000) { main { current()?.hasWindowFocus() == true } }) {
+            // A dialog or menu from an earlier step is still open over the screen: close it first.
+            step("a dialog was still open before moving to \"$label\"; Back closes it")
+            back()
+            waitUntil(2000) { main { current()?.hasWindowFocus() == true } }
+        }
         hideKeyboard()
         val blocked = HashSet<Int>()
         var lastFocusId = 0

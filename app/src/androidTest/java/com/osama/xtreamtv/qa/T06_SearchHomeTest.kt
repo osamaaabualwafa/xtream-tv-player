@@ -59,6 +59,12 @@ class T06_SearchHomeTest : QaTest() {
         Qa.leavePlayer()
         Qa.expect(SearchActivity::class.java, "back to search")
         search("Desert", "movie_open")
+        Qa.step("from the search box, Down twice (only movie results on screen)")
+        Qa.down()
+        Qa.step("after Down 1: highlight on ${Qa.focusedDescription()}")
+        Qa.down()
+        Qa.step("after Down 2: highlight on ${Qa.focusedDescription()}")
+        Qa.shot("search_movies_only_down", "Search with only movie results, after Down twice")
         val hit = Qa.findText("Desert")
         if (hit != null) {
             Qa.focusText("Desert")

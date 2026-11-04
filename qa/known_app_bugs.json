@@ -74,5 +74,30 @@
         "shot_contains": "series_details"
       }
     ]
+  },
+  {
+    "id": "5",
+    "title": "Nothing is highlighted on Home after switching to the Dock layout",
+    "screen": "Home (Dock layout), right after changing the layout in Settings",
+    "what": "Coming back from Settings after choosing Dock, Home is rebuilt with no visible highlight: the remote's focus sits on the gear button of the old layout, which Dock keeps hidden.",
+    "expected": "A Dock tile (for example Live TV) is highlighted.",
+    "steps": [
+      "Use the Big tiles Home layout.",
+      "Highlight the gear (Settings) button and press OK.",
+      "Settings › Home layout: choose Dock, then press Back.",
+      "Home appears as Dock with nothing highlighted."
+    ],
+    "cause": "HomeActivity.onResume() calls recreate() when the look changed; Android restores the focus to the view that had it before (@id/settings_button). In activity_home_dock.xml that view exists only inside a hidden (visibility gone) container, so the highlight lands on an invisible view. Moving focus to tile_live after a rebuild (or not restoring focus) would avoid it.",
+    "tests": [
+      "T11_NewIn12Test.switchToDockFromSettings"
+    ],
+    "error_contains": [],
+    "check_matches": [
+      {
+        "kind": "focus_hidden",
+        "detail_contains": "settings_button",
+        "shot_contains": "home_after_layout_change"
+      }
+    ]
   }
 ]

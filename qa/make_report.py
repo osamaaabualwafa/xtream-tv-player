@@ -144,6 +144,7 @@ if monkey_txt:
         "events": int(injected.group(1)) if injected else 0,
         "finished": "Monkey finished" in monkey_txt,
         "crash": "// CRASH" in monkey_txt,
+        "crash_count": monkey_txt.count("// CRASH"),
         "anr": "NOT RESPONDING" in monkey_txt,
         "detail": "",
     }
@@ -416,7 +417,7 @@ if check_counts:
 
 if monkey:
     out.append("<h2>Random remote presses</h2><p>%d presses, %s.</p>" % (
-        monkey["events"], "<span class='fail'>the app crashed</span>" if monkey["crash"] else "<span class='fail'>the app froze</span>" if monkey["anr"] else "<span class='pass'>no crash or freeze</span>"))
+        monkey["events"], "<span class='fail'>the app crashed %d time(s)</span>" % monkey["crash_count"] if monkey["crash"] else "<span class='fail'>the app froze</span>" if monkey["anr"] else "<span class='pass'>no crash or freeze</span>"))
     if monkey["detail"]:
         out.append("<pre>%s</pre>" % E(monkey["detail"]))
     if os.path.exists(os.path.join(DST, "shots", "monkey_end.png")):

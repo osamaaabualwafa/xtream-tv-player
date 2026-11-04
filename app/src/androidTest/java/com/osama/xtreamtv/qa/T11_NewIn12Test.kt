@@ -57,6 +57,39 @@ class T11_NewIn12Test : QaTest() {
         }
     }
 
+    /** Is the highlighted item really on screen (not a hidden view)? */
+    private fun highlightVisible(): Boolean = Qa.main {
+        val f = Qa.current()?.currentFocus ?: return@main false
+        val r = android.graphics.Rect()
+        f.isShown && f.getGlobalVisibleRect(r) && r.width() > 4 && r.height() > 4
+    }
+
+    @Test
+    fun switchToDockFromSettings() {
+        openHome(mapOf("home_style" to Appearance.HOME_TILES))
+        Qa.step("on Big tiles Home: open Settings with the gear button")
+        Qa.focusId(R.id.settings_button, "Settings button")
+        Qa.ok()
+        Qa.expect(SettingsActivity::class.java, "Settings")
+        Qa.focusId(R.id.menu_home, "Home layout")
+        Qa.focusText("Dock")
+        Qa.ok()
+        Qa.settle(800)
+        Qa.shot("dock_chosen", "Home layout: Dock chosen")
+        Qa.backTo(HomeActivity::class.java, "Home")
+        Qa.settle(1500)
+        val visibleAfterBack = highlightVisible()
+        Qa.shot("dock_after_settings", "Home rebuilt as Dock after Back (highlight: ${Qa.focusedDescription()})")
+        Qa.step("highlight on screen after Back: $visibleAfterBack (${Qa.focusedDescription()})")
+        Qa.down()
+        Qa.settle(800)
+        val visibleAfterKey = highlightVisible()
+        Qa.shot("dock_after_one_key", "After one Down press (highlight: ${Qa.focusedDescription()})")
+        Qa.step("highlight on screen after one Down: $visibleAfterKey")
+        assertTrue("After switching to Dock and pressing Back, an item on Home is highlighted " +
+            "(highlight was on ${Qa.focusedDescription()}; after one Down press it is ${if (visibleAfterKey) "visible" else "still hidden"})", visibleAfterBack)
+    }
+
     @Test
     fun quickDrawer() {
         for (home in Appearance.HOME_NAMES.indices) {
