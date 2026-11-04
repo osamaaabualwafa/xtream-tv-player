@@ -12,7 +12,9 @@
     ],
     "cause": "BrowseActivity.bindNowPlaying(): the coroutine that loads a channel's 'Now' programme calls itemAdapter.notifyItemChanged() while the RecyclerView is still laying out (it can run straight away inside onBindViewHolder). Android does not allow that and throws IllegalStateException.",
     "tests": [],
-    "error_contains": ["Cannot call this method while RecyclerView is computing a layout or scrolling"]
+    "error_contains": [
+      "Cannot call this method while RecyclerView is computing a layout or scrolling"
+    ]
   },
   {
     "id": "2",
@@ -26,22 +28,51 @@
       "The app closes."
     ],
     "cause": "SearchActivity.loadLibrary(): the three lists load with async { } inside lifecycleScope.launch. When one fails, the failure cancels the parent coroutine and is re-thrown outside the try/catch, so the catch block never shows the message (structured concurrency). Wrapping the async calls in coroutineScope { } / supervisorScope { } inside the try would keep the error inside it.",
-    "tests": ["T10_BadNetworkTest.brokenServer"],
-    "error_contains": ["Server returned an invalid response"]
+    "tests": [
+      "T10_BadNetworkTest.brokenServer"
+    ],
+    "error_contains": [
+      "Server returned an invalid response"
+    ]
   },
   {
     "id": "3",
-    "title": "Quick drawer: TV guide does nothing until Live TV has been opened",
+    "title": "Quick drawer: TV guide does nothing (until a channel has been played)",
     "screen": "Home › Menu key › quick drawer › TV guide",
-    "what": "Right after opening the app, pressing OK on 'TV guide' in the new quick drawer closes the drawer and nothing opens. It only works after Live TV has been opened once in that session.",
+    "what": "Pressing OK on 'TV guide' in the new quick drawer closes the drawer and nothing opens. Opening the Live TV list first doesn't help; it only works after a channel has been played (or the guide opened from the Live TV list) in that session.",
     "expected": "The TV guide opens with all channels.",
     "steps": [
       "Open the app (Home).",
       "Press the Menu key on the remote: the quick drawer opens.",
-      "Move to 'TV guide' and press OK: the drawer closes and the guide does not open."
+      "Move to 'TV guide' and press OK: the drawer closes and the guide does not open.",
+      "Same after opening the Live TV list and coming back to Home."
     ],
-    "cause": "HomeActivity's drawer starts GuideActivity without a channel list; GuideActivity.onCreate() uses Session.zapList, which is empty until Live TV is opened, and then calls finish() straight away.",
-    "tests": ["T11_NewIn12Test.quickDrawerGuide"],
+    "cause": "HomeActivity's quick drawer starts GuideActivity with a plain Intent. GuideActivity.onCreate() takes its channels from Session.zapList and calls finish() when that list is empty; the list is only filled when a channel is played, when the guide is opened from the Live TV list, or from Search.",
+    "tests": [
+      "T11_NewIn12Test.quickDrawerGuide"
+    ],
     "error_contains": []
+  },
+  {
+    "id": "4",
+    "title": "Series page: Play and Favorites buttons hidden behind the seasons at large sizes",
+    "screen": "Series details page, Settings › Look › Interface size Large with Text size Large or Extra large",
+    "what": "The row with Play / Resume and '☆ Add to favorites' is cut off just above the Season 1 / 2 / 3 buttons: only its top edge is visible.",
+    "expected": "All buttons fully visible (the page scrolls or the rows move down).",
+    "steps": [
+      "Settings › Look: Interface size = Large, Text size = Large or Extra large.",
+      "Open Series and choose a series with several seasons.",
+      "The Play and Favorites buttons are cut off under the season buttons."
+    ],
+    "cause": "activity_details_series.xml: the top block (@id/info: title, ratings, plot, cast, buttons) has layout_height=0dp with layout_weight=1, so it only gets the space left above the seasons and episodes. With larger text it no longer fits and its last row, the buttons, is clipped.",
+    "tests": [],
+    "error_contains": [],
+    "check_matches": [
+      {
+        "kind": "text_offscreen",
+        "detail_contains": "Add to favorites",
+        "shot_contains": "series_details"
+      }
+    ]
   }
 ]

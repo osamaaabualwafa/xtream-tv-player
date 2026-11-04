@@ -158,10 +158,10 @@ class T08_ThemesTest : QaTest() {
     @Test fun themeGlassBrowse() = themeBrowse(Appearance.THEME_GLASS, "Glass")
     @Test fun themeGlassScreens() = themeScreens(Appearance.THEME_GLASS, "Glass")
 
-    /** Glass: every background (scene) on the main screens. */
-    @Test
-    fun glassBackgrounds() {
-        for ((i, name) in Appearance.SCENE_NAMES.withIndex()) {
+    /** Glass: backgrounds (scenes) on the main screens, three per test so a crash hides little. */
+    private fun glassBackgrounds(range: IntRange) {
+        for (i in range) {
+            val name = Appearance.SCENE_NAMES[i]
             tag = "glass_bg_$name"
             Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_scene" to i))
             home()
@@ -176,9 +176,12 @@ class T08_ThemesTest : QaTest() {
         }
     }
 
-    /** Glass: the three glass styles and the four highlight styles (dark and Daylight). */
+    @Test fun glassBackgrounds1() = glassBackgrounds(0..2)
+    @Test fun glassBackgrounds2() = glassBackgrounds(3..5)
+    @Test fun glassBackgrounds3() = glassBackgrounds(6..8)
+
     @Test
-    fun glassStylesAndHighlights() {
+    fun glassStyles() {
         for ((i, name) in Appearance.GLASS_STYLE_NAMES.withIndex()) {
             tag = "glass_style_$name"
             Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_style" to i))
@@ -186,22 +189,27 @@ class T08_ThemesTest : QaTest() {
             browse(ContentType.MOVIE, "movies")
             detailsScreens()
         }
-        for (scene in listOf(0, Appearance.SCENE_DAYLIGHT)) {
-            for ((f, name) in Appearance.FOCUS_NAMES.withIndex()) {
-                tag = "glass_focus_${name.replace(' ', '_')}_${Appearance.SCENE_NAMES[scene]}"
-                Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_scene" to scene, "focus_style" to f))
-                home()
-                browse(ContentType.MOVIE, "movies")
-                browse(ContentType.LIVE, "live")
-                Qa.start(Intent(Qa.ctx, SettingsActivity::class.java))
-                Qa.expect(SettingsActivity::class.java, "Settings")
-                Qa.focusId(R.id.menu_color, "Look")
-                Qa.right()
-                Qa.shot("${tag}_settings", "$tag · settings, Look")
-                Qa.finishAll()
-            }
+    }
+
+    /** Glass: the four highlight styles on a dark scene and on Daylight. */
+    private fun glassHighlights(scene: Int) {
+        for ((f, name) in Appearance.FOCUS_NAMES.withIndex()) {
+            tag = "glass_focus_${name.replace(' ', '_')}_${Appearance.SCENE_NAMES[scene]}"
+            Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_scene" to scene, "focus_style" to f))
+            home()
+            browse(ContentType.MOVIE, "movies")
+            browse(ContentType.LIVE, "live")
+            Qa.start(Intent(Qa.ctx, SettingsActivity::class.java))
+            Qa.expect(SettingsActivity::class.java, "Settings")
+            Qa.focusId(R.id.menu_color, "Look")
+            Qa.right()
+            Qa.shot("${tag}_settings", "$tag · settings, Look")
+            Qa.finishAll()
         }
     }
+
+    @Test fun glassHighlightsDark() = glassHighlights(0)
+    @Test fun glassHighlightsDaylight() = glassHighlights(Appearance.SCENE_DAYLIGHT)
 
     /** Glass: moving background on, with the other effects. */
     @Test
@@ -264,24 +272,27 @@ class T08_ThemesTest : QaTest() {
         }
     }
 
-    @Test
-    fun sizes() {
-        // ui_size values: 3 Small, 0 Compact, 1 Normal, 2 Large. text_size: 0 Small .. 3 Extra large.
-        for ((ui, text) in listOf(3 to 0, 2 to 3, 0 to 3, 1 to 2, 2 to 2)) {
-            tag = "size_ui${ui}_text$text"
-            Qa.reset(settings = mapOf("ui_size" to ui, "text_size" to text))
-            home()
-            browse(ContentType.MOVIE, "movies")
-            browse(ContentType.LIVE, "live")
-            detailsScreens()
-            Qa.start(Intent(Qa.ctx, SettingsActivity::class.java))
-            Qa.expect(SettingsActivity::class.java, "Settings")
-            Qa.focusId(R.id.menu_player, "Player")
-            Qa.shot("${tag}_settings_player", "$tag · settings")
-            Qa.finishAll()
-            playerScreens()
-        }
+    // ui_size values: 3 Small, 0 Compact, 1 Normal, 2 Large. text_size: 0 Small .. 3 Extra large.
+    private fun sizes(ui: Int, text: Int) {
+        tag = "size_ui${ui}_text$text"
+        Qa.reset(settings = mapOf("ui_size" to ui, "text_size" to text))
+        home()
+        browse(ContentType.MOVIE, "movies")
+        browse(ContentType.LIVE, "live")
+        detailsScreens()
+        Qa.start(Intent(Qa.ctx, SettingsActivity::class.java))
+        Qa.expect(SettingsActivity::class.java, "Settings")
+        Qa.focusId(R.id.menu_player, "Player")
+        Qa.shot("${tag}_settings_player", "$tag · settings")
+        Qa.finishAll()
+        playerScreens()
     }
+
+    @Test fun sizesSmallSmall() = sizes(3, 0)
+    @Test fun sizesLargeExtraLarge() = sizes(2, 3)
+    @Test fun sizesCompactExtraLarge() = sizes(0, 3)
+    @Test fun sizesNormalLarge() = sizes(1, 2)
+    @Test fun sizesLargeLarge() = sizes(2, 2)
 
     @Test
     fun effects() {

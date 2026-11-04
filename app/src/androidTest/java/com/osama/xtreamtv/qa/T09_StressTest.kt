@@ -30,7 +30,7 @@ class T09_StressTest : QaTest() {
 
     private fun hammer(label: String, keys: List<Int>, presses: Int) {
         val t = SystemClock.elapsedRealtime()
-        repeat(presses) { i -> Qa.device.pressKeyCode(keys[i % keys.size]); SystemClock.sleep(40) }
+        repeat(presses) { i -> Qa.key(keys[i % keys.size], 1, 40) }
         val ms = SystemClock.elapsedRealtime() - t
         Qa.settle(1500)
         Qa.metric("${label}_presses_ms", ms)
@@ -106,8 +106,7 @@ class T09_StressTest : QaTest() {
                 Qa.waitUntil(15_000) { Qa.current() != null }
             } else {
                 screens.add(here.javaClass.simpleName)
-                Qa.device.pressKeyCode(k)
-                SystemClock.sleep(150)
+                Qa.key(k, 1, 150)
             }
             if (i % 200 == 199) Qa.shot("random_$i", "After ${i + 1} random remote keys")
         }

@@ -10,7 +10,8 @@ SHARDS = [
     ("live-movies", ["T03_LiveTvTest", "T04_MoviesTest"], False),
     ("settings-new-network", ["T07_SettingsTest", "T11_NewIn12Test", "T10_BadNetworkTest"], False),
     ("themes-a", ["T08_ThemesTest#themeDefaultHome+themeDefaultBrowse+themeDefaultScreens+themeCinemaHome+themeCinemaBrowse+themeCinemaScreens+themeGlassHome+themeGlassBrowse+themeGlassScreens+removedThemesMoveToDefault"], False),
-    ("themes-b", ["T08_ThemesTest#glassBackgrounds+glassStylesAndHighlights+glassMovingBackground+colours+palettesAndBackgrounds+sizes+effects"], False),
+    ("themes-b", ["T08_ThemesTest#glassBackgrounds1+glassBackgrounds2+glassBackgrounds3+glassStyles+glassHighlightsDark+glassHighlightsDaylight+glassMovingBackground"], False),
+    ("themes-c", ["T08_ThemesTest#colours+palettesAndBackgrounds+sizesSmallSmall+sizesLargeExtraLarge+sizesCompactExtraLarge+sizesNormalLarge+sizesLargeLarge+effects"], False),
     ("stress-random", ["T09_StressTest"], True),
 ]
 

@@ -220,6 +220,16 @@ for bug in known:
                 t["app_bug"] = bug["id"]
             for f in matched_finding:
                 f["app_bug"] = bug["id"]
+    for cm in bug.get("check_matches", []):
+        for t in tests:
+            for sh in t["shots"]:
+                if cm.get("shot_contains", "") not in sh["file"]:
+                    continue
+                for c in sh.get("checks", []):
+                    if c.get("kind") == cm.get("kind") and cm.get("detail_contains", "") in (c.get("detail", "") + c.get("text", "")):
+                        hits.append({"test": t["name"], "result": "screen check", "shot": sh["file"],
+                                     "steps": [x["text"] for x in t["steps"]][-12:], "error": c.get("text", ""), "finding": ""})
+                        break
     crash_hits = [c for c in crashes if any(m in c["text"] for m in bug.get("error_contains", []))]
     app_bugs.append(dict(bug, seen_this_run=bool(hits or crash_hits), hits=hits, crash_count=len(crash_hits),
                          crash_example=crash_hits[0]["text"][:2500] if crash_hits else ""))

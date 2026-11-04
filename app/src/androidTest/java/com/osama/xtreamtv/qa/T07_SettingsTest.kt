@@ -16,11 +16,11 @@ import org.junit.Test
  */
 class T07_SettingsTest : QaTest() {
 
-    private fun openSettings() {
+    private fun openSettings(twoPlaylists: Boolean = false) {
         Qa.launchApp()
-        // With two playlists and none set to open at start, the app asks which one first.
-        if (Qa.waitUntil(8000) { Qa.current() is HomeActivity || Qa.current() is com.osama.xtreamtv.PlaylistsActivity } &&
-            Qa.current() is com.osama.xtreamtv.PlaylistsActivity) {
+        if (twoPlaylists) {
+            // With two playlists and none set to open at start, the app asks which one first.
+            Qa.expect(com.osama.xtreamtv.PlaylistsActivity::class.java, "playlist chooser")
             Qa.focusText("Demo TV")
             Qa.ok()
         }
@@ -228,7 +228,7 @@ class T07_SettingsTest : QaTest() {
     @Test
     fun playlistsConnectionAbout() {
         Qa.reset(users = listOf("demo", "second"))
-        openSettings()
+        openSettings(twoPlaylists = true)
         openSection(R.id.menu_avatars, "Playlists")
         crawl("Playlists")
         openSection(R.id.menu_connection, "Connection check")

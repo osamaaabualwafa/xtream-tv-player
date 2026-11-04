@@ -87,14 +87,15 @@ class T05_SeriesTest : QaTest() {
         else Qa.expectPlaying("S01E02")
 
         Qa.step("episodes list inside the player")
-        // The controls hide after a few seconds; OK brings them back (every key keeps them up).
-        if (!Qa.visible(R.id.vc_episodes)) Qa.ok()
-        if (Qa.waitVisible(R.id.vc_episodes, 4000)) {
-            Qa.focusId(R.id.vc_episodes, "Episodes button")
-            Qa.ok()
+        // Menu on the remote opens the episodes list while an episode plays.
+        Qa.key(android.view.KeyEvent.KEYCODE_MENU)
+        if (Qa.waitVisible(R.id.episodes_panel, 4000) || Qa.waitVisible(R.id.episodes_list, 1000)) {
             Qa.settle(1200)
             Qa.shot("player_episodes", "Episodes list in the player")
             Qa.back()
+        } else {
+            Qa.shot("menu_in_episode", "Menu key during an episode")
+            Qa.finding("warning", "Menu during an episode didn't open the episodes list")
         }
         Qa.leavePlayer()
         Qa.expect(DetailsActivity::class.java, "series page after watching")

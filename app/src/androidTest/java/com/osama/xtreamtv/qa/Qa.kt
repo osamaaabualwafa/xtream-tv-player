@@ -289,9 +289,16 @@ object Qa {
 
     // ---------------------------------------------------------------- remote control
 
+    /** TV remotes report as D-pad + keyboard. */
+    private const val REMOTE_SOURCE = InputDevice.SOURCE_DPAD or InputDevice.SOURCE_KEYBOARD
+
     fun key(code: Int, times: Int = 1, gapMs: Long = 300) {
         repeat(times) {
-            device.pressKeyCode(code)
+            val ua = inst.uiAutomation
+            val t = SystemClock.uptimeMillis()
+            ua.injectInputEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, REMOTE_SOURCE), true)
+            ua.injectInputEvent(KeyEvent(t, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, REMOTE_SOURCE), true)
+            device.waitForIdle(1500)
             SystemClock.sleep(gapMs)
         }
     }
@@ -326,11 +333,11 @@ object Qa {
     fun longOk(code: Int = KeyEvent.KEYCODE_DPAD_CENTER) {
         val t = SystemClock.uptimeMillis()
         val ua = inst.uiAutomation
-        ua.injectInputEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD), true)
+        ua.injectInputEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, REMOTE_SOURCE), true)
         SystemClock.sleep(1300)
         val t2 = SystemClock.uptimeMillis()
-        ua.injectInputEvent(KeyEvent(t, t2, KeyEvent.ACTION_DOWN, code, 1, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), true)
-        ua.injectInputEvent(KeyEvent(t, t2 + 50, KeyEvent.ACTION_UP, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD), true)
+        ua.injectInputEvent(KeyEvent(t, t2, KeyEvent.ACTION_DOWN, code, 1, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_LONG_PRESS, REMOTE_SOURCE), true)
+        ua.injectInputEvent(KeyEvent(t, t2 + 50, KeyEvent.ACTION_UP, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, REMOTE_SOURCE), true)
         SystemClock.sleep(700)
     }
 
@@ -456,8 +463,12 @@ object Qa {
 
     fun focusText(text: String, maxPresses: Int = 40) = focus(text, maxPresses) { findTextOnMain(text) }
 
-    private fun findTextOnMain(text: String): View? {
-        val r = current()?.window?.decorView ?: return null
+    /** Like [focusText], but only inside the view [rootId] (e.g. one list). */
+    fun focusTextIn(rootId: Int, text: String, maxPresses: Int = 40) =
+        focus(text, maxPresses) { current()?.findViewById<View>(rootId)?.let { findTextOnMain(text, it) } }
+
+    private fun findTextOnMain(text: String, root: View? = null): View? {
+        val r = root ?: current()?.window?.decorView ?: return null
         var exact: View? = null
         var partial: View? = null
         walk(r) { v ->
@@ -690,7 +701,8 @@ object Audit {
             if (!inList && full > 0 && r.width().toLong() * r.height() < full * 0.85) {
                 out.put(item("text_offscreen", "Text partly outside the screen or its panel", text))
             }
-            if (bmp != null) contrast(tv, r, bmp)?.let { ratio ->
+            // Text over a playing video changes every frame, and one-letter avatars sit on their own circle: skip those.
+            if (bmp != null && a !is com.osama.xtreamtv.PlayerActivity && tv.text.trim().length > 1) contrast(tv, r, bmp)?.let { ratio ->
                 if (ratio < 3.0) out.put(item("low_contrast", "Hard to read: text and background too similar (%.1f:1)".format(ratio), text))
             }
         }
@@ -704,6 +716,8 @@ object Audit {
             val (a1, r1) = limited[i]
             val (a2, r2) = limited[j]
             if (Qa.isAncestor(a1, a2) || Qa.isAncestor(a2, a1)) continue
+            // Only texts of the same component: a menu or drawer drawn over the screen is meant to cover it.
+            if (!closeRelatives(a1, a2)) continue
             val inter = Rect()
             if (!inter.setIntersect(r1, r2)) continue
             val small = minOf(r1.width().toLong() * r1.height(), r2.width().toLong() * r2.height())
@@ -713,6 +727,13 @@ object Audit {
             }
         }
         return out
+    }
+
+    /** Do the two views share a parent or grandparent? */
+    private fun closeRelatives(a: View, b: View): Boolean {
+        val pa = listOfNotNull(a.parent as? View, (a.parent as? View)?.parent as? View)
+        val pb = listOfNotNull(b.parent as? View, (b.parent as? View)?.parent as? View)
+        return pa.any { x -> pb.any { it === x } }
     }
 
     private fun item(kind: String, text: String, detail: String) = JSONObject().put("kind", kind).put("text", text).put("detail", detail)
