@@ -205,6 +205,8 @@ object Qa {
 
     @Suppress("UNCHECKED_CAST")
     fun <T> main(block: () -> T): T {
+        // Already on the main thread (helpers calling helpers): just run it.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return block()
         var result: Any? = null
         var error: Throwable? = null
         inst.runOnMainSync {
