@@ -50,6 +50,7 @@ jobs:
 
       - name: Start the fake Xtream server
         run: |
+          bash qa/server/make_live_ts.sh
           nohup python3 qa/server/fake_xtream.py > qa-server.log 2>&1 &
           sleep 2
           curl -sf http://127.0.0.1:8080/__health

@@ -125,9 +125,7 @@ class T10_BadNetworkTest : QaTest() {
         Qa.shot("movies_without_internet", "Movies with no connection")
         Qa.internetUp()
         SystemClock.sleep(2000)
-        Qa.back()
-        if (Qa.current() !is HomeActivity) Qa.back()
-        Qa.waitUntil(5000) { Qa.current() is HomeActivity }
+        Qa.backTo(HomeActivity::class.java, "Home")
         if (Qa.current() is HomeActivity) {
             Qa.focusId(R.id.tile_movies, "Movies tile")
             Qa.ok()

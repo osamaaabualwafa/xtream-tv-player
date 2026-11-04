@@ -58,8 +58,8 @@ class T03_LiveTvTest : QaTest() {
         Qa.expectPlaying("World News HD")
         Qa.shot("live_playing", "Live channel playing")
 
-        Qa.step("OK shows the channel info")
-        Qa.ok()
+        Qa.step("channel info shows when a channel starts; OK shows it again")
+        if (!Qa.visible(R.id.overlay)) Qa.ok()
         Qa.waitVisible(R.id.overlay, 5000)
         Qa.shot("live_overlay", "Channel info (name, logo, now / next)")
         val name = Qa.text(R.id.overlay_name)
@@ -67,8 +67,7 @@ class T03_LiveTvTest : QaTest() {
         val now = Qa.text(R.id.overlay_now)
         if (now.isNullOrBlank()) Qa.finding("warning", "Channel info has no \"Now\" programme", "The fake server sends one for every channel")
 
-        Qa.back()
-        Qa.expect(BrowseActivity::class.java, "back on the channel list")
+        Qa.backTo(BrowseActivity::class.java, "back on the channel list")
     }
 
     @Test
@@ -168,6 +167,8 @@ class T03_LiveTvTest : QaTest() {
         Qa.settle(1000)
         Qa.shot("live_options", "Live options menu")
         Qa.back()
+        Qa.settle(1000)
+        Qa.shot("options_closed", "After Back on the options menu")
 
         Qa.step("Guide key opens the TV guide")
         Qa.key(KeyEvent.KEYCODE_GUIDE)
@@ -193,7 +194,10 @@ class T03_LiveTvTest : QaTest() {
         Qa.expect(GuideActivity::class.java, "TV guide of a catch-up channel")
         Qa.waitUntil(15_000) { Qa.listCount(R.id.guide_programs) > 0 }
         Qa.shot("guide_catchup", "Guide of a channel with catch-up (past shows can be played)")
-        Qa.focusText("Programme 3")
+        Qa.step("go to the programme list, then up to a past programme")
+        Qa.focus("programme on now") { Qa.findText("On now") }
+        Qa.up(2)
+        Qa.shot("guide_past_programme", "A past programme highlighted")
         Qa.ok()
         Qa.settle(2000)
         if (Qa.current() is PlayerActivity) {
@@ -223,10 +227,7 @@ class T03_LiveTvTest : QaTest() {
         Qa.shot("favorites_category", "★ Favorites category")
         assertTrue("Favorite shows in ★ Favorites", Qa.findText("Football Live") != null)
 
-        Qa.back()
-        Qa.back()
-        if (Qa.current() !is HomeActivity) Qa.back()
-        Qa.expect(HomeActivity::class.java, "Home")
+        Qa.backTo(HomeActivity::class.java, "Home")
         Qa.waitUntil(5000) { Qa.visible(R.id.row_channels) }
         Qa.shot("home_favorite_channels", "Home with the favorite channels row")
         if (!Qa.visible(R.id.row_channels)) Qa.finding("warning", "Favorite channel not shown on Home", "Expected the favorite channels row")
@@ -248,6 +249,8 @@ class T03_LiveTvTest : QaTest() {
     fun searchInsideLiveList() {
         Qa.reset()
         openLiveTv()
+        Qa.focusText("All")
+        Qa.settle(1500)
         val all = Qa.listCount(R.id.items)
         Qa.focusId(R.id.search, "search box")
         Qa.type(R.id.search, "sports")

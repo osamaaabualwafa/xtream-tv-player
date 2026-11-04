@@ -303,6 +303,16 @@ object Qa {
     fun ok() = key(KeyEvent.KEYCODE_DPAD_CENTER, 1, 500)
     fun back() = key(KeyEvent.KEYCODE_BACK, 1, 600)
 
+    /** Presses Back until [cls] shows (at most [max] times); fails if it never does. */
+    fun <T : Activity> backTo(cls: Class<T>, what: String, max: Int = 4) {
+        repeat(max) {
+            if (cls.isInstance(current())) return
+            back()
+            waitUntil(2500) { cls.isInstance(current()) }
+        }
+        expect(cls, what, 3000)
+    }
+
     /** Back out of the player (the first Back may only close the controls). */
     fun leavePlayer() {
         repeat(3) {

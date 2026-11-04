@@ -116,6 +116,19 @@ while i < len(lines):
         anrs.append({"time": ln[:18], "text": "\n".join(re.sub(r"^.*?ActivityManager:\s?", "", b) for b in block)})
     i += 1
 
+# App log (only our app's processes), for diagnosing failures.
+pids = set(re.findall(r"Start proc (\d+):" + re.escape(PKG), logcat))
+app_lines = []
+for ln in lines:
+    parts = ln.split(None, 3)
+    if len(parts) >= 3 and (parts[2] in pids or PKG in ln):
+        app_lines.append(ln)
+if app_lines:
+    import gzip
+    with gzip.open(os.path.join(DST, "logcat_app.txt.gz"), "wt", encoding="utf-8") as f:
+        f.write("\n".join(app_lines))
+app_errors = [ln for ln in app_lines if re.match(r"^\S+ \S+\s+\d+\s+\d+ [EW] ", ln) and "QA" not in ln][-300:]
+
 # The instrumentation runner stops the app on purpose between tests; only real crashes count.
 crashes = [c for c in crashes if "Instrumentation" not in c["text"].split("\n")[0]]
 
@@ -182,6 +195,7 @@ summary = {
     "screen_checks": {"counts": check_counts, "examples": check_examples},
     "crashes": crashes,
     "anrs": anrs,
+    "app_errors": app_errors,
     "monkey": monkey,
     "metrics": metrics,
     "videos": videos,

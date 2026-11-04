@@ -95,8 +95,7 @@ class T06_SearchHomeTest : QaTest() {
         Qa.focusId(R.id.settings_button, "Settings button")
         Qa.ok()
         Qa.expect(SettingsActivity::class.java, "Settings")
-        Qa.back()
-        Qa.expect(HomeActivity::class.java, "Home")
+        Qa.backTo(HomeActivity::class.java, "Home")
 
         Qa.step("refresh lists")
         if (Qa.visible(R.id.refresh_lists)) {

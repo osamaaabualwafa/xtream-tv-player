@@ -103,9 +103,7 @@ class T04_MoviesTest : QaTest() {
         }
 
         Qa.step("Home shows it under Continue watching")
-        Qa.back()
-        if (Qa.current() !is HomeActivity) Qa.back()
-        Qa.expect(HomeActivity::class.java, "Home")
+        Qa.backTo(HomeActivity::class.java, "Home")
         Qa.waitUntil(6000) { Qa.visible(R.id.row_continue) }
         Qa.shot("home_continue", "Home with Continue watching")
         if (!Qa.visible(R.id.row_continue)) Qa.finding("problem", "Movie not in Continue watching on Home")

@@ -119,8 +119,7 @@ class T07_SettingsTest : QaTest() {
         }
         Qa.shot("browse_layout_chosen", "Movies and series layout: last one chosen")
         Qa.step("Home rebuilds with the new layout after Back")
-        Qa.back()
-        Qa.expect(HomeActivity::class.java, "Home")
+        Qa.backTo(HomeActivity::class.java, "Home")
         Qa.settle(1500)
         Qa.shot("home_after_layout_change", "Home after choosing Top tabs")
     }

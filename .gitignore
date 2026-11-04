@@ -6,3 +6,4 @@ local.properties
 .DS_Store
 captures/
 .kotlin/
+qa/server/media/live_long.ts

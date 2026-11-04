@@ -474,13 +474,45 @@ class Handler(BaseHTTPRequestHandler):
                 if user == "tsonly":
                     return self.send_bytes(b"m3u8 not allowed", "text/plain", 403)
                 return self.live_playlist()
-            return self.send_file(os.path.join(MEDIA, "live.ts"), "video/mp2t")
+            return self.live_ts()
         if kind == "timeshift":
             return self.send_file(os.path.join(MEDIA, "live.ts"), "video/mp2t")
         if kind == "movie" and sid == BROKEN_MOVIE:
             return self.send_bytes(b"<html>404</html>", "text/html", 404)
         ctype = "video/x-matroska" if ext == "mkv" else "video/mp4"
         return self.send_file(os.path.join(MEDIA, "movie.mp4"), ctype)
+
+    def live_ts(self):
+        """Endless-looking live TS: joins a 10-minute stream at the current 'live' point."""
+        path = os.path.join(MEDIA, "live_long.ts")
+        if not os.path.exists(path):
+            return self.send_file(os.path.join(MEDIA, "live.ts"), "video/mp2t")
+        size = os.path.getsize(path)
+        start = int((time.time() % 480) / 600 * size) // 188 * 188
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Content-Length", str(size - start))
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        sent = 0
+        began = time.time()
+        rate = size / 600.0 * 3  # up to 3x real time, like a live server with a small burst
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk or time.time() < state["down_until"]:
+                        break
+                    self.wfile.write(chunk)
+                    sent += len(chunk)
+                    ahead = sent / rate - (time.time() - began)
+                    if ahead > 0:
+                        time.sleep(min(ahead, 1.0))
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self.close_connection = True
 
     def live_playlist(self):
         first = int(time.time() // SEG_SECONDS) - 3
