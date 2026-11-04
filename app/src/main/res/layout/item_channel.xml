@@ -20,7 +20,7 @@
         android:layout_width="52dp"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="@color/text_secondary_focus"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="15sp" />
 
     <ImageView
@@ -46,7 +46,7 @@
             android:ellipsize="end"
             android:maxLines="2"
             android:lineSpacingExtra="-2dp"
-            android:textColor="@color/text_focus_primary"
+            android:textColor="@color/on_focus_text"
             android:textSize="17sp" />
 
         <TextView
@@ -57,7 +57,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:singleLine="true"
-            android:textColor="@color/text_secondary_focus"
+            android:textColor="@color/on_focus_secondary"
             android:textSize="14sp"
             android:visibility="gone" />
 

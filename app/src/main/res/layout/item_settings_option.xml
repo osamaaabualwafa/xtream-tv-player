@@ -19,7 +19,7 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:singleLine="true"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="17sp" />
 
     <TextView
@@ -28,6 +28,6 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="@color/accent_focus"
+        android:textColor="@color/on_focus_accent"
         android:textSize="16sp" />
 </LinearLayout>

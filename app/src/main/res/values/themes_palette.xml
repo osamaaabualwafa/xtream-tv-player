@@ -5,7 +5,7 @@
 <resources>
     <style name="Palette" />
 
-    <!-- Coastal: slate blue, leather (Movies) and sea foam (Series). -->
+    <!-- Coastal colours for the Default theme: slate blue, leather (Movies) and sea foam (Series). -->
     <style name="Palette.Coastal">
         <item name="appBg">#FF141B20</item>
         <item name="appSurface">#FF1E2A32</item>
@@ -42,7 +42,7 @@
         <item name="appBackground">@drawable/bg_palette</item>
     </style>
 
-    <!-- Coconut: warm brown, husk (Movies) and olive (Series). -->
+    <!-- Coconut colours for the Default theme: warm brown, husk (Movies) and olive (Series). -->
     <style name="Palette.Coconut">
         <item name="appBg">#FF1A110B</item>
         <item name="appSurface">#FF2B1D14</item>
@@ -114,5 +114,37 @@
         <item name="appTile3_40">#408B4A6A</item>
         <item name="appTile3_6B">#6B8B4A6A</item>
         <item name="appBackground">@drawable/bg_palette</item>
+    </style>
+
+    <!-- Glass: text and quiet surfaces; the scene and glass style bring the rest (THEME.md 4 and 5). -->
+    <style name="Palette.Glass">
+        <item name="appText">#FFF0F6F6</item>
+        <item name="appTextSecondary">#FFA0AFAF</item>
+        <item name="appTileCount">#FFA0AFAF</item>
+        <item name="appOnAccent">#FFDAE4DF</item>
+        <item name="appGold">#FFE8C97A</item>
+        <item name="appError">#FFF2A69B</item>
+        <item name="appSurface">#0CFFFFFF</item>
+        <item name="appSurfaceFocus">#14FFFFFF</item>
+        <item name="appSurfaceActive">#10FFFFFF</item>
+        <item name="appCardStroke">#16FFFFFF</item>
+        <item name="appChoiceFill">#07FFFFFF</item>
+        <item name="appChoiceStroke">#16FFFFFF</item>
+        <item name="appPosterFill">#07FFFFFF</item>
+        <item name="appPosterStroke">#16FFFFFF</item>
+        <item name="appRowFill">#00FFFFFF</item>
+        <item name="appSelectedFill">#10FFFFFF</item>
+        <item name="appSelectedStroke">#00000000</item>
+        <item name="appSelectedChip">#10FFFFFF</item>
+        <item name="appTileIdleLive">#07FFFFFF</item>
+        <item name="appTileIdleLiveEnd">#07FFFFFF</item>
+        <item name="appTileIdleSearch">#07FFFFFF</item>
+        <item name="appTileIdleEnd">#07FFFFFF</item>
+        <item name="appTile2_38">#07FFFFFF</item>
+        <item name="appTile3_40">#07FFFFFF</item>
+        <item name="appButtonFill">#07FFFFFF</item>
+        <item name="appButtonStroke">#16FFFFFF</item>
+        <item name="appDialogFill">#C409121D</item>
+        <item name="appDialogStroke">#1CC9DDEE</item>
     </style>
 </resources>

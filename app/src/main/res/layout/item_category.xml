@@ -23,7 +23,7 @@
         android:gravity="left|center_vertical"
         android:textAlignment="gravity"
         android:textDirection="ltr"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="16sp" />
 
     <TextView
@@ -33,6 +33,6 @@
         android:layout_height="wrap_content"
         android:layout_marginLeft="8dp"
         android:singleLine="true"
-        android:textColor="@color/text_secondary_focus"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="14sp" />
 </LinearLayout>

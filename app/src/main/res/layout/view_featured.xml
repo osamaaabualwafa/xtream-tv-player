@@ -77,7 +77,7 @@
             android:paddingLeft="22dp"
             android:paddingRight="22dp"
             android:text="▶  Open"
-            android:textColor="?attr/appOnAccent"
+            android:textColor="@color/on_button"
             android:textSize="15sp"
             android:textStyle="bold" />
     </LinearLayout>

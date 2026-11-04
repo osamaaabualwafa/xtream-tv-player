@@ -30,7 +30,7 @@
             android:paddingRight="6dp"
             android:paddingBottom="1dp"
             android:text="● LIVE"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/appLiveText"
             android:textSize="10sp"
             android:textStyle="bold"
             android:visibility="gone" />
@@ -45,15 +45,16 @@
         android:ellipsize="end"
         android:gravity="center"
         android:singleLine="true"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="14sp" />
 
     <TextView
+                android:duplicateParentState="true"
         android:id="@+id/subtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
         android:singleLine="true"
-        android:textColor="?attr/appTextSecondary"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="12sp" />
 </LinearLayout>

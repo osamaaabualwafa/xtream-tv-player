@@ -67,6 +67,9 @@ class LayoutThumbView @JvmOverloads constructor(
                 box(28f, 3f, 44f, 6f, accent)
                 for (r in 0 until 3) posters(4f, 13f + r * 14f, 7, 11.4f, 11f, 2f)
             }
+            "H4" -> { // dock: six icon tiles
+                for (r in 0 until 2) for (c in 0 until 3) box(20f + c * 22f, 7f + r * 23f, 16f, 18f, if (r == 0 && c == 0) accent else plain)
+            }
             "B0" -> { // sidebar + grid + info strip
                 box(4f, 4f, 22f, 48f, faint)
                 for (i in 0 until 6) box(6f, 7f + i * 7f, 18f, 5f, if (i == 2) accent else plain)

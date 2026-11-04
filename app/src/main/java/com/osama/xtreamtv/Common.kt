@@ -145,6 +145,11 @@ class Prefs(context: Context) {
         if (!global.contains("stream_type")) e.putInt("stream_type", 0)
         if (!global.contains("picture_size")) e.putInt("picture_size", 0)
         if (!global.contains("theme")) e.putInt("theme", 0)
+        if (!global.contains("glass_scene")) e.putInt("glass_scene", 0)
+        if (!global.contains("glass_style")) e.putInt("glass_style", 0)
+        if (!global.contains("focus_style")) e.putInt("focus_style", 0)
+        if (!global.contains("moving_background")) e.putBoolean("moving_background", false)
+        if (!global.contains("home_menu_button")) e.putInt("home_menu_button", 0)
         e.putInt("settings_pinned_for", versionCode)
         e.apply()
     }
@@ -275,10 +280,41 @@ class Prefs(context: Context) {
         set(value) = global.edit().putInt("buffer_size", value).apply()
 
     // Settings > Look.
-    /** Settings > Look > Theme: 0 Default, 1 Cinema, 2 Coastal, 3 Coconut (Appearance.THEME_NAMES). */
+    /** Settings > Look > Theme: stored value from Appearance.THEMES. */
     var themeIndex: Int
         get() = global.getInt("theme", 0)
         set(value) = global.edit().putInt("theme", value).apply()
+
+    // Glass theme (THEME.md).
+    var glassScene: Int
+        get() = global.getInt("glass_scene", 0)
+        set(value) = global.edit().putInt("glass_scene", value).apply()
+
+    var glassStyle: Int
+        get() = global.getInt("glass_style", 0)
+        set(value) = global.edit().putInt("glass_style", value).apply()
+
+    var focusStyle: Int
+        get() = global.getInt("focus_style", 0)
+        set(value) = global.edit().putInt("focus_style", value).apply()
+
+    var movingBackground: Boolean
+        get() = global.getBoolean("moving_background", false)
+        set(value) = global.edit().putBoolean("moving_background", value).apply()
+
+    /** Menu key on Home: 0 opens the quick drawer, 1 does nothing. */
+    var homeMenuButton: Int
+        get() = global.getInt("home_menu_button", 0)
+        set(value) = global.edit().putInt("home_menu_button", value).apply()
+
+    /** The Coastal and Coconut themes are now colours of the Default theme (also for old backups). */
+    fun moveRemovedThemes() {
+        val old = themeIndex
+        if (old == 2 || old == 3) {
+            themeIndex = 0
+            paletteIndex = old - 1
+        }
+    }
 
     /** Whole-app palette: 0 Default (theme colour + background apply), 1 Coastal, 2 Coconut. */
     var paletteIndex: Int
@@ -662,19 +698,8 @@ private val AVATAR_COLORS = intArrayOf(
 fun avatarColor(playlistId: String): Int = AVATAR_COLORS[Math.floorMod(playlistId.hashCode(), AVATAR_COLORS.size)]
 
 val scaleOnFocus = View.OnFocusChangeListener { v, hasFocus ->
+    FocusFx.grow(v, hasFocus)
     val glow = Prefs(v.context).posterGlow
-    val scale = if (hasFocus) (if (glow) 1.1f else 1.06f) else 1f
-    val d = v.resources.displayMetrics.density
-    v.animate().scaleX(scale).scaleY(scale).translationY(if (hasFocus && glow) -4 * d else 0f).setDuration(140).start()
-    v.elevation = if (hasFocus) (if (glow) 18 * d else 8f) else 0f
-    if (glow && android.os.Build.VERSION.SDK_INT >= 28) {
-        // A soft glow in the theme colour around the highlighted poster.
-        val a = v.context.obtainStyledAttributes(intArrayOf(R.attr.appAccent))
-        val accent = a.getColor(0, 0xFF3D8BFD.toInt())
-        a.recycle()
-        v.outlineSpotShadowColor = accent
-        v.outlineAmbientShadowColor = accent
-    }
     // In a row or grid: the others dim a little so the highlighted one stands out.
     val parent = v.parent as? androidx.recyclerview.widget.RecyclerView ?: return@OnFocusChangeListener
     if (!glow) return@OnFocusChangeListener
@@ -866,7 +891,10 @@ class ItemAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val view = LayoutInflater.from(parent.context)
             .inflate(layout ?: if (grid) R.layout.item_poster else R.layout.item_channel, parent, false)
-        if (grid) view.onFocusChangeListener = scaleOnFocus
+        if (grid) {
+            view.onFocusChangeListener = scaleOnFocus
+            FocusFx.markGrows(view)
+        }
         return VH(view)
     }
 
@@ -960,6 +988,11 @@ class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyc
         parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
     ): Boolean = centerOnFocus(parent, child, immediate)
 
+    override fun onAttachedToWindow(view: RecyclerView) {
+        super.onAttachedToWindow(view)
+        FocusBox.reserve(view)
+    }
+
     /**
      * Keep the next row ready above and below the screen (built and its posters loading), so the
      * row sliding in is already drawn. Not on TVs short of memory.
@@ -994,8 +1027,14 @@ class RowLayoutManager(context: android.content.Context, @RecyclerView.Orientati
 
     override fun requestChildRectangleOnScreen(
         parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
-    ): Boolean = if (center && orientation == VERTICAL) centerOnFocus(parent, child, immediate)
-    else super.requestChildRectangleOnScreen(parent, child, rect, immediate, focusedChildVisible)
+    ): Boolean {
+        if (center && orientation == VERTICAL) return centerOnFocus(parent, child, immediate)
+        // Stop with room around the focused item, not flush at the edge.
+        val room = (FocusFx.ROOM_DP * parent.resources.displayMetrics.density).toInt()
+        val wide = android.graphics.Rect(rect)
+        if (orientation == HORIZONTAL) wide.inset(-room, 0) else wide.inset(0, -room)
+        return super.requestChildRectangleOnScreen(parent, child, wide, immediate, focusedChildVisible)
+    }
 
     override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
         val forward = if (orientation == HORIZONTAL) View.FOCUS_RIGHT else View.FOCUS_DOWN
@@ -1028,5 +1067,6 @@ class RowLayoutManager(context: android.content.Context, @RecyclerView.Orientati
     override fun onAttachedToWindow(view: RecyclerView) {
         super.onAttachedToWindow(view)
         view.itemAnimator = null
+        FocusBox.reserve(view)
     }
 }

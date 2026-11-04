@@ -59,4 +59,49 @@
     <attr name="appTileFocusSeriesEnd" format="color" />
     <attr name="appTileFocusSearchStart" format="color" />
     <attr name="appTileFocusSearchEnd" format="color" />
+    <!-- Glass theme: what it changes beyond the palette (defaults = every other theme's look). -->
+    <attr name="appGlassCard" format="color" />
+    <attr name="appCardStroke" format="color" />
+    <attr name="appSelectedFill" format="color" />
+    <attr name="appSelectedStroke" format="color" />
+    <attr name="appSelectedRing" format="color" />
+    <attr name="appSelectedChip" format="color" />
+    <attr name="appFocusGlow" format="color" />
+    <attr name="appFocusGlowColor" format="color" />
+    <attr name="appFocusSecondaryText" format="color" />
+    <attr name="appFocusPill" format="color" />
+    <attr name="appFocusTile" format="color" />
+    <attr name="appFocusInput" format="color" />
+    <attr name="appChoiceFill" format="color" />
+    <attr name="appChoiceStroke" format="color" />
+    <attr name="appPosterFill" format="color" />
+    <attr name="appPosterStroke" format="color" />
+    <attr name="appRowFill" format="color" />
+    <attr name="appTileIdleLive" format="color" />
+    <attr name="appTileIdleLiveEnd" format="color" />
+    <attr name="appTileIdleSearch" format="color" />
+    <attr name="appTileIdleEnd" format="color" />
+    <attr name="appButtonFill" format="color" />
+    <attr name="appButtonFocus" format="color" />
+    <attr name="appButtonStroke" format="color" />
+    <attr name="appButtonFocusText" format="color" />
+    <attr name="appDialogFill" format="color" />
+    <attr name="appDialogStroke" format="color" />
+    <attr name="appPanelSolid" format="color" />
+    <attr name="appShadeStrong" format="color" />
+    <attr name="appShadeMid" format="color" />
+    <attr name="appShadeSoft" format="color" />
+    <attr name="appShade99" format="color" />
+    <attr name="appShade1A" format="color" />
+    <attr name="appLiveText" format="color" />
+    <attr name="appIconTint" format="color" />
+    <attr name="appGlowA" format="color" />
+    <attr name="appGlowB" format="color" />
+    <attr name="appGlowC" format="color" />
+    <attr name="appFocusGlowWidth" format="dimension" />
+    <attr name="appCornerTabbar" format="dimension" />
+    <attr name="appFocusScale" format="float" />
+    <attr name="appVcFocusText" format="color" />
+    <attr name="appSideIcon" format="color" />
+    <attr name="appRowFocusFill" format="color" />
 </resources>

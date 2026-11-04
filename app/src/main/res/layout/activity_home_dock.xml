@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home, Dock layout: six big glass icon tiles. The hidden block holds what the other Home
+     layouts show on the page (account, rows); here those live in the quick drawer or Browse. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/appBackground"
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:orientation="vertical"
+    android:paddingLeft="36dp"
+    android:paddingTop="20dp"
+    android:paddingRight="36dp"
+    android:paddingBottom="14dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:tag="screen_title"
+            android:text="Xtream TV"
+            android:textColor="?attr/appText"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/playlist_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?attr/appTextSecondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/expiry_chip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="10dp"
+            android:textColor="?attr/appTextSecondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="16dp"
+            android:textColor="?attr/appText"
+            android:textSize="18sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipChildren="false"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clipChildren="false"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/tile_live"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_tv" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Live TV"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tile_live_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text=""
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_movies"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_film" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Movies"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tile_movies_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text=""
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_series"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_series" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Series"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tile_series_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text=""
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/tile_search"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_search" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Search"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="Everything"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_favorites"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_heart" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="★ Favorites"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tile_favorites_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text=""
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tile_settings"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_gear" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Settings"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="Look and colours"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Page dot: one page today; a second appears only with more than six tiles. -->
+    <View
+        android:layout_width="14dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:background="@drawable/bg_grip" />
+
+    <TextView
+        android:id="@+id/version"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+        <TextView android:id="@+id/account" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/expiry_warning" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/refresh_lists" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/check_updates" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/logout" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/settings_button" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_continue_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_channels_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_favorites_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_recent_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_new_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/playlist_initial" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/playlist_chip" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_continue" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_channels" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_favorites" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_recent" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_new" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    </LinearLayout>
+</LinearLayout>

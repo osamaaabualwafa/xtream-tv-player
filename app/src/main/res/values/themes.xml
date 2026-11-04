@@ -66,6 +66,51 @@
         <item name="appTileFocusSeriesEnd">?attr/appTile3_1A</item>
         <item name="appTileFocusSearchStart">#4DFFFFFF</item>
         <item name="appTileFocusSearchEnd">#1AFFFFFF</item>
+        <!-- Glass theme hooks: these values are the look of every other theme. -->
+        <item name="appGlassCard">?attr/appGlassFill</item>
+        <item name="appCardStroke">?attr/appGlassStroke</item>
+        <item name="appSelectedFill">?attr/appAccent26</item>
+        <item name="appSelectedStroke">?attr/appAccent66</item>
+        <item name="appSelectedRing">?attr/appAccent</item>
+        <item name="appSelectedChip">#1AFFFFFF</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowColor">#00000000</item>
+        <item name="appFocusSecondaryText">?attr/appFocusText</item>
+        <item name="appFocusPill">?attr/appAccent80</item>
+        <item name="appFocusTile">?attr/appAccent4D</item>
+        <item name="appFocusInput">?attr/appAccent26</item>
+        <item name="appChoiceFill">#0FFFFFFF</item>
+        <item name="appChoiceStroke">#24FFFFFF</item>
+        <item name="appPosterFill">#0FFFFFFF</item>
+        <item name="appPosterStroke">#1FFFFFFF</item>
+        <item name="appRowFill">#0AFFFFFF</item>
+        <item name="appTileIdleLive">?attr/appAccent4D</item>
+        <item name="appTileIdleLiveEnd">?attr/appAccent0D</item>
+        <item name="appTileIdleSearch">#14FFFFFF</item>
+        <item name="appTileIdleEnd">#0AFFFFFF</item>
+        <item name="appButtonFill">?attr/appAccentCC</item>
+        <item name="appButtonFocus">?attr/appAccent</item>
+        <item name="appButtonStroke">#00000000</item>
+        <item name="appButtonFocusText">?attr/appOnAccent</item>
+        <item name="appDialogFill">#F21A2130</item>
+        <item name="appDialogStroke">#33FFFFFF</item>
+        <item name="appPanelSolid">#FC171D29</item>
+        <item name="appShadeStrong">#F00E1218</item>
+        <item name="appShadeMid">#B30E1218</item>
+        <item name="appShadeSoft">#660E1218</item>
+        <item name="appShade99">#990E1218</item>
+        <item name="appShade1A">#1A0E1218</item>
+        <item name="appLiveText">#FFFFFFFF</item>
+        <item name="appIconTint">?attr/appText</item>
+        <item name="appGlowA">#00000000</item>
+        <item name="appGlowB">#00000000</item>
+        <item name="appGlowC">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appCornerTabbar">32dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appRowFocusFill">?attr/appSurfaceFocus</item>
+        <item name="appSideIcon">#FFFFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
     </style>
 
     <!-- Dialog buttons get the same strong focus highlight as the rest of the app (D-pad only). -->
@@ -84,7 +129,7 @@
         <item name="android:paddingLeft">22dp</item>
         <item name="android:paddingRight">22dp</item>
         <item name="android:stateListAnimator">@null</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:minWidth">120dp</item>
         <item name="android:textAllCaps">false</item>
     </style>
@@ -101,7 +146,7 @@
         <item name="android:paddingLeft">24dp</item>
         <item name="android:paddingRight">24dp</item>
         <item name="android:background">@drawable/bg_button</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">16sp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:focusable">true</item>
@@ -139,6 +184,7 @@
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
         <item name="android:scaleType">fitCenter</item>
+        <item name="android:tint">@color/vc_focus_text</item>
     </style>
 
     <style name="VcPill">
@@ -153,7 +199,8 @@
         <item name="android:drawablePadding">4dp</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
-        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textColor">@color/vc_focus_text</item>
+        <item name="android:drawableTint">@color/vc_focus_text</item>
         <item name="android:textSize">@dimen/vc_pill_text</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -171,7 +218,7 @@
         <item name="android:background">@drawable/bg_glass_pill</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">16sp</item>
     </style>
 
@@ -210,7 +257,7 @@
         <item name="android:clickable">true</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:paddingLeft">16dp</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">17sp</item>
     </style>
 
@@ -225,7 +272,7 @@
         <item name="android:gravity">center</item>
         <item name="android:paddingLeft">20dp</item>
         <item name="android:paddingRight">20dp</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">16sp</item>
     </style>
 
@@ -238,7 +285,7 @@
         <item name="android:paddingLeft">24dp</item>
         <item name="android:paddingRight">24dp</item>
         <item name="android:background">@drawable/bg_glass_pill</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">16sp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:focusable">true</item>
@@ -282,13 +329,23 @@
         <item name="android:paddingRight">14dp</item>
     </style>
 
+    <!-- Glass theme: small all-caps line over a title. -->
+    <style name="GlassEyebrow">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:letterSpacing">0.16</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">?attr/appTextSecondary</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+
     <style name="HomeTileIcon">
         <item name="android:layout_width">30dp</item>
         <item name="android:layout_height">30dp</item>
         <item name="android:layout_marginBottom">6dp</item>
         <item name="android:importantForAccessibility">no</item>
         <item name="android:duplicateParentState">true</item>
-        <item name="android:tint">@color/text_focus_primary</item>
+        <item name="android:tint">@color/on_focus_icon</item>
     </style>
 
     <style name="HomeTileName">
@@ -296,7 +353,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:singleLine">true</item>
         <item name="android:duplicateParentState">true</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">19sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -307,7 +364,7 @@
         <item name="android:layout_marginTop">2dp</item>
         <item name="android:singleLine">true</item>
         <item name="android:duplicateParentState">true</item>
-        <item name="android:textColor">@color/tile_count_focus</item>
+        <item name="android:textColor">@color/on_focus_count</item>
         <item name="android:textSize">13sp</item>
     </style>
 
@@ -318,7 +375,7 @@
         <item name="android:gravity">center</item>
         <item name="android:paddingLeft">16dp</item>
         <item name="android:paddingRight">16dp</item>
-        <item name="android:textColor">@color/text_focus_primary</item>
+        <item name="android:textColor">@color/on_focus_text</item>
         <item name="android:textSize">15sp</item>
     </style>
 </resources>

@@ -54,14 +54,15 @@
         android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:lines="2"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="13sp" />
 
     <TextView
+                android:duplicateParentState="true"
         android:id="@+id/subtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="?attr/appGold"
+        android:textColor="@color/on_focus_gold"
         android:textSize="12sp" />
 </LinearLayout>

@@ -355,7 +355,7 @@ class SearchActivity : AppCompatActivity() {
             val items = found[one].orEmpty().take(MAX_RESULTS)
             if (one == ContentType.LIVE) {
                 if (results.adapter !== channelList) {
-                    results.layoutManager = LinearLayoutManager(this)
+                    results.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
                     results.adapter = channelList
                 }
                 channelList.submit(items)

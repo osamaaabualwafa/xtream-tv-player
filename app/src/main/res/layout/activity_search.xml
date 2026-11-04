@@ -135,7 +135,7 @@
         android:layout_height="match_parent">
 
         <!-- "All": one row per section. -->
-        <ScrollView
+        <com.osama.xtreamtv.FocusScrollView
             android:id="@+id/search_sections"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -181,7 +181,7 @@
                 style="@style/HomeRow" />
 
             </LinearLayout>
-        </ScrollView>
+        </com.osama.xtreamtv.FocusScrollView>
 
         <!-- One section: the full list (channel rows or a poster grid). -->
         <androidx.recyclerview.widget.RecyclerView

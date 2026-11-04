@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glass theme: glass styles and "Selected item" styles (THEME.md sections 3 and 5). Applied after the scene. -->
+<resources>
+    <style name="Glass" />
+    <style name="Focus" />
+
+    <style name="Glass.Clear">
+        <item name="appGlassFill">#3B273D49</item>
+        <item name="appGlassStroke">#29E1F0FF</item>
+        <item name="appGlassCard">#07FFFFFF</item>
+    </style>
+
+    <style name="Glass.Frosted">
+        <item name="appGlassFill">#24CADCEB</item>
+        <item name="appGlassStroke">#47EFFAFF</item>
+        <item name="appGlassCard">#0CEDF5FF</item>
+    </style>
+
+    <style name="Glass.Smoked">
+        <item name="appGlassFill">#C409121D</item>
+        <item name="appGlassStroke">#1CC9DDEE</item>
+        <item name="appGlassCard">#04FFFFFF</item>
+    </style>
+
+    <style name="Glass.Perf">
+        <item name="appGlassFill">#FF17252D</item>
+        <item name="appGlassStroke">#29E1F0FF</item>
+        <item name="appGlassCard">#07FFFFFF</item>
+    </style>
+
+    <style name="Glass.Daylight">
+        <item name="appGlassFill">#70FFFFFF</item>
+        <item name="appGlassStroke">#C0FFFFFF</item>
+        <item name="appGlassCard">#8CFFFFFF</item>
+        <item name="appCardStroke">#141E2822</item>
+        <item name="appChoiceFill">#8CFFFFFF</item>
+        <item name="appChoiceStroke">#141E2822</item>
+        <item name="appPosterFill">#8CFFFFFF</item>
+        <item name="appPosterStroke">#141E2822</item>
+        <item name="appTileIdleLive">#8CFFFFFF</item>
+        <item name="appTileIdleLiveEnd">#8CFFFFFF</item>
+        <item name="appTileIdleSearch">#8CFFFFFF</item>
+        <item name="appTileIdleEnd">#8CFFFFFF</item>
+        <item name="appTile2_38">#8CFFFFFF</item>
+        <item name="appTile3_40">#8CFFFFFF</item>
+        <item name="appSelectedFill">#CCFFFFFF</item>
+        <item name="appSelectedChip">#CCFFFFFF</item>
+        <item name="appButtonFill">#8CFFFFFF</item>
+        <item name="appButtonStroke">#141E2822</item>
+        <item name="appDialogFill">#F5FFFFFF</item>
+        <item name="appDialogStroke">#141E2822</item>
+        <item name="appSurface">#8CFFFFFF</item>
+        <item name="appSurfaceFocus">#E6FFFFFF</item>
+        <item name="appSurfaceActive">#CCFFFFFF</item>
+        <item name="appRowFill">#00FFFFFF</item>
+    </style>
+
+    <style name="Focus.Ring">
+        <item name="appFocusFill">#14FFFFFF</item>
+        <item name="appRowFocusFill">#14FFFFFF</item>
+        <item name="appFocusPill">#14FFFFFF</item>
+        <item name="appFocusTile">#14FFFFFF</item>
+        <item name="appFocusInput">#14FFFFFF</item>
+        <item name="appButtonFocus">#14FFFFFF</item>
+        <item name="appFocusStroke">?attr/appAccent</item>
+        <item name="appFocusStrokeThin">1.5dp</item>
+        <item name="appFocusStrokeThick">1.5dp</item>
+        <item name="appFocusText">#FFFFFFFF</item>
+        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appButtonFocusText">#FFFFFFFF</item>
+        <item name="appFocusGlow">?attr/appFocusGlowColor</item>
+        <item name="appFocusGlowWidth">3dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">#14FFFFFF</item>
+        <item name="appTileFocusLiveEnd">#14FFFFFF</item>
+        <item name="appTileFocusMoviesStart">#14FFFFFF</item>
+        <item name="appTileFocusMoviesEnd">#14FFFFFF</item>
+        <item name="appTileFocusSeriesStart">#14FFFFFF</item>
+        <item name="appTileFocusSeriesEnd">#14FFFFFF</item>
+        <item name="appTileFocusSearchStart">#14FFFFFF</item>
+        <item name="appTileFocusSearchEnd">#14FFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.White">
+        <item name="appFocusFill">#10EAFFF0</item>
+        <item name="appRowFocusFill">#10EAFFF0</item>
+        <item name="appFocusPill">#10EAFFF0</item>
+        <item name="appFocusTile">#10EAFFF0</item>
+        <item name="appFocusInput">#10EAFFF0</item>
+        <item name="appButtonFocus">#10EAFFF0</item>
+        <item name="appFocusStroke">#A6ECFFF4</item>
+        <item name="appFocusStrokeThin">1dp</item>
+        <item name="appFocusStrokeThick">1dp</item>
+        <item name="appFocusText">#FFF2FFF9</item>
+        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appButtonFocusText">#FFF2FFF9</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">#10EAFFF0</item>
+        <item name="appTileFocusLiveEnd">#10EAFFF0</item>
+        <item name="appTileFocusMoviesStart">#10EAFFF0</item>
+        <item name="appTileFocusMoviesEnd">#10EAFFF0</item>
+        <item name="appTileFocusSeriesStart">#10EAFFF0</item>
+        <item name="appTileFocusSeriesEnd">#10EAFFF0</item>
+        <item name="appTileFocusSearchStart">#10EAFFF0</item>
+        <item name="appTileFocusSearchEnd">#10EAFFF0</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.Solid">
+        <item name="appFocusFill">?attr/appAccent</item>
+        <item name="appRowFocusFill">?attr/appAccent</item>
+        <item name="appFocusPill">?attr/appAccent</item>
+        <item name="appFocusTile">?attr/appAccent</item>
+        <item name="appFocusInput">?attr/appAccent</item>
+        <item name="appButtonFocus">?attr/appAccent</item>
+        <item name="appFocusStroke">#00000000</item>
+        <item name="appFocusStrokeThin">0dp</item>
+        <item name="appFocusStrokeThick">0dp</item>
+        <item name="appFocusText">#FF11161A</item>
+        <item name="appFocusSecondaryText">#FF26332D</item>
+        <item name="appButtonFocusText">#FF11161A</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">?attr/appAccent</item>
+        <item name="appTileFocusLiveEnd">?attr/appAccent</item>
+        <item name="appTileFocusMoviesStart">?attr/appAccent</item>
+        <item name="appTileFocusMoviesEnd">?attr/appAccent</item>
+        <item name="appTileFocusSeriesStart">?attr/appAccent</item>
+        <item name="appTileFocusSeriesEnd">?attr/appAccent</item>
+        <item name="appTileFocusSearchStart">?attr/appAccent</item>
+        <item name="appTileFocusSearchEnd">?attr/appAccent</item>
+        <item name="appVcFocusText">#FF11161A</item>
+    </style>
+
+    <style name="Focus.Lift">
+        <item name="appFocusFill">#1FFFFFFF</item>
+        <item name="appRowFocusFill">#1FFFFFFF</item>
+        <item name="appFocusPill">#1FFFFFFF</item>
+        <item name="appFocusTile">#1FFFFFFF</item>
+        <item name="appFocusInput">#1FFFFFFF</item>
+        <item name="appButtonFocus">#1FFFFFFF</item>
+        <item name="appFocusStroke">#00000000</item>
+        <item name="appFocusStrokeThin">0dp</item>
+        <item name="appFocusStrokeThick">0dp</item>
+        <item name="appFocusText">#FFFFFFFF</item>
+        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appButtonFocusText">#FFFFFFFF</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.05</item>
+        <item name="appTileFocusLiveStart">#1FFFFFFF</item>
+        <item name="appTileFocusLiveEnd">#1FFFFFFF</item>
+        <item name="appTileFocusMoviesStart">#1FFFFFFF</item>
+        <item name="appTileFocusMoviesEnd">#1FFFFFFF</item>
+        <item name="appTileFocusSeriesStart">#1FFFFFFF</item>
+        <item name="appTileFocusSeriesEnd">#1FFFFFFF</item>
+        <item name="appTileFocusSearchStart">#1FFFFFFF</item>
+        <item name="appTileFocusSearchEnd">#1FFFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.DaylightRing">
+        <item name="appFocusFill">#E6FFFFFF</item>
+        <item name="appRowFocusFill">#E6FFFFFF</item>
+        <item name="appFocusPill">#E6FFFFFF</item>
+        <item name="appFocusTile">#E6FFFFFF</item>
+        <item name="appFocusInput">#E6FFFFFF</item>
+        <item name="appButtonFocus">#E6FFFFFF</item>
+        <item name="appFocusStroke">?attr/appAccent</item>
+        <item name="appFocusStrokeThin">1.5dp</item>
+        <item name="appFocusStrokeThick">1.5dp</item>
+        <item name="appFocusText">#FF1E2420</item>
+        <item name="appFocusSecondaryText">#FF5D6862</item>
+        <item name="appButtonFocusText">#FF1E2420</item>
+        <item name="appFocusGlow">?attr/appFocusGlowColor</item>
+        <item name="appFocusGlowWidth">3dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">#E6FFFFFF</item>
+        <item name="appTileFocusLiveEnd">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesStart">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesStart">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSearchStart">#E6FFFFFF</item>
+        <item name="appTileFocusSearchEnd">#E6FFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.DaylightWhite">
+        <item name="appFocusFill">#E6FFFFFF</item>
+        <item name="appRowFocusFill">#E6FFFFFF</item>
+        <item name="appFocusPill">#E6FFFFFF</item>
+        <item name="appFocusTile">#E6FFFFFF</item>
+        <item name="appFocusInput">#E6FFFFFF</item>
+        <item name="appButtonFocus">#E6FFFFFF</item>
+        <item name="appFocusStroke">#661E2822</item>
+        <item name="appFocusStrokeThin">1dp</item>
+        <item name="appFocusStrokeThick">1dp</item>
+        <item name="appFocusText">#FF1E2420</item>
+        <item name="appFocusSecondaryText">#FF5D6862</item>
+        <item name="appButtonFocusText">#FF1E2420</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">#E6FFFFFF</item>
+        <item name="appTileFocusLiveEnd">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesStart">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesStart">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSearchStart">#E6FFFFFF</item>
+        <item name="appTileFocusSearchEnd">#E6FFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.DaylightSolid">
+        <item name="appFocusFill">?attr/appAccent</item>
+        <item name="appRowFocusFill">?attr/appAccent</item>
+        <item name="appFocusPill">?attr/appAccent</item>
+        <item name="appFocusTile">?attr/appAccent</item>
+        <item name="appFocusInput">?attr/appAccent</item>
+        <item name="appButtonFocus">?attr/appAccent</item>
+        <item name="appFocusStroke">#00000000</item>
+        <item name="appFocusStrokeThin">0dp</item>
+        <item name="appFocusStrokeThick">0dp</item>
+        <item name="appFocusText">#FFFFFFFF</item>
+        <item name="appFocusSecondaryText">#FFEAF0FF</item>
+        <item name="appButtonFocusText">#FFFFFFFF</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.0</item>
+        <item name="appTileFocusLiveStart">?attr/appAccent</item>
+        <item name="appTileFocusLiveEnd">?attr/appAccent</item>
+        <item name="appTileFocusMoviesStart">?attr/appAccent</item>
+        <item name="appTileFocusMoviesEnd">?attr/appAccent</item>
+        <item name="appTileFocusSeriesStart">?attr/appAccent</item>
+        <item name="appTileFocusSeriesEnd">?attr/appAccent</item>
+        <item name="appTileFocusSearchStart">?attr/appAccent</item>
+        <item name="appTileFocusSearchEnd">?attr/appAccent</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+    <style name="Focus.DaylightLift">
+        <item name="appFocusFill">#E6FFFFFF</item>
+        <item name="appRowFocusFill">#E6FFFFFF</item>
+        <item name="appFocusPill">#E6FFFFFF</item>
+        <item name="appFocusTile">#E6FFFFFF</item>
+        <item name="appFocusInput">#E6FFFFFF</item>
+        <item name="appButtonFocus">#E6FFFFFF</item>
+        <item name="appFocusStroke">#00000000</item>
+        <item name="appFocusStrokeThin">0dp</item>
+        <item name="appFocusStrokeThick">0dp</item>
+        <item name="appFocusText">#FF1E2420</item>
+        <item name="appFocusSecondaryText">#FF5D6862</item>
+        <item name="appButtonFocusText">#FF1E2420</item>
+        <item name="appFocusGlow">#00000000</item>
+        <item name="appFocusGlowWidth">0dp</item>
+        <item name="appFocusScale">1.05</item>
+        <item name="appTileFocusLiveStart">#E6FFFFFF</item>
+        <item name="appTileFocusLiveEnd">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesStart">#E6FFFFFF</item>
+        <item name="appTileFocusMoviesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesStart">#E6FFFFFF</item>
+        <item name="appTileFocusSeriesEnd">#E6FFFFFF</item>
+        <item name="appTileFocusSearchStart">#E6FFFFFF</item>
+        <item name="appTileFocusSearchEnd">#E6FFFFFF</item>
+        <item name="appVcFocusText">#FFFFFFFF</item>
+    </style>
+
+</resources>

@@ -20,15 +20,16 @@
         android:maxWidth="280dp"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="16sp" />
 
     <TextView
+                android:duplicateParentState="true"
         android:id="@+id/subtitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginLeft="8dp"
         android:singleLine="true"
-        android:textColor="?attr/appTextSecondary"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="14sp" />
 </LinearLayout>

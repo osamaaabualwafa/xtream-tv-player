@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glass theme wallpaper, Daylight: base, three soft glows (painted once into a picture). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FFF1EFE8" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.10" android:centerY="-0.12" android:endColor="#00CFE3D6" android:gradientRadius="88%" android:startColor="#CCCFE3D6" android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.83" android:centerY="1.15" android:endColor="#00D6E2F3" android:gradientRadius="98%" android:startColor="#CCD6E2F3" android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.67" android:centerY="-0.22" android:endColor="#00F0DFC2" android:gradientRadius="58%" android:startColor="#66F0DFC2" android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

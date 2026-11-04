@@ -40,7 +40,7 @@
         android:layout_marginTop="6dp"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="15sp" />
 
     <TextView
@@ -49,6 +49,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:singleLine="true"
-        android:textColor="@color/text_secondary_focus"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="12sp" />
 </LinearLayout>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Text on the main buttons (Play, Resume, Log in, Open). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/appButtonFocusText" android:state_focused="true" />
+    <item android:color="?attr/appOnAccent" />
+</selector>

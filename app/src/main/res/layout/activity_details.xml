@@ -82,7 +82,7 @@
                     android:id="@+id/play"
                     style="@style/GlassButton"
                     android:background="@drawable/bg_glass_button"
-                    android:textColor="?attr/appOnAccent"
+                    android:textColor="@color/on_button"
                     android:layout_marginLeft="0dp"
                     android:text="▶  Play" />
 
@@ -90,7 +90,7 @@
                     android:id="@+id/resume"
                     style="@style/GlassButton"
                     android:background="@drawable/bg_glass_button"
-                    android:textColor="?attr/appOnAccent"
+                    android:textColor="@color/on_button"
                     android:visibility="gone" />
 
                 <Button
