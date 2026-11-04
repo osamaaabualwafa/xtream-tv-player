@@ -1,1 +1,1 @@
-com.osama.xtreamtv.qa.T01_DataTest,com.osama.xtreamtv.qa.T03_LiveTvTest
+com.osama.xtreamtv.qa.T03_LiveTvTest,com.osama.xtreamtv.qa.T02_LoginAndPlaylistsTest,com.osama.xtreamtv.qa.T04_MoviesTest

@@ -489,9 +489,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(os.path.join(MEDIA, "live.ts"), "video/mp2t")
         size = os.path.getsize(path)
         start = int((time.time() % 480) / 600 * size) // 188 * 188
+        # Like real live servers: no length, the stream simply goes on until the viewer leaves.
         self.send_response(200)
         self.send_header("Content-Type", "video/mp2t")
-        self.send_header("Content-Length", str(size - start))
+        self.send_header("Connection", "close")
         self.end_headers()
         if self.command == "HEAD":
             return
