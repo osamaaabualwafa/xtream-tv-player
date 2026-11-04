@@ -65,9 +65,9 @@ class T06_SearchHomeTest : QaTest() {
         Qa.down()
         Qa.step("after Down 2: highlight on ${Qa.focusedDescription()}")
         Qa.shot("search_movies_only_down", "Search with only movie results, after Down twice")
-        val hit = Qa.findText("Desert")
+        val hit = Qa.findText("Iron Desert")
         if (hit != null) {
-            Qa.focusText("Desert")
+            Qa.focusTextIn(R.id.search_sections, "Iron Desert")
             Qa.ok()
             Qa.waitUntil(10_000) { Qa.current() is DetailsActivity }
             Qa.shot("search_movie_details", "Movie opened from search")

@@ -210,7 +210,7 @@ for bug in known:
     for t in tests:
         matched_finding = [f for f in t["findings"] if any(m.lower() in f["title"].lower() for m in bug.get("finding_contains", []))]
         test_hit = t["result"] != "passed" and (
-            t["name"] in bug.get("tests", []) or
+            (t["name"] in bug.get("tests", []) and all(m in t["error"] for m in bug.get("error_must_contain", []))) or
             any(m in (t["error"] + t["trace"]) for m in bug.get("error_contains", [])))
         if matched_finding or test_hit:
             shot = (matched_finding[0].get("shot") if matched_finding else None) or (t["shots"][-1]["file"] if t["shots"] else None)

@@ -51,7 +51,10 @@
     "tests": [
       "T11_NewIn12Test.quickDrawerGuide"
     ],
-    "error_contains": []
+    "error_contains": [],
+    "error_must_contain": [
+      "TV guide in the quick drawer"
+    ]
   },
   {
     "id": "4",
@@ -98,6 +101,9 @@
         "detail_contains": "settings_button",
         "shot_contains": "home_after_layout_change"
       }
+    ],
+    "error_must_contain": [
+      "an item on Home is highlighted"
     ]
   }
 ]

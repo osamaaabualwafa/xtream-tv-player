@@ -89,6 +89,13 @@ class T10_BadNetworkTest : QaTest() {
         val url = Session.api(Qa.ctx)!!.movieUrl("101", "mp4")
         Qa.start(PlayerActivity.vodIntent(Qa.ctx, url, "Network test movie", "movie_101", 0, null, false))
         Qa.expect(PlayerActivity::class.java, "movie player")
+        if (!Qa.waitPlaying(35_000) && Qa.player()?.error == "ERROR_CODE_DECODING_FAILED") {
+            // The emulator's software decoder sometimes fails to start; that is not the network test.
+            Qa.step("emulator decoder failed to start; opening the movie again")
+            Qa.finishAll()
+            Qa.start(PlayerActivity.vodIntent(Qa.ctx, url, "Network test movie", "movie_101", 0, null, false))
+            Qa.expect(PlayerActivity::class.java, "movie player")
+        }
         Qa.expectPlaying("movie")
         Qa.internetDown(20)
         Qa.right(2)

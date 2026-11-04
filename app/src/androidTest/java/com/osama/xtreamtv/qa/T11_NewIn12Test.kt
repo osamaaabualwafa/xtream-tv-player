@@ -72,6 +72,7 @@ class T11_NewIn12Test : QaTest() {
         Qa.ok()
         Qa.expect(SettingsActivity::class.java, "Settings")
         Qa.focusId(R.id.menu_home, "Home layout")
+        Qa.right() // into the section's first card
         Qa.focusText("Dock")
         Qa.ok()
         Qa.settle(800)
