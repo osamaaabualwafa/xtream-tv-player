@@ -120,28 +120,43 @@ class T08_ThemesTest : QaTest() {
         Qa.finishAll()
     }
 
-    private fun theme(value: Int, name: String, extra: Map<String, Any> = emptyMap()) {
+    // Each theme is split in three tests, so a crash in one screen doesn't hide the others.
+    private fun themeHome(value: Int, name: String) {
         tag = "theme_$name"
         for (home in Appearance.HOME_NAMES.indices) {
-            Qa.reset(settings = mapOf("theme" to value, "home_style" to home) + extra)
+            Qa.reset(settings = mapOf("theme" to value, "home_style" to home))
             home("home_${Appearance.HOME_NAMES[home].replace(' ', '_')}")
         }
+    }
+
+    private fun themeBrowse(value: Int, name: String) {
+        tag = "theme_$name"
         for (b in 0..3) {
-            Qa.reset(settings = mapOf("theme" to value, "browse_style" to b) + extra)
+            Qa.reset(settings = mapOf("theme" to value, "browse_style" to b))
             val browseName = Appearance.BROWSE_NAMES[b]
             browse(ContentType.MOVIE, "movies_$browseName")
             browse(ContentType.SERIES, "series_$browseName")
             if (b != Appearance.BROWSE_PREVIEW) browse(ContentType.LIVE, "live_$browseName")
         }
-        Qa.reset(settings = mapOf("theme" to value) + extra)
+    }
+
+    private fun themeScreens(value: Int, name: String) {
+        tag = "theme_$name"
+        Qa.reset(settings = mapOf("theme" to value))
         detailsScreens()
         otherScreens()
         playerScreens()
     }
 
-    @Test fun themeDefault() = theme(0, "Default")
-    @Test fun themeCinema() = theme(Appearance.THEME_CINEMA, "Cinema")
-    @Test fun themeGlass() = theme(Appearance.THEME_GLASS, "Glass")
+    @Test fun themeDefaultHome() = themeHome(0, "Default")
+    @Test fun themeDefaultBrowse() = themeBrowse(0, "Default")
+    @Test fun themeDefaultScreens() = themeScreens(0, "Default")
+    @Test fun themeCinemaHome() = themeHome(Appearance.THEME_CINEMA, "Cinema")
+    @Test fun themeCinemaBrowse() = themeBrowse(Appearance.THEME_CINEMA, "Cinema")
+    @Test fun themeCinemaScreens() = themeScreens(Appearance.THEME_CINEMA, "Cinema")
+    @Test fun themeGlassHome() = themeHome(Appearance.THEME_GLASS, "Glass")
+    @Test fun themeGlassBrowse() = themeBrowse(Appearance.THEME_GLASS, "Glass")
+    @Test fun themeGlassScreens() = themeScreens(Appearance.THEME_GLASS, "Glass")
 
     /** Glass: every background (scene) on the main screens. */
     @Test

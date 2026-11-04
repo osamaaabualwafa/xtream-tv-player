@@ -1,1 +1,47 @@
-[]
+[
+  {
+    "id": "1",
+    "title": "The app closes (crashes) on the Live TV channel list",
+    "screen": "Live TV list (Browse, live channels), any theme and layout",
+    "what": "While the channel list is being drawn or scrolled, the app suddenly closes. It happens at random: when opening Live TV, changing category, filtering, or scrolling quickly. Seen with the normal test provider and with the huge one.",
+    "expected": "The list keeps working; the 'Now:' programme line under each channel simply appears when it is ready.",
+    "steps": [
+      "Open the app and choose Live TV.",
+      "Move between categories (or type in the search box, or scroll quickly down the list).",
+      "The app closes without a message, at random (several times per weekly run)."
+    ],
+    "cause": "BrowseActivity.bindNowPlaying(): the coroutine that loads a channel's 'Now' programme calls itemAdapter.notifyItemChanged() while the RecyclerView is still laying out (it can run straight away inside onBindViewHolder). Android does not allow that and throws IllegalStateException.",
+    "tests": [],
+    "error_contains": ["Cannot call this method while RecyclerView is computing a layout or scrolling"]
+  },
+  {
+    "id": "2",
+    "title": "Search closes the app when the server sends a broken list",
+    "screen": "Search",
+    "what": "With a provider whose lists come back broken (an error page or cut-off data), opening Search makes the app close instead of showing a message. The Live TV, Movies and Series screens handle the same server correctly ('Couldn't load categories').",
+    "expected": "Search shows 'Couldn't load the library…' and stays open.",
+    "steps": [
+      "Log in to a provider whose channel/movie/series lists fail (the test uses the fake 'broken' account).",
+      "Open Search from Home.",
+      "The app closes."
+    ],
+    "cause": "SearchActivity.loadLibrary(): the three lists load with async { } inside lifecycleScope.launch. When one fails, the failure cancels the parent coroutine and is re-thrown outside the try/catch, so the catch block never shows the message (structured concurrency). Wrapping the async calls in coroutineScope { } / supervisorScope { } inside the try would keep the error inside it.",
+    "tests": ["T10_BadNetworkTest.brokenServer"],
+    "error_contains": ["Server returned an invalid response"]
+  },
+  {
+    "id": "3",
+    "title": "Quick drawer: TV guide does nothing until Live TV has been opened",
+    "screen": "Home › Menu key › quick drawer › TV guide",
+    "what": "Right after opening the app, pressing OK on 'TV guide' in the new quick drawer closes the drawer and nothing opens. It only works after Live TV has been opened once in that session.",
+    "expected": "The TV guide opens with all channels.",
+    "steps": [
+      "Open the app (Home).",
+      "Press the Menu key on the remote: the quick drawer opens.",
+      "Move to 'TV guide' and press OK: the drawer closes and the guide does not open."
+    ],
+    "cause": "HomeActivity's drawer starts GuideActivity without a channel list; GuideActivity.onCreate() uses Session.zapList, which is empty until Live TV is opened, and then calls finish() straight away.",
+    "tests": ["T11_NewIn12Test.quickDrawerGuide"],
+    "error_contains": []
+  }
+]

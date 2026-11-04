@@ -84,16 +84,6 @@ class T11_NewIn12Test : QaTest() {
         Qa.waitUntil(3000) { !drawerOpen() }
         assertTrue("Menu again closes the drawer", !drawerOpen())
 
-        Qa.step("TV guide from the drawer")
-        Qa.key(KeyEvent.KEYCODE_MENU)
-        Qa.waitUntil(4000) { drawerOpen() }
-        Qa.focusId(R.id.drawer_guide, "drawer TV guide")
-        Qa.ok()
-        Qa.expect(GuideActivity::class.java, "TV guide from the drawer")
-        Qa.waitUntil(15_000) { Qa.listCount(R.id.guide_programs) > 0 }
-        Qa.shot("drawer_guide", "TV guide opened from the drawer")
-        Qa.backTo(HomeActivity::class.java, "Home")
-
         Qa.step("Settings and playlists from the drawer")
         Qa.key(KeyEvent.KEYCODE_MENU)
         Qa.waitUntil(4000) { drawerOpen() }
@@ -114,6 +104,36 @@ class T11_NewIn12Test : QaTest() {
         Qa.key(KeyEvent.KEYCODE_MENU)
         Qa.settle(1500)
         assertTrue("Menu does nothing when switched off", !drawerOpen())
+    }
+
+    @Test
+    fun quickDrawerGuide() {
+        openHome(mapOf("theme" to Appearance.THEME_GLASS))
+        Qa.step("right after opening the app: Menu, then TV guide")
+        Qa.key(KeyEvent.KEYCODE_MENU)
+        Qa.waitUntil(4000) { drawerOpen() }
+        Qa.focusId(R.id.drawer_guide, "drawer TV guide")
+        Qa.shot("drawer_guide_highlighted", "Quick drawer with TV guide highlighted")
+        Qa.ok()
+        val openedFirst = Qa.waitUntil(8000) { Qa.current() is GuideActivity }
+        Qa.shot("drawer_guide_result_first", "After OK on TV guide (Live TV not opened yet)")
+        if (openedFirst) Qa.backTo(HomeActivity::class.java, "Home")
+
+        Qa.step("after visiting Live TV once: Menu, then TV guide")
+        Qa.focusId(R.id.tile_live, "Live TV tile")
+        Qa.ok()
+        Qa.expect(BrowseActivity::class.java, "Live TV")
+        Qa.waitUntil(20_000) { Qa.listCount(R.id.items) > 0 }
+        Qa.backTo(HomeActivity::class.java, "Home")
+        Qa.key(KeyEvent.KEYCODE_MENU)
+        Qa.waitUntil(4000) { drawerOpen() }
+        Qa.focusId(R.id.drawer_guide, "drawer TV guide")
+        Qa.ok()
+        val openedAfter = Qa.waitUntil(8000) { Qa.current() is GuideActivity }
+        Qa.shot("drawer_guide_result_after_live", "After OK on TV guide (Live TV opened before)")
+        Qa.step("guide opened: right after start=$openedFirst, after visiting Live TV=$openedAfter")
+        assertTrue("TV guide in the quick drawer opens the guide right after starting the app " +
+            "(after visiting Live TV it ${if (openedAfter) "does" else "doesn't either"})", openedFirst)
     }
 
     private fun cards(theme: Int) {
@@ -148,12 +168,11 @@ class T11_NewIn12Test : QaTest() {
         Qa.focusText("Speed")
         Qa.ok()
         Qa.settle(800)
-        Qa.shot("cards_movie_speed_$theme", "Cards: Speed")
-        Qa.back()
-        Qa.settle(800)
-        Qa.back()
-        Qa.settle(800)
+        Qa.shot("cards_movie_speed_$theme", "Cards: Speed (tiles apply at once)")
+        // Back closes whatever is open on top of the video, one step at a time, never the player itself here.
+        repeat(3) { if (Qa.visible(R.id.player_menu)) { Qa.back(); Qa.settle(600) } }
         Qa.shot("cards_closed_$theme", "After Back on the Cards menu")
+        assertTrue("Back closes the Cards menu", !Qa.visible(R.id.player_menu))
         assertTrue("Still in the player after closing the menu", Qa.current() is PlayerActivity)
         Qa.expectPlaying("movie after closing the menu")
     }

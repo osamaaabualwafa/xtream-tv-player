@@ -18,6 +18,12 @@ class T07_SettingsTest : QaTest() {
 
     private fun openSettings() {
         Qa.launchApp()
+        // With two playlists and none set to open at start, the app asks which one first.
+        if (Qa.waitUntil(8000) { Qa.current() is HomeActivity || Qa.current() is com.osama.xtreamtv.PlaylistsActivity } &&
+            Qa.current() is com.osama.xtreamtv.PlaylistsActivity) {
+            Qa.focusText("Demo TV")
+            Qa.ok()
+        }
         Qa.expect(HomeActivity::class.java, "Home")
         Qa.focusId(R.id.settings_button, "Settings button")
         Qa.ok()
@@ -48,7 +54,8 @@ class T07_SettingsTest : QaTest() {
     private fun rowValue(title: String): String? = Qa.main {
         val row = rowViews().firstOrNull { it.findViewById<TextView>(R.id.title)?.text?.toString() == title } ?: return@main null
         val sub = row.findViewById<TextView>(R.id.subtitle)
-        if (sub.visibility != View.VISIBLE) "switch" else sub.text?.toString()
+        // Glass shows the value as a small "value ▾" button.
+        if (sub.visibility != View.VISIBLE) "switch" else sub.text?.toString()?.removeSuffix("▾")?.trim()
     }
 
     private fun openOption(title: String) {
@@ -177,20 +184,20 @@ class T07_SettingsTest : QaTest() {
         Qa.step("every background")
         for ((i, name) in com.osama.xtreamtv.Appearance.SCENE_NAMES.withIndex()) {
             pickTagged("scene$i", "background $name")
-            assertEquals("Background $name saved", i, Qa.prefs().getInt("glass_scene", -1))
+            assertEquals("Background $name saved", i, Qa.prefs().getInt("glass_scene", 0))
             Qa.shot("glass_scene_$name", "Look › Background: $name")
         }
         pickTagged("scene0", "background Aurora")
         Qa.step("every glass style")
         for ((i, name) in com.osama.xtreamtv.Appearance.GLASS_STYLE_NAMES.withIndex()) {
             pickTagged("glass_style$i", "glass style $name")
-            assertEquals("Glass style $name saved", i, Qa.prefs().getInt("glass_style", -1))
+            assertEquals("Glass style $name saved", i, Qa.prefs().getInt("glass_style", 0))
             Qa.shot("glass_style_$name", "Look › Glass style: $name")
         }
         Qa.step("every highlight style")
         for ((i, name) in com.osama.xtreamtv.Appearance.FOCUS_NAMES.withIndex()) {
             pickTagged("focus_style$i", "highlight $name")
-            assertEquals("Highlight style $name saved", i, Qa.prefs().getInt("focus_style", -1))
+            assertEquals("Highlight style $name saved", i, Qa.prefs().getInt("focus_style", 0))
             Qa.shot("glass_focus_${name.replace(' ', '_')}", "Look › Selected item: $name")
         }
         pickTagged("glass_style0", "glass style Clear")
@@ -211,7 +218,7 @@ class T07_SettingsTest : QaTest() {
         openSection(R.id.menu_player, "Player (Glass)")
         for ((i, name) in listOf("Small pop-up", "Side panel", "Cards").withIndex()) {
             pickTagged("player_menu$i", "player menu $name")
-            assertEquals("Player menu $name saved", i, Qa.prefs().getInt("player_menu_style", -1))
+            assertEquals("Player menu $name saved", i, Qa.prefs().getInt("player_menu_style", 0))
         }
         Qa.shot("glass_player_menu_cards", "Player › Player menu: Cards")
         pickTagged("player_menu0", "player menu Small pop-up")

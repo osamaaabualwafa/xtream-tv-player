@@ -204,7 +204,7 @@ class T03_LiveTvTest : QaTest() {
         Qa.waitUntil(15_000) { Qa.listCount(R.id.guide_programs) > 0 }
         Qa.shot("guide_catchup", "Guide of a channel with catch-up (past shows can be played)")
         Qa.step("go to the programme list, then up to a past programme")
-        Qa.focusText("On now")
+        Qa.focusText("► On now")
         Qa.up(2)
         Qa.shot("guide_past_programme", "A past programme highlighted")
         Qa.ok()

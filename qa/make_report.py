@@ -208,7 +208,9 @@ for bug in known:
     hits = []
     for t in tests:
         matched_finding = [f for f in t["findings"] if any(m.lower() in f["title"].lower() for m in bug.get("finding_contains", []))]
-        test_hit = t["name"] in bug.get("tests", []) and t["result"] != "passed"
+        test_hit = t["result"] != "passed" and (
+            t["name"] in bug.get("tests", []) or
+            any(m in (t["error"] + t["trace"]) for m in bug.get("error_contains", [])))
         if matched_finding or test_hit:
             shot = (matched_finding[0].get("shot") if matched_finding else None) or (t["shots"][-1]["file"] if t["shots"] else None)
             hits.append({"test": t["name"], "result": t["result"], "shot": shot,
@@ -218,7 +220,9 @@ for bug in known:
                 t["app_bug"] = bug["id"]
             for f in matched_finding:
                 f["app_bug"] = bug["id"]
-    app_bugs.append(dict(bug, seen_this_run=bool(hits), hits=hits))
+    crash_hits = [c for c in crashes if any(m in c["text"] for m in bug.get("error_contains", []))]
+    app_bugs.append(dict(bug, seen_this_run=bool(hits or crash_hits), hits=hits, crash_count=len(crash_hits),
+                         crash_example=crash_hits[0]["text"][:2500] if crash_hits else ""))
 summary = {
     "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     "run_url": RUN_URL,
@@ -358,6 +362,10 @@ if seen_bugs:
         out.append("<div class='grid'>%s</div>" % "".join(img(h["shot"], "%s (%s)" % (h["test"], h["result"])) for h in b["hits"] if h["shot"]))
         for h in b["hits"]:
             out.append("<details><summary>Test steps: %s</summary><pre>%s\n%s</pre></details>" % (E(h["test"]), E("\n".join(h["steps"])), E(h["error"])))
+        if b.get("crash_example"):
+            out.append("<details><summary>App crash log (%d time(s) this run)</summary><pre>%s</pre></details>" % (b["crash_count"], E(b["crash_example"])))
+        if b.get("cause"):
+            out.append("<p><b>Likely cause in the code:</b> %s</p>" % E(b["cause"]))
 
 if failed:
     out.append("<h2>Failed tests</h2>")

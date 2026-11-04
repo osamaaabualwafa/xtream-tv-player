@@ -87,9 +87,9 @@ class T05_SeriesTest : QaTest() {
         else Qa.expectPlaying("S01E02")
 
         Qa.step("episodes list inside the player")
-        Qa.ok()
-        Qa.settle(800)
-        if (Qa.visible(R.id.vc_episodes)) {
+        // The controls hide after a few seconds; OK brings them back (every key keeps them up).
+        if (!Qa.visible(R.id.vc_episodes)) Qa.ok()
+        if (Qa.waitVisible(R.id.vc_episodes, 4000)) {
             Qa.focusId(R.id.vc_episodes, "Episodes button")
             Qa.ok()
             Qa.settle(1200)

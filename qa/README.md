@@ -5,13 +5,17 @@ Every **Wednesday at 02:00 Riyadh time** GitHub runs `.github/workflows/weekly-q
 1. Builds the app and the UI tests (`app/src/androidTest/.../qa`).
 2. Starts a fake Xtream server (`qa/server/fake_xtream.py`): made-up channels, movies, series, guide
    and test videos. No real provider or login is used.
-3. Starts an Android TV emulator (1080p, Android 11) and runs every test with remote-control keys.
+3. Starts six Android TV emulators in parallel (1080p, Android 11; groups in `qa/shards.py`) and
+   runs every test with remote-control keys.
 4. Presses 4,000 random remote keys ("monkey") to look for crashes and freezes.
 5. Builds the report (`qa/make_report.py`): screenshots, automatic screen checks, problems,
    crashes, measurements. Uploaded as the **qa-report** artifact, pushed to the **qa-report** branch,
    and the screen recording as **qa-video**.
 
-At 09:00 a scheduled Claude task reads the report and sends a summary with screenshots.
+The report has an **APP BUG** section: real app problems confirmed by review, listed in
+`qa/known_app_bugs.json` with the screen, the steps and screenshots from the run.
+
+At about 09:00 a scheduled Claude task reads the report and sends a summary with screenshots.
 It does not change any code without approval.
 
 ## What is tested
@@ -25,8 +29,9 @@ It does not change any code without approval.
 | T05 Series | Seasons, episodes, next-episode countdown and auto-play, episode list in player, both episode formats, 12-episode season, empty series |
 | T06 Search and Home | Search (English, Arabic, no result, filters, open results), Home rows, counts, featured banner, refresh, guide from list |
 | T07 Settings | Every option in every section, every value, then restored; layouts; connection check |
-| T08 Themes | 4 themes × every screen × 4 Home layouts × 4 Movies/Series layouts; 8 colours; palettes; backgrounds; text and interface sizes; effects |
+| T08 Themes | Default, Cinema and Glass × every screen × 5 Home layouts × 4 Movies/Series layouts; Glass: 9 backgrounds, 3 glass styles, 4 highlight styles (dark and Daylight), moving background; old Coastal/Coconut themes move to Default; 8 colours; palettes; backgrounds; text and interface sizes; effects |
 | T09 Stress | 10,000 channels / 50,000 movies / 5,000 series: open times, fast scrolling, memory, search; 800 random keys |
+| T11 New in the Glass version | Dock Home (every tile), quick drawer on the Menu key (every Home layout, its buttons, the "does nothing" setting), Cards player menu (live and movie, Default and Glass) |
 | T10 Bad network | Slow server, broken server, internet cut while watching live / a movie / browsing / starting, state kept after reopening |
 
 Automatic screen checks on every screenshot: nothing highlighted, highlight off screen, text cut

@@ -175,7 +175,10 @@ class T02_LoginAndPlaylistsTest : QaTest() {
         Qa.dialogPick("Open at start")
         Qa.settle()
         Qa.shot("open_at_start", "Second playlist marked to open at start")
-        assertEquals("qa_second", Qa.prefs().getString("default_playlist", null))
+        val secondId = org.json.JSONArray(Qa.prefs().getString("playlists", "[]")).let { a ->
+            (0 until a.length()).map { a.getJSONObject(it) }.first { it.optString("name") == "Second account" }.getString("id")
+        }
+        assertEquals("Second account opens at start", secondId, Qa.prefs().getString("default_playlist", null))
 
         Qa.step("delete it")
         Qa.focusText("Second account")

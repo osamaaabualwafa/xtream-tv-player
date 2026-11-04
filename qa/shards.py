@@ -9,7 +9,7 @@ SHARDS = [
     ("data-login-series-search", ["T01_DataTest", "T02_LoginAndPlaylistsTest", "T05_SeriesTest", "T06_SearchHomeTest"], False),
     ("live-movies", ["T03_LiveTvTest", "T04_MoviesTest"], False),
     ("settings-new-network", ["T07_SettingsTest", "T11_NewIn12Test", "T10_BadNetworkTest"], False),
-    ("themes-a", ["T08_ThemesTest#themeDefault+themeCinema+themeGlass+removedThemesMoveToDefault"], False),
+    ("themes-a", ["T08_ThemesTest#themeDefaultHome+themeDefaultBrowse+themeDefaultScreens+themeCinemaHome+themeCinemaBrowse+themeCinemaScreens+themeGlassHome+themeGlassBrowse+themeGlassScreens+removedThemesMoveToDefault"], False),
     ("themes-b", ["T08_ThemesTest#glassBackgrounds+glassStylesAndHighlights+glassMovingBackground+colours+palettesAndBackgrounds+sizes+effects"], False),
     ("stress-random", ["T09_StressTest"], True),
 ]

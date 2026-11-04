@@ -347,6 +347,7 @@ object Qa {
         var lastFocusId = 0
         var presses = 0
         var missing = 0
+        var keyboardNote = ""
         while (presses < maxPresses) {
             val st = main {
                 val a = current() ?: return@main null
@@ -399,13 +400,22 @@ object Qa {
             key(keyCode, 1, 250)
             presses++
             settle(150)
-            val afterId = focusIdentity()
-            val after = main { current()?.currentFocus?.let { rectOf(it) } }
+            var afterId = focusIdentity()
+            var after = main { current()?.currentFocus?.let { rectOf(it) } }
+            if (afterId == focusId && after == fr && main { current()?.currentFocus is EditText }) {
+                // In a text field the on-screen keyboard can take the first arrow press: settle and try once more.
+                SystemClock.sleep(700)
+                key(keyCode, 1, 250)
+                settle(150)
+                afterId = focusIdentity()
+                after = main { current()?.currentFocus?.let { rectOf(it) } }
+                if (afterId == focusId && after == fr) keyboardNote = keyboardState()
+            }
             if (afterId == focusId && after == fr) blocked.add(keyCode)
         }
         finding(
             "warning", "Remote can't reach \"$label\" with the arrow keys",
-            "Tried $presses presses from ${focusedDescription()}. The test moved the highlight there directly to continue.",
+            "Tried $presses presses from ${focusedDescription()}. The test moved the highlight there directly to continue.$keyboardNote",
         )
         shot("cant_reach_${label.take(20)}")
         main { target()?.requestFocus() }
@@ -419,6 +429,18 @@ object Qa {
         System.identityHashCode(f) * 31 + ((f as? TextView)?.text?.hashCode() ?: 0)
     }
 
+    /** What the emulator's keyboard is doing (for remote-navigation findings in text fields). */
+    private fun keyboardState(): String = try {
+        val out = inst.uiAutomation.executeShellCommand("dumpsys input_method").let { pfd ->
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes().toString(Charsets.UTF_8) }
+        }
+        val shown = Regex("mInputShown=(\\w+)").find(out)?.groupValues?.get(1) ?: "?"
+        val ime = Regex("mCurMethodId=(\\S+)").find(out)?.groupValues?.get(1) ?: "?"
+        " Keyboard on screen: $shown (keyboard app: $ime)."
+    } catch (e: Exception) {
+        ""
+    }
+
     /** Closes the on-screen keyboard (the tests type with setText; the remote then moves between fields). */
     fun hideKeyboard() {
         main {
@@ -427,6 +449,7 @@ object Qa {
             val imm = a.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             imm.hideSoftInputFromWindow(f.windowToken, 0)
         }
+        SystemClock.sleep(300)
     }
 
     fun focusId(id: Int, label: String, maxPresses: Int = 40) = focus(label, maxPresses) { current()?.findViewById<View>(id)?.takeIf { it.isShown } }
@@ -438,7 +461,7 @@ object Qa {
         var exact: View? = null
         var partial: View? = null
         walk(r) { v ->
-            if (v is TextView && v.isShown) {
+            if (v is TextView && v !is EditText && v.isShown) {
                 val t = v.text?.toString()?.trim() ?: ""
                 if (exact == null && t.equals(text, ignoreCase = true)) exact = v
                 if (partial == null && t.contains(text, ignoreCase = true)) partial = v
@@ -483,9 +506,15 @@ object Qa {
         device.wait(androidx.test.uiautomator.Until.hasObject(androidx.test.uiautomator.By.text(text)), timeoutMs) == true
 
     private fun focusedText(): String? {
+        val any = java.util.regex.Pattern.compile(".+")
         val f = device.findObject(androidx.test.uiautomator.By.focused(true)) ?: return null
-        f.text?.let { return it }
-        return f.findObject(androidx.test.uiautomator.By.text(java.util.regex.Pattern.compile(".+")))?.text
+        // A focused list (dialog choices): the highlighted row is its selected child.
+        if (f.className == "android.widget.ListView") {
+            val sel = f.findObject(androidx.test.uiautomator.By.selected(true)) ?: return null
+            return sel.text ?: sel.findObject(androidx.test.uiautomator.By.text(any))?.text
+        }
+        if (f.childCount == 0) return f.text
+        return f.findObject(androidx.test.uiautomator.By.text(any))?.text
     }
 
     /** Picks [text] in a dialog with the arrow keys and OK (a tap if the arrows can't reach it). */
@@ -519,8 +548,9 @@ object Qa {
         val errorView = a.findViewById<View>(R.id.error)
         val errorText = (errorView as? TextView)?.takeIf { it.isShown }?.text?.toString()
             ?: errorView?.takeIf { it.isShown }?.let { ev -> var t: String? = null; walk(ev) { v -> if (t == null && v is TextView && v.text.isNotBlank()) t = v.text.toString() }; t ?: "shown" }
-        val title = (a.findViewById<View>(R.id.overlay_name) as? TextView)?.text?.toString()
-            ?: (a.findViewById<View>(R.id.title) as? TextView)?.text?.toString()
+        val title = listOf(R.id.overlay_name, R.id.vc_episode, R.id.vc_title, R.id.title)
+            .mapNotNull { (a.findViewById<View>(it) as? TextView)?.text?.toString()?.takeIf { t -> t.isNotBlank() } }
+            .joinToString(" · ").ifBlank { null }
         PlayerInfo(p?.playbackState ?: -1, p?.isPlaying ?: false, p?.currentPosition ?: -1, p?.playerError?.errorCodeName, errorText, title)
     }
 
