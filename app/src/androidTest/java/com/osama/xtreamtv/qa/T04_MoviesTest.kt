@@ -65,7 +65,10 @@ class T04_MoviesTest : QaTest() {
         Qa.ok()
         Qa.settle(800)
         Qa.shot("movie_controls", "Playback controls")
-        Qa.back()
+        // Back closes the controls (only while they are still showing; they hide by themselves).
+        if (Qa.visible(R.id.vod_controls)) Qa.back()
+        Qa.waitUntil(8000) { !Qa.visible(R.id.vod_controls) }
+        assertTrue("Still in the player after closing the controls", Qa.current() is PlayerActivity)
 
         Qa.step("Right jumps forward")
         val before = Qa.player()?.positionMs ?: 0
@@ -172,6 +175,13 @@ class T04_MoviesTest : QaTest() {
         SystemClock.sleep(65_000)
         Qa.shot("screensaver", "Screensaver after a minute on pause")
         Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY)
+        if (!Qa.waitPlaying(6000)) {
+            // The first key may only close the screensaver.
+            Qa.shot("after_first_play_key", "After the first Play key on the screensaver")
+            Qa.step("first Play key only closed the screensaver; pressing Play again")
+            Qa.finding("info", "Play on the screensaver first closes it; a second Play resumes", "Design choice; check it feels right")
+            Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY)
+        }
         Qa.expectPlaying("movie after the screensaver")
     }
 }

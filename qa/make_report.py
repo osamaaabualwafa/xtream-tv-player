@@ -35,7 +35,8 @@ def read(path, default=""):
 
 # ------------------------------------------------------------------ device
 device = {}
-for line in read(os.path.join(SRC, "device.txt")).splitlines():
+device_files = sorted(glob.glob(os.path.join(SRC, "**", "device.txt"), recursive=True))
+for line in (read(device_files[0]) if device_files else "").splitlines():
     if "=" in line:
         k, v = line.split("=", 1)
         device[k.strip()] = v.strip()
@@ -94,7 +95,7 @@ for name in sorted(set(junit) | set(records)):
     })
 
 # ------------------------------------------------------------------ crashes and ANRs from logcat
-logcat = read(os.path.join(SRC, "logcat.txt"))
+logcat = "\n".join(read(p) for p in sorted(glob.glob(os.path.join(SRC, "**", "logcat.txt"), recursive=True)))
 crashes, anrs = [], []
 lines = logcat.splitlines()
 i = 0
@@ -133,7 +134,9 @@ app_errors = [ln for ln in app_lines if re.match(r"^\S+ \S+\s+\d+\s+\d+ [EW] ", 
 crashes = [c for c in crashes if "Instrumentation" not in c["text"].split("\n")[0]]
 
 # ------------------------------------------------------------------ monkey
-monkey_txt = read(os.path.join(SRC, "monkey.txt"))
+monkey_files = glob.glob(os.path.join(SRC, "**", "monkey.txt"), recursive=True)
+monkey_txt = read(monkey_files[0]) if monkey_files else ""
+monkey_png = glob.glob(os.path.join(SRC, "**", "monkey_end.png"), recursive=True)
 monkey = None
 if monkey_txt:
     injected = re.search(r"Events injected:\s*(\d+)", monkey_txt)
@@ -150,8 +153,8 @@ if monkey_txt:
     m = re.search(r"// NOT RESPONDING:.*?\n(?:.*\n){0,15}", monkey_txt)
     if m and not monkey["detail"]:
         monkey["detail"] = m.group(0)[:3000]
-    if os.path.exists(os.path.join(SRC, "monkey_end.png")):
-        shutil.copy(os.path.join(SRC, "monkey_end.png"), os.path.join(DST, "shots", "monkey_end.png"))
+    if monkey_png:
+        shutil.copy(monkey_png[0], os.path.join(DST, "shots", "monkey_end.png"))
 
 # ------------------------------------------------------------------ automatic screen checks, findings, metrics
 check_counts = {}
@@ -167,7 +170,10 @@ for t in tests:
             if len(check_examples[k]) < 12:
                 check_examples[k].append({"shot": s["file"], "text": c.get("text", ""), "detail": c.get("detail", ""), "test": t["name"]})
 
-findings = [dict(f, test=t["name"]) for t in tests for f in t["findings"]]
+findings = [f for t in tests for f in t["findings"]]
+for t in tests:
+    for f in t["findings"]:
+        f["test"] = t["name"]
 metrics = {}
 for t in tests:
     for k, v in t["metrics"].items():
@@ -183,7 +189,36 @@ totals = {
     "warnings": sum(1 for f in findings if f["severity"] == "warning"),
 }
 
-videos = sorted(os.path.basename(p) for p in glob.glob(os.path.join(SRC, "video", "*.mp4")))
+videos = sorted(os.path.basename(p) for p in glob.glob(os.path.join(SRC, "**", "video", "*.mp4"), recursive=True))
+
+# Shards (parallel emulators): which ran, and the build/emulator output of any that produced no results.
+shards = []
+for sf in sorted(glob.glob(os.path.join(SRC, "**", "shard.txt"), recursive=True)):
+    d = os.path.dirname(sf)
+    n_results = len(glob.glob(os.path.join(d, "**", "TEST-*.xml"), recursive=True))
+    shards.append({"shard": read(sf).strip(), "gradle_exit": read(os.path.join(d, "gradle_exit.txt")).strip(),
+                   "has_results": n_results > 0,
+                   "tail": "" if n_results else read(os.path.join(d, "gradle.txt"))[-4000:]})
+
+# ---- APP BUG list: real app bugs confirmed by review (qa/known_app_bugs.json), matched to this run.
+app_bugs = []
+known_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "known_app_bugs.json")
+known = json.loads(read(known_path, "[]") or "[]")
+for bug in known:
+    hits = []
+    for t in tests:
+        matched_finding = [f for f in t["findings"] if any(m.lower() in f["title"].lower() for m in bug.get("finding_contains", []))]
+        test_hit = t["name"] in bug.get("tests", []) and t["result"] != "passed"
+        if matched_finding or test_hit:
+            shot = (matched_finding[0].get("shot") if matched_finding else None) or (t["shots"][-1]["file"] if t["shots"] else None)
+            hits.append({"test": t["name"], "result": t["result"], "shot": shot,
+                         "steps": [x["text"] for x in t["steps"]][-25:],
+                         "error": t["error"][:600], "finding": matched_finding[0]["title"] if matched_finding else ""})
+            if test_hit:
+                t["app_bug"] = bug["id"]
+            for f in matched_finding:
+                f["app_bug"] = bug["id"]
+    app_bugs.append(dict(bug, seen_this_run=bool(hits), hits=hits))
 summary = {
     "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     "run_url": RUN_URL,
@@ -199,11 +234,16 @@ summary = {
     "monkey": monkey,
     "metrics": metrics,
     "videos": videos,
+    "shards": shards,
+    "app_bugs": app_bugs,
     "video_parts": read(os.path.join(SRC, "video", "parts.txt")),
 }
 if not tests:
-    tail = read(os.path.join(SRC, "gradle.txt"))[-6000:]
-    summary["setup_error"] = tail or "No test results at all (the emulator or the build failed before the tests ran)."
+    tails = "\n\n".join("[%s]\n%s" % (x["shard"], x["tail"]) for x in shards if x["tail"])
+    summary["setup_error"] = tails or "No test results at all (the emulator or the build failed before the tests ran)."
+missing = [x["shard"] for x in shards if not x["has_results"]]
+if missing:
+    summary["missing_shards"] = missing
 
 with open(os.path.join(DST, "summary.json"), "w", encoding="utf-8") as f:
     json.dump(summary, f, ensure_ascii=False, indent=1)
@@ -219,12 +259,22 @@ md.append("| %d | %d | %d | %d | %d | %d | %d | %d |" % (
     len(crashes), len(anrs), totals["screenshots"]))
 md.append("")
 failed = [t for t in tests if t["result"] in ("failed", "crashed", "unknown")]
-if failed:
-    md.append("### Failed")
-    for t in failed:
+seen_bugs = [b for b in app_bugs if b["seen_this_run"]]
+if seen_bugs:
+    md.append("### APP BUG")
+    for b in seen_bugs:
+        md.append("- **APP BUG %s — %s** (%s)" % (b["id"], b["title"], ", ".join(sorted({h["test"] for h in b["hits"]}))))
+    md.append("")
+other = [t for t in failed if not t.get("app_bug")]
+if other:
+    md.append("### Failed (not an app bug on record)")
+    for t in other:
         md.append("- **%s** — %s" % (t["name"], html.escape(t["error"].splitlines()[0][:200] if t["error"] else "")))
     md.append("")
-probs = [f for f in findings if f["severity"] == "problem"]
+if summary.get("missing_shards"):
+    md.append("**Shards with no results:** %s" % ", ".join(summary["missing_shards"]))
+    md.append("")
+probs = [f for f in findings if f["severity"] == "problem" and not f.get("app_bug")]
 if probs:
     md.append("### Problems found")
     for f in probs[:30]:
@@ -272,6 +322,8 @@ out.append("<header><h1>Xtream TV — weekly QA report</h1><div class='sub'>%s �
     "<a style='color:#ed6927' href='%s'>GitHub run</a>" % E(RUN_URL) if RUN_URL else "", ""))
 if summary.get("setup_error"):
     out.append("<h2>The tests did not run</h2><pre>%s</pre>" % E(summary["setup_error"]))
+if summary.get("missing_shards"):
+    out.append("<h2>Some test groups did not run</h2><p>%s</p>" % E(", ".join(summary["missing_shards"])))
 
 
 def kpi(label, value, cls=""):
@@ -282,6 +334,7 @@ out.append("<div class='kpis'>" + "".join([
     kpi("tests", totals["tests"]),
     kpi("passed", totals["passed"], "good"),
     kpi("failed", totals["failed"], "bad" if totals["failed"] else "good"),
+    kpi("APP BUGs", len(seen_bugs), "bad" if seen_bugs else "good"),
     kpi("problems", totals["problems"], "bad" if totals["problems"] else "good"),
     kpi("warnings", totals["warnings"]),
     kpi("crashes", len(crashes), "bad" if crashes else "good"),
@@ -295,11 +348,22 @@ def img(file, caption="", warn=None):
     return "<figure><a href='shots/%s'><img loading='lazy' src='shots/%s'></a><figcaption>%s%s</figcaption></figure>" % (E(file), E(file), E(caption), w)
 
 
+if seen_bugs:
+    out.append("<h2 style='color:#c0392b'>APP BUG</h2><p class='info'>Real problems in the app, confirmed by review. The tests are right; the app needs a fix.</p>")
+    for b in seen_bugs:
+        out.append("<h3 class='fail'>APP BUG %s — %s</h3>" % (E(b["id"]), E(b["title"])))
+        out.append("<p><b>Screen:</b> %s<br><b>What happens:</b> %s<br><b>Expected:</b> %s</p>" % (E(b.get("screen", "")), E(b.get("what", "")), E(b.get("expected", ""))))
+        if b.get("steps"):
+            out.append("<p><b>Steps to see it:</b></p><ol>%s</ol>" % "".join("<li>%s</li>" % E(x) for x in b["steps"]))
+        out.append("<div class='grid'>%s</div>" % "".join(img(h["shot"], "%s (%s)" % (h["test"], h["result"])) for h in b["hits"] if h["shot"]))
+        for h in b["hits"]:
+            out.append("<details><summary>Test steps: %s</summary><pre>%s\n%s</pre></details>" % (E(h["test"]), E("\n".join(h["steps"])), E(h["error"])))
+
 if failed:
     out.append("<h2>Failed tests</h2>")
     for t in failed:
         last = t["shots"][-1]["file"] if t["shots"] else None
-        out.append("<h3 class='fail'>%s</h3><p>%s</p>" % (E(t["name"]), E(t["error"][:800])))
+        out.append("<h3 class='fail'>%s%s</h3><p>%s</p>" % ("APP BUG %s · " % E(t["app_bug"]) if t.get("app_bug") else "", E(t["name"]), E(t["error"][:800])))
         if last:
             out.append("<div class='grid'>%s</div>" % img(last, "Last screen"))
         if t["steps"]:
@@ -312,8 +376,9 @@ if findings:
     order = {"problem": 0, "warning": 1, "info": 2}
     for f in sorted(findings, key=lambda f: order.get(f["severity"], 3)):
         shot = f.get("shot")
+        sev = "APP BUG " + f["app_bug"] if f.get("app_bug") else f["severity"]
         out.append("<tr><td class='%s'>%s</td><td>%s<br><span class='info'>%s</span></td><td>%s</td><td>%s</td></tr>" % (
-            E(f["severity"]), E(f["severity"]), E(f["title"]), E(f.get("detail", "")), E(f["test"]),
+            E(f["severity"]), E(sev), E(f["title"]), E(f.get("detail", "")), E(f["test"]),
             "<a href='shots/%s'><img loading='lazy' src='shots/%s' width='220'></a>" % (E(shot), E(shot)) if shot else ""))
     out.append("</table>")
 

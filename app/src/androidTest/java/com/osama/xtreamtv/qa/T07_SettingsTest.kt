@@ -31,27 +31,24 @@ class T07_SettingsTest : QaTest() {
         Qa.shot("section_$label", "Settings: $label")
     }
 
-    /** Titles of the option rows in the shown section. */
-    private fun optionRows(): List<String> = Qa.main {
-        val body = Qa.current()?.findViewById<ViewGroup>(R.id.section_body) ?: return@main emptyList()
-        val out = ArrayList<String>()
+    /** Option rows (title + value) in the shown section, also inside the Glass cards. */
+    private fun rowViews(): List<View> {
+        val body = Qa.current()?.findViewById<ViewGroup>(R.id.section_body) ?: return emptyList()
+        val found = ArrayList<View>()
         Qa.walk(body) { v ->
-            val title = v.findViewById<TextView>(R.id.title)
-            if (v.isClickable && v !== title && title != null && v.findViewById<View>(R.id.subtitle) != null && v.parent === body) {
-                out.add(title.text.toString())
-            }
+            if (v is ViewGroup && v.isClickable && v.findViewById<TextView>(R.id.title) != null && v.findViewById<View>(R.id.subtitle) != null) found.add(v)
         }
-        out
+        // Keep the innermost rows only.
+        return found.filter { row -> found.none { other -> other !== row && Qa.isAncestor(row, other) } }
     }
 
+    private fun optionRows(): List<String> = Qa.main { rowViews().map { it.findViewById<TextView>(R.id.title).text.toString() } }
+
+    /** The value a row shows; for Glass on/off switches (no value text) "switch". */
     private fun rowValue(title: String): String? = Qa.main {
-        val body = Qa.current()?.findViewById<ViewGroup>(R.id.section_body) ?: return@main null
-        var value: String? = null
-        for (i in 0 until body.childCount) {
-            val row = body.getChildAt(i)
-            if (row.findViewById<TextView>(R.id.title)?.text?.toString() == title) value = row.findViewById<TextView>(R.id.subtitle)?.text?.toString()
-        }
-        value
+        val row = rowViews().firstOrNull { it.findViewById<TextView>(R.id.title)?.text?.toString() == title } ?: return@main null
+        val sub = row.findViewById<TextView>(R.id.subtitle)
+        if (sub.visibility != View.VISIBLE) "switch" else sub.text?.toString()
     }
 
     private fun openOption(title: String) {
@@ -72,6 +69,19 @@ class T07_SettingsTest : QaTest() {
         for (title in rows) {
             if (title in skip) continue
             val original = rowValue(title) ?: continue
+            if (original == "switch") {
+                // Glass on/off switch: OK flips it at once; flip twice to keep the setting.
+                Qa.focusText(title, 60)
+                Qa.ok()
+                Qa.waitUntil(5000) { Qa.current() is SettingsActivity }
+                Qa.settle(600)
+                Qa.shot("switch_${title.take(20)}", "$section › $title flipped")
+                Qa.focusText(title, 60)
+                Qa.ok()
+                Qa.waitUntil(5000) { Qa.current() is SettingsActivity }
+                Qa.step("$section › $title: switch flipped and back")
+                continue
+            }
             openOption(title)
             val choices = dialogChoices()
             Qa.shot("option_${title.take(20)}", "$section › $title (current: $original)")
@@ -103,13 +113,14 @@ class T07_SettingsTest : QaTest() {
         Qa.reset()
         openSettings()
         openSection(R.id.menu_home, "Home layout")
-        for ((i, name) in listOf("Hero", "Side menu", "Big tiles", "Top tabs").withIndex()) {
+        for ((i, name) in com.osama.xtreamtv.Appearance.HOME_NAMES.withIndex()) {
             Qa.focusText(name)
             Qa.ok()
             Qa.settle(500)
             assertEquals("Home layout saved", i, Qa.prefs().getInt("home_style", -1))
         }
-        Qa.shot("home_layout_chosen", "Home layout: last one chosen")
+        Qa.shot("home_layout_chosen", "Home layout: last one (Dock) chosen")
+        crawl("Home layout")
         openSection(R.id.menu_browse, "Movies and series")
         for ((i, name) in listOf("Sidebar", "Folding", "Chips", "Preview").withIndex()) {
             Qa.focusText(name)
@@ -121,7 +132,7 @@ class T07_SettingsTest : QaTest() {
         Qa.step("Home rebuilds with the new layout after Back")
         Qa.backTo(HomeActivity::class.java, "Home")
         Qa.settle(1500)
-        Qa.shot("home_after_layout_change", "Home after choosing Top tabs")
+        Qa.shot("home_after_layout_change", "Home after choosing the last layout (Preview browse, Dock home)")
     }
 
     @Test
@@ -148,6 +159,63 @@ class T07_SettingsTest : QaTest() {
             }
         }
         Qa.shot("look_colours", "Look section after trying the colours")
+    }
+
+    /** Buttons and swatches identified by their tag (Glass settings). */
+    private fun pickTagged(tagName: String, label: String) {
+        Qa.focus(label, 60) { Qa.current()?.findViewById<ViewGroup>(R.id.section_body)?.findViewWithTag<View>(tagName) }
+        Qa.ok()
+        Qa.waitUntil(6000) { Qa.current() is SettingsActivity }
+        Qa.settle(800)
+    }
+
+    @Test
+    fun glassLookOptions() {
+        Qa.reset(settings = mapOf("theme" to com.osama.xtreamtv.Appearance.THEME_GLASS))
+        openSettings()
+        openSection(R.id.menu_color, "Look (Glass)")
+        Qa.step("every background")
+        for ((i, name) in com.osama.xtreamtv.Appearance.SCENE_NAMES.withIndex()) {
+            pickTagged("scene$i", "background $name")
+            assertEquals("Background $name saved", i, Qa.prefs().getInt("glass_scene", -1))
+            Qa.shot("glass_scene_$name", "Look › Background: $name")
+        }
+        pickTagged("scene0", "background Aurora")
+        Qa.step("every glass style")
+        for ((i, name) in com.osama.xtreamtv.Appearance.GLASS_STYLE_NAMES.withIndex()) {
+            pickTagged("glass_style$i", "glass style $name")
+            assertEquals("Glass style $name saved", i, Qa.prefs().getInt("glass_style", -1))
+            Qa.shot("glass_style_$name", "Look › Glass style: $name")
+        }
+        Qa.step("every highlight style")
+        for ((i, name) in com.osama.xtreamtv.Appearance.FOCUS_NAMES.withIndex()) {
+            pickTagged("focus_style$i", "highlight $name")
+            assertEquals("Highlight style $name saved", i, Qa.prefs().getInt("focus_style", -1))
+            Qa.shot("glass_focus_${name.replace(' ', '_')}", "Look › Selected item: $name")
+        }
+        pickTagged("glass_style0", "glass style Clear")
+        pickTagged("focus_style0", "highlight Accent ring")
+        crawl("Look (Glass)", skip = setOf("Theme"))
+        Qa.step("Theme row: Default, Cinema, Glass")
+        openOption("Theme")
+        val themes = dialogChoices()
+        Qa.shot("theme_choices", "Theme choices")
+        Qa.back()
+        assertEquals("Themes offered", listOf("Default", "Cinema", "Glass"), themes)
+    }
+
+    @Test
+    fun glassPlayerOptions() {
+        Qa.reset(settings = mapOf("theme" to com.osama.xtreamtv.Appearance.THEME_GLASS))
+        openSettings()
+        openSection(R.id.menu_player, "Player (Glass)")
+        for ((i, name) in listOf("Small pop-up", "Side panel", "Cards").withIndex()) {
+            pickTagged("player_menu$i", "player menu $name")
+            assertEquals("Player menu $name saved", i, Qa.prefs().getInt("player_menu_style", -1))
+        }
+        Qa.shot("glass_player_menu_cards", "Player › Player menu: Cards")
+        pickTagged("player_menu0", "player menu Small pop-up")
+        crawl("Player (Glass)")
     }
 
     @Test

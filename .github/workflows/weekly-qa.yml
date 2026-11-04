@@ -1,8 +1,8 @@
 name: Weekly QA (Android TV)
 
-# Every Wednesday 02:00 Riyadh time (= Tuesday 23:00 UTC): the full UI test suite on an
-# Android TV emulator against a fake Xtream server (qa/server). Results: the "qa-report"
-# artifact, the qa-report branch (latest report only) and the run summary.
+# Every Wednesday 02:00 Riyadh time (= Tuesday 23:00 UTC): the full UI test suite on Android TV
+# emulators (several in parallel) against a fake Xtream server (qa/server). Results: the
+# "qa-report" artifact, the qa-report branch (latest report only) and the run summary.
 on:
   schedule:
     - cron: '0 23 * * 2'
@@ -20,14 +20,28 @@ permissions:
 
 concurrency:
   group: weekly-qa
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  qa:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: python3 qa/shards.py "${{ github.event.inputs.tests }}" >> "$GITHUB_OUTPUT"
+
+  tests:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     env:
-      QA_TESTS: ${{ github.event.inputs.tests }}
+      QA_TESTS: ${{ matrix.tests }}
+      QA_MONKEY: ${{ matrix.monkey }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,11 +54,6 @@ jobs:
 
       - name: Build the app and the tests
         run: |
-          # Pushes to the weekly-qa branch (while developing the tests) run only qa/push-tests.txt.
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ -f qa/push-tests.txt ]; then
-            echo "QA_TESTS=$(tr -d '\n ' < qa/push-tests.txt)" >> "$GITHUB_ENV"
-            echo "QA_MONKEY=0" >> "$GITHUB_ENV"
-          fi
           chmod +x gradlew qa/run-on-emulator.sh
           env -u GITHUB_RUN_NUMBER ./gradlew assembleDebug assembleDebugAndroidTest -PbuildNumber=999999 --stacktrace
 
@@ -75,34 +84,55 @@ jobs:
           disable-animations: true
           script: bash qa/run-on-emulator.sh
 
-      - name: Build the report
+      - name: Keep this shard's results
         if: always()
         run: |
+          mkdir -p qa-out
           cp qa-server.log qa-out/ 2>/dev/null || true
+          echo "${{ matrix.shard }}" > qa-out/shard.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-out-${{ matrix.shard }}
+          path: |
+            qa-out
+            !qa-out/video
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-video-${{ matrix.shard }}
+          path: qa-out/video
+          retention-days: 14
+          if-no-files-found: ignore
+
+  report:
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: qa-out-*
+          path: qa-out
+
+      - name: Build the report
+        run: |
           python3 qa/make_report.py qa-out report "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           cat report/summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the report (screenshots, results)
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: qa-report
           path: report
           retention-days: 30
 
-      - name: Upload the screen recording
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-video
-          path: qa-out/video
-          retention-days: 14
-          if-no-files-found: ignore
-
       - name: Publish the latest report to the qa-report branch
-        if: always()
         run: |
-          [ -d report ] || exit 0
           cd report
           git init -q -b qa-report
           git config user.name "weekly-qa"
@@ -112,6 +142,5 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" qa-report
 
       - name: Mark the run red if tests failed or the app crashed
-        if: always()
         run: |
           python3 -c "import json,sys; s=json.load(open('report/summary.json')); sys.exit(1 if s['totals']['failed'] or s['crashes'] or s['anrs'] or not s['totals']['tests'] else 0)"

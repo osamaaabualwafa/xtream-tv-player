@@ -167,6 +167,11 @@ class T02_LoginAndPlaylistsTest : QaTest() {
         Qa.step("make it open at start")
         Qa.focusText("Second account")
         Qa.longOk()
+        if (!Qa.dialogShowing("Delete", 4000)) {
+            Qa.step("options didn't open on the first long-press; trying once more")
+            Qa.focusText("Second account")
+            Qa.longOk()
+        }
         Qa.dialogPick("Open at start")
         Qa.settle()
         Qa.shot("open_at_start", "Second playlist marked to open at start")

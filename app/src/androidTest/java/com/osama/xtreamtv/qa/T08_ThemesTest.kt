@@ -120,35 +120,107 @@ class T08_ThemesTest : QaTest() {
         Qa.finishAll()
     }
 
-    private fun theme(index: Int) {
-        tag = "theme_${Appearance.THEME_NAMES[index]}"
-        for (home in 0..3) {
-            Qa.reset(settings = mapOf("theme" to index, "home_style" to home))
+    private fun theme(value: Int, name: String, extra: Map<String, Any> = emptyMap()) {
+        tag = "theme_$name"
+        for (home in Appearance.HOME_NAMES.indices) {
+            Qa.reset(settings = mapOf("theme" to value, "home_style" to home) + extra)
             home("home_${Appearance.HOME_NAMES[home].replace(' ', '_')}")
         }
         for (b in 0..3) {
-            Qa.reset(settings = mapOf("theme" to index, "browse_style" to b))
-            Qa.launchApp()
-            Qa.expect(HomeActivity::class.java, "Home")
-            Qa.finishAll()
-            val name = Appearance.BROWSE_NAMES[b]
-            browse(ContentType.MOVIE, "movies_$name")
-            browse(ContentType.SERIES, "series_$name")
-            if (b != Appearance.BROWSE_PREVIEW) browse(ContentType.LIVE, "live_$name")
+            Qa.reset(settings = mapOf("theme" to value, "browse_style" to b) + extra)
+            val browseName = Appearance.BROWSE_NAMES[b]
+            browse(ContentType.MOVIE, "movies_$browseName")
+            browse(ContentType.SERIES, "series_$browseName")
+            if (b != Appearance.BROWSE_PREVIEW) browse(ContentType.LIVE, "live_$browseName")
         }
-        Qa.reset(settings = mapOf("theme" to index))
-        Qa.launchApp()
-        Qa.expect(HomeActivity::class.java, "Home")
-        Qa.finishAll()
+        Qa.reset(settings = mapOf("theme" to value) + extra)
         detailsScreens()
         otherScreens()
         playerScreens()
     }
 
-    @Test fun themeDefault() = theme(0)
-    @Test fun themeCinema() = theme(1)
-    @Test fun themeCoastal() = theme(2)
-    @Test fun themeCoconut() = theme(3)
+    @Test fun themeDefault() = theme(0, "Default")
+    @Test fun themeCinema() = theme(Appearance.THEME_CINEMA, "Cinema")
+    @Test fun themeGlass() = theme(Appearance.THEME_GLASS, "Glass")
+
+    /** Glass: every background (scene) on the main screens. */
+    @Test
+    fun glassBackgrounds() {
+        for ((i, name) in Appearance.SCENE_NAMES.withIndex()) {
+            tag = "glass_bg_$name"
+            Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_scene" to i))
+            home()
+            browse(ContentType.MOVIE, "movies")
+            browse(ContentType.LIVE, "live")
+            if (i == Appearance.SCENE_DAYLIGHT || i == Appearance.SCENE_MIDNIGHT) {
+                // Daylight is the only light scene; the player always uses dark glass.
+                detailsScreens()
+                otherScreens()
+                playerScreens()
+            }
+        }
+    }
+
+    /** Glass: the three glass styles and the four highlight styles (dark and Daylight). */
+    @Test
+    fun glassStylesAndHighlights() {
+        for ((i, name) in Appearance.GLASS_STYLE_NAMES.withIndex()) {
+            tag = "glass_style_$name"
+            Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_style" to i))
+            home()
+            browse(ContentType.MOVIE, "movies")
+            detailsScreens()
+        }
+        for (scene in listOf(0, Appearance.SCENE_DAYLIGHT)) {
+            for ((f, name) in Appearance.FOCUS_NAMES.withIndex()) {
+                tag = "glass_focus_${name.replace(' ', '_')}_${Appearance.SCENE_NAMES[scene]}"
+                Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "glass_scene" to scene, "focus_style" to f))
+                home()
+                browse(ContentType.MOVIE, "movies")
+                browse(ContentType.LIVE, "live")
+                Qa.start(Intent(Qa.ctx, SettingsActivity::class.java))
+                Qa.expect(SettingsActivity::class.java, "Settings")
+                Qa.focusId(R.id.menu_color, "Look")
+                Qa.right()
+                Qa.shot("${tag}_settings", "$tag · settings, Look")
+                Qa.finishAll()
+            }
+        }
+    }
+
+    /** Glass: moving background on, with the other effects. */
+    @Test
+    fun glassMovingBackground() {
+        tag = "glass_moving"
+        Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "moving_background" to true))
+        home()
+        android.os.SystemClock.sleep(3000)
+        Qa.shot("${tag}_home_later", "$tag · Home 3 s later (background moves)")
+        browse(ContentType.MOVIE, "movies")
+        browse(ContentType.SERIES, "series")
+        playerScreens()
+        val mem = Qa.memoryMb()
+        Qa.metric("glass_moving_memory_mb", mem)
+        tag = "glass_moving_effects"
+        Qa.reset(settings = mapOf("theme" to Appearance.THEME_GLASS, "moving_background" to true, "backdrop_follows" to true, "poster_glow" to true, "featured_banner" to true))
+        home()
+        browse(ContentType.MOVIE, "movies")
+    }
+
+    /** Old saved themes (Coastal = 2, Coconut = 3) must turn into Default with that colour set. */
+    @Test
+    fun removedThemesMoveToDefault() {
+        for ((old, palette) in listOf(2 to 1, 3 to 2)) {
+            tag = "old_theme_$old"
+            Qa.reset(settings = mapOf("theme" to old))
+            home()
+            val theme = Qa.prefs().getInt("theme", -1)
+            val pal = Qa.prefs().getInt("palette", -1)
+            Qa.step("saved theme $old became theme=$theme palette=$pal")
+            org.junit.Assert.assertEquals("Old theme $old should become Default", 0, theme)
+            org.junit.Assert.assertEquals("Old theme $old should keep its colours as palette $palette", palette, pal)
+        }
+    }
 
     @Test
     fun colours() {

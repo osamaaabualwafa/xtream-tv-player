@@ -340,8 +340,11 @@ object Qa {
      * highlight is placed there directly so the journey can go on.
      */
     fun focus(label: String, maxPresses: Int = 40, target: () -> View?): Boolean {
+        // After a dialog or the keyboard closes, the screen takes the remote back a moment later.
+        waitUntil(3000) { main { current()?.hasWindowFocus() == true } }
+        hideKeyboard()
         val blocked = HashSet<Int>()
-        var lastFocus: Rect? = null
+        var lastFocusId = 0
         var presses = 0
         var missing = 0
         while (presses < maxPresses) {
@@ -349,7 +352,7 @@ object Qa {
                 val a = current() ?: return@main null
                 val t = target() ?: return@main null
                 val f = a.currentFocus
-                val done = t.isFocused || t.hasFocus() || (f != null && isAncestor(f, t))
+                val done = a.hasWindowFocus() && (t.isFocused || t.hasFocus() || (f != null && isAncestor(f, t)))
                 Triple(rectOf(t), f?.let { rectOf(it) }, done)
             }
             if (st == null) {
@@ -372,11 +375,9 @@ object Qa {
                 presses++
                 continue
             }
-            if (lastFocus != null && lastFocus == fr) {
-                // The last key didn't move the highlight.
-            } else {
-                blocked.clear()
-            }
+            val focusId = focusIdentity()
+            // A key that moved the highlight (to another item, even if a centred list kept it in place) clears the dead ends.
+            if (focusId != lastFocusId) blocked.clear()
             val dx = tr.centerX() - fr.centerX()
             val dy = tr.centerY() - fr.centerY()
             val horizontal = if (dx > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
@@ -394,11 +395,13 @@ object Qa {
             }
             val keyCode = order.distinct().firstOrNull { it !in blocked }
             if (keyCode == null) break
-            lastFocus = fr
+            lastFocusId = focusId
             key(keyCode, 1, 250)
             presses++
+            settle(150)
+            val afterId = focusIdentity()
             val after = main { current()?.currentFocus?.let { rectOf(it) } }
-            if (after == fr) blocked.add(keyCode)
+            if (afterId == focusId && after == fr) blocked.add(keyCode)
         }
         finding(
             "warning", "Remote can't reach \"$label\" with the arrow keys",
@@ -408,6 +411,22 @@ object Qa {
         main { target()?.requestFocus() }
         SystemClock.sleep(300)
         return false
+    }
+
+    /** Which view has the highlight (changes when the highlight moves, even inside a centred list). */
+    private fun focusIdentity(): Int = main {
+        val f = current()?.currentFocus ?: return@main 0
+        System.identityHashCode(f) * 31 + ((f as? TextView)?.text?.hashCode() ?: 0)
+    }
+
+    /** Closes the on-screen keyboard (the tests type with setText; the remote then moves between fields). */
+    fun hideKeyboard() {
+        main {
+            val a = current() ?: return@main
+            val f = a.currentFocus ?: return@main
+            val imm = a.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(f.windowToken, 0)
+        }
     }
 
     fun focusId(id: Int, label: String, maxPresses: Int = 40) = focus(label, maxPresses) { current()?.findViewById<View>(id)?.takeIf { it.isShown } }
