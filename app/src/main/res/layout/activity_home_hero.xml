@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Home H1: Continue watching as a big hero at the top, smaller glass tiles, then the rows. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.osama.xtreamtv.FocusScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/home_scroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -64,6 +64,7 @@
                     android:textStyle="bold" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/playlist_name"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -71,7 +72,7 @@
                     android:ellipsize="end"
                     android:maxWidth="200dp"
                     android:singleLine="true"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="15sp" />
             </LinearLayout>
 
@@ -323,4 +324,4 @@
             android:textSize="13sp" />
 
     </LinearLayout>
-</ScrollView>
+</com.osama.xtreamtv.FocusScrollView>

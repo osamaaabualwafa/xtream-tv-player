@@ -27,6 +27,8 @@ class BrowseActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_TYPE = "type"
+        /** Dock Home's Favorites tile: open on the ★ Favorites category. */
+        const val EXTRA_OPEN_FAVORITES = "open_favorites"
         private const val CAT_ALL = "__all__"
         private const val CAT_FAV = "__fav__"
         private const val CAT_CONTINUE = "__continue__"
@@ -174,6 +176,24 @@ class BrowseActivity : AppCompatActivity() {
                 val gap = ((ChannelPreview.WIDTH_DP + 16) * resources.displayMetrics.density).toInt()
                 itemsView.setPadding(itemsView.paddingLeft, itemsView.paddingTop, gap, itemsView.paddingBottom)
                 channelPreview = p
+            }
+        }
+        // Glass: the channel list sits in one rounded glass panel, stopping short of the preview.
+        if (live && prefs.themeIndex == Appearance.THEME_GLASS && style == Appearance.BROWSE_SIDEBAR) {
+            val density = resources.displayMetrics.density
+            val pad = (14 * density).toInt()
+            val inset = if (channelPreview != null) itemsView.paddingRight else 0
+            FocusBox.usePadding(itemsView)
+            itemsView.background = android.graphics.drawable.InsetDrawable(
+                androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_glass_card), 0, 0, inset, 0,
+            )
+            // After the background: setting one replaces the view's padding with the drawable's.
+            itemsView.setPadding(pad, pad, inset + pad, pad)
+            // Rows scrolling away disappear at the panel's rounded edge.
+            itemsView.clipToOutline = true
+            itemsView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, outline: android.graphics.Outline) =
+                    outline.setRoundRect(0, 0, v.width - inset, v.height, 24 * density)
             }
         }
 
@@ -495,6 +515,7 @@ class BrowseActivity : AppCompatActivity() {
                 // Open "Continue watching" when there is something to resume, otherwise the
                 // first real category ("All" can be tens of thousands of items).
                 val firstIndex = when {
+                    intent.getBooleanExtra(EXTRA_OPEN_FAVORITES, false) && list.any { it.id == CAT_FAV } -> list.indexOfFirst { it.id == CAT_FAV }
                     type != ContentType.LIVE && prefs.continueWatching(type).isNotEmpty() -> 0
                     cats.isEmpty() -> list.indexOfFirst { it.id == CAT_ALL }
                     else -> list.indexOf(cats.first())

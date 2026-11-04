@@ -33,7 +33,7 @@
             android:paddingRight="7dp"
             android:paddingBottom="1dp"
             android:text="NEW"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/appLiveText"
             android:textSize="11sp"
             android:textStyle="bold"
             android:visibility="gone" />
@@ -89,16 +89,17 @@
         android:lines="2"
         android:paddingLeft="2dp"
         android:paddingRight="2dp"
-        android:textColor="@color/text_focus_primary"
+        android:textColor="@color/on_focus_text"
         android:textSize="13sp" />
 
     <TextView
+                android:duplicateParentState="true"
         android:id="@+id/subtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingLeft="2dp"
         android:singleLine="true"
-        android:textColor="?attr/appGold"
+        android:textColor="@color/on_focus_gold"
         android:textSize="12sp"
         android:visibility="gone" />
 </LinearLayout>

@@ -1909,6 +1909,9 @@ class PlayerActivity : AppCompatActivity() {
      */
     private fun showMenu(title: String, items: List<Pair<String, () -> Unit>>, selected: Int = -1) {
         closeEpisodes(refocus = false)
+        cardsOpen = false
+        findViewById<View>(R.id.player_menu_grip).visibility = View.GONE
+        findViewById<View>(R.id.player_menu_eyebrow).visibility = View.GONE
         placeMenuPanel()
         findViewById<TextView>(R.id.player_menu_title).apply {
             text = title
@@ -1969,6 +1972,16 @@ class PlayerActivity : AppCompatActivity() {
     private fun placeMenuPanel() {
         val density = resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
+        if (cardsOpen) {
+            menuPanel.layoutParams = (menuPanel.layoutParams as android.widget.FrameLayout.LayoutParams).apply {
+                width = dp(860)
+                height = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                // Under the title, above the toolbar when it is up.
+                gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+                setMargins(dp(20), dp(if (isLive) 40 else 64), dp(20), dp(20))
+            }
+            return
+        }
         val side = prefs.playerMenuStyle == 1
         val width = if (side) dp(460) else dp(360)
         var right = dp(40)
@@ -1989,7 +2002,203 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /** Settings > Player > Player menu = Cards: a centred sheet; every tile applies straight away. */
+    private var cardsOpen = false
+    private var sleepChoice = 0
+
+    private fun showCards(focusTag: String? = null) {
+        closeEpisodes(refocus = false)
+        cardsOpen = true
+        placeMenuPanel()
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
+        findViewById<View>(R.id.player_menu_grip).visibility = View.VISIBLE
+        val eyebrow = findViewById<TextView>(R.id.player_menu_eyebrow)
+        eyebrow.visibility = View.VISIBLE
+        eyebrow.text = if (isLive) currentChannel?.name ?: "" else findViewById<TextView>(R.id.vc_title).text
+        findViewById<TextView>(R.id.player_menu_title).apply {
+            text = "Settings"
+            textSize = 22f
+        }
+        val pad = dp(18)
+        menuPanel.setPadding(pad, dp(10), pad, pad)
+        menuItems.removeAllViews()
+        val iconTint = androidx.core.content.ContextCompat.getColorStateList(this, R.color.on_focus_icon)
+        val textTint = androidx.core.content.ContextCompat.getColorStateList(this, R.color.on_focus_text)
+        fun refresh(tag: String) = showCards(tag)
+        fun tile(label: String, icon: Int?, tag: String, selected: Boolean, weight: Float = 1f, action: () -> Unit) = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setBackgroundResource(R.drawable.bg_glass_choice)
+            isFocusable = true
+            isClickable = true
+            isActivated = selected
+            this.tag = tag
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, dp(52), weight).apply { rightMargin = dp(6) }
+            if (icon != null) addView(android.widget.ImageView(context).apply {
+                setImageResource(icon)
+                imageTintList = iconTint
+                isDuplicateParentStateEnabled = true
+                layoutParams = android.widget.LinearLayout.LayoutParams(dp(18), dp(18))
+            })
+            addView(TextView(context).apply {
+                text = label
+                textSize = 11f
+                gravity = android.view.Gravity.CENTER
+                maxLines = 2
+                isDuplicateParentStateEnabled = true
+                setTextColor(textTint)
+                setPadding(0, dp(3), 0, 0)
+            })
+            setOnClickListener { action() }
+        }
+        fun card(title: String, subtitle: String, icon: Int, tiles: List<View>, onHeader: (() -> Unit)? = null) = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            FocusBox.open(this)
+            setBackgroundResource(R.drawable.bg_inner_card)
+            setPadding(dp(10), dp(8), dp(4), dp(10))
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) }
+            val header = android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(2), dp(4), dp(2))
+                layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6); rightMargin = dp(6) }
+                addView(android.widget.ImageView(context).apply {
+                    setImageResource(icon)
+                    imageTintList = iconTint
+                    isDuplicateParentStateEnabled = true
+                    layoutParams = android.widget.LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(8) }
+                })
+                addView(android.widget.LinearLayout(context).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    isDuplicateParentStateEnabled = true
+                    addView(TextView(context).apply {
+                        text = title
+                        textSize = 14f
+                        isDuplicateParentStateEnabled = true
+                        setTextColor(textTint)
+                    })
+                    addView(TextView(context).apply {
+                        text = subtitle
+                        textSize = 11f
+                        isDuplicateParentStateEnabled = true
+                        setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_secondary))
+                    })
+                })
+                if (onHeader != null) {
+                    setBackgroundResource(R.drawable.bg_glass_item)
+                    isFocusable = true
+                    isClickable = true
+                    tag = "header_$title"
+                    setOnClickListener { onHeader() }
+                }
+            }
+            addView(header)
+            addView(android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                tiles.forEach { addView(it) }
+            })
+        }
+        fun row(vararg cards: View) = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            cards.forEach { addView(it) }
+        }
+        val pictureIndex = prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)
+        val pictureCard = card("Picture size", pictureLabel(), R.drawable.ic_glass_picture, PICTURE_SIZES.mapIndexed { i, size ->
+            tile(size.first, R.drawable.ic_glass_picture, "picture$i", i == pictureIndex) {
+                prefs.pictureSize = i
+                playerView.resizeMode = size.second
+                refresh("picture$i")
+            }
+        })
+        val sleepOptions = ArrayList<Triple<String, Boolean, () -> Unit>>()
+        sleepOptions += Triple("Off", !sleepAtEnd && sleepAt == 0L) { setSleepTimer(0); sleepChoice = 0 }
+        for (m in listOf(30, 60)) sleepOptions += Triple("$m minutes", !sleepAtEnd && sleepAt > 0 && sleepChoice == m) { setSleepTimer(m); sleepChoice = m }
+        if (!isLive) sleepOptions += Triple(if (episodes.isNotEmpty()) "End of this episode" else "End of this video", sleepAtEnd) {
+            setSleepTimer(0)
+            sleepAtEnd = true
+            sleepChoice = 0
+            Toast.makeText(this, "Playback will stop at the end", Toast.LENGTH_SHORT).show()
+        }
+        val sleepCard = card("Sleep timer", sleepLabel(), R.drawable.ic_glass_moon, sleepOptions.mapIndexed { i, (label, selected, action) ->
+            tile(label, R.drawable.ic_glass_moon, "sleep$i", selected) {
+                action()
+                refresh("sleep$i")
+            }
+        })
+        if (isLive) {
+            val actions = ArrayList<View>()
+            actions += tile("TV guide", R.drawable.ic_glass_guide, "guide", false) { closeMenu(); openGuide() }
+            lastChannel?.let { last ->
+                actions += tile("Last channel", R.drawable.ic_glass_refresh, "last", false) { closeMenu(); switchToLastChannel() }
+            }
+            actions += tile("Jump to live", R.drawable.ic_glass_tv, "jump", false) { closeMenu(); playChannel(channelIndex) }
+            actions += tile("Stream info", R.drawable.ic_glass_list, "info", false) { closeMenu(); showStreamInfo() }
+            menuItems.addView(row(card(currentChannel?.name ?: "Options", currentListTitle ?: "", R.drawable.ic_glass_tv, actions)))
+            menuItems.addView(row(pictureCard, sleepCard))
+        } else {
+            val subtitleName = SUBTITLE_SIZES[prefs.subtitleSize.coerceIn(0, 3)].first
+            val audioCard = card("Audio and subtitles", trackSummary(), R.drawable.ic_glass_subtitles, listOf(
+                tile("Subtitle size: $subtitleName", R.drawable.ic_glass_subtitles, "subsize", false) {
+                    prefs.subtitleSize = (prefs.subtitleSize + 1) % SUBTITLE_SIZES.size
+                    applySubtitleStyle()
+                    refresh("subsize")
+                },
+                tile("Subtitle background: ${if (prefs.subtitleBackground) "On" else "Off"}", R.drawable.ic_glass_subtitles, "subbg", false) {
+                    prefs.subtitleBackground = !prefs.subtitleBackground
+                    applySubtitleStyle()
+                    refresh("subbg")
+                },
+            )) { closeMenu(); showTrackPicker() }
+            val speedCard = card("Speed", speedLabel(speed), R.drawable.ic_glass_speed, SPEEDS.mapIndexed { i, s ->
+                tile(speedLabel(s), R.drawable.ic_glass_speed, "speed$i", s == speed) {
+                    speed = s
+                    player?.setPlaybackSpeed(s)
+                    refresh("speed$i")
+                }
+            })
+            menuItems.addView(row(audioCard, speedCard))
+            menuItems.addView(row(pictureCard, sleepCard))
+            menuItems.addView(android.widget.LinearLayout(this).apply {
+                gravity = android.view.Gravity.END
+                setPadding(0, dp(6), dp(4), 0)
+                addView(tile("Stream info", null, "info", false) { closeMenu(); showStreamInfo() }.apply {
+                    layoutParams = android.widget.LinearLayout.LayoutParams(dp(130), dp(40))
+                })
+            })
+        }
+        menuPanel.visibility = View.VISIBLE
+        if (!isLive && controlsShown()) controls.hold(true)
+        menuItems.post {
+            val focus = focusTag?.let { menuItems.findViewWithTag<View>(it) } ?: firstFocusableIn(menuItems)
+            focus?.requestFocus()
+        }
+    }
+
+    /** "Audio: ar  ·  Subtitles: Off": what is playing now. */
+    private fun trackSummary(): String {
+        fun selected(type: Int): String? {
+            for (group in player?.currentTracks?.groups.orEmpty()) {
+                if (group.type != type) continue
+                for (i in 0 until group.length) if (group.isTrackSelected(i)) {
+                    val format = group.getTrackFormat(i)
+                    return format.label ?: format.language ?: "On"
+                }
+            }
+            return null
+        }
+        return "Audio: ${selected(androidx.media3.common.C.TRACK_TYPE_AUDIO) ?: "Default"}  ·  Subtitles: ${selected(androidx.media3.common.C.TRACK_TYPE_TEXT) ?: "Off"}"
+    }
+
+    private fun firstFocusableIn(v: View): View? {
+        if (v.isFocusable) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) firstFocusableIn(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
     private fun showSettings() {
+        if (prefs.playerMenuStyle == 2) return showCards()
         showMenu(
             "Settings",
             listOf(
@@ -2008,6 +2217,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun showLiveOptions() {
+        if (prefs.playerMenuStyle == 2) return showCards()
         val items = ArrayList<Pair<String, () -> Unit>>()
         items += "TV guide" to { openGuide() }
         lastChannel?.let { items += "Last channel:  ${it.second.name}" to { switchToLastChannel() } }

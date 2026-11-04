@@ -100,7 +100,7 @@
                     style="@style/GlassButton"
                     android:layout_marginLeft="0dp"
                     android:background="@drawable/bg_glass_button"
-                    android:textColor="?attr/appOnAccent"
+                    android:textColor="@color/on_button"
                     android:visibility="gone" />
 
                 <Button
@@ -108,7 +108,7 @@
                     style="@style/GlassButton"
                     android:layout_marginLeft="0dp"
                     android:background="@drawable/bg_glass_button"
-                    android:textColor="?attr/appOnAccent"
+                    android:textColor="@color/on_button"
                     android:visibility="gone" />
 
                 <Button

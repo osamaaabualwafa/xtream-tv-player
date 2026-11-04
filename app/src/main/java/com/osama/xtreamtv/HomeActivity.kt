@@ -69,6 +69,7 @@ class HomeActivity : AppCompatActivity() {
                 Appearance.HOME_HERO -> R.layout.activity_home_hero
                 Appearance.HOME_SIDE_MENU -> R.layout.activity_home_side
                 Appearance.HOME_TABS -> R.layout.activity_home_tabs
+                Appearance.HOME_DOCK -> R.layout.activity_home_dock
                 else -> R.layout.activity_home
             }
         )
@@ -99,7 +100,7 @@ class HomeActivity : AppCompatActivity() {
             findViewById<View>(R.id.tile_search).nextFocusRightId = R.id.tile_search
         }
         // Up from the tiles reaches the top-bar chips (they sit far to the right).
-        if (prefs.homeStyle != Appearance.HOME_SIDE_MENU) {
+        if (prefs.homeStyle != Appearance.HOME_SIDE_MENU && prefs.homeStyle != Appearance.HOME_DOCK) {
             findViewById<View>(R.id.tile_live).nextFocusUpId = R.id.playlist_chip
             findViewById<View>(R.id.tile_movies).nextFocusUpId = R.id.playlist_chip
             findViewById<View>(R.id.tile_series).nextFocusUpId = R.id.settings_button
@@ -111,6 +112,8 @@ class HomeActivity : AppCompatActivity() {
             startActivity(PlaylistsActivity.manageIntent(this))
             finish()
         }
+        playlistsAction = openPlaylists
+        setupDock()
         findViewById<View>(R.id.logout).setOnClickListener(openPlaylists)
         findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         findViewById<View>(R.id.playlist_chip).setOnClickListener(openPlaylists)
@@ -177,13 +180,87 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
         MiniPlayerBar.detach(this)
         findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
+    }
+
+    private var playlistsAction: View.OnClickListener? = null
+
+    /** Dock layout's two extra tiles. */
+    private fun setupDock() {
+        val favorites = findViewById<View?>(R.id.tile_favorites) ?: return
+        val settings = findViewById<View>(R.id.tile_settings)
+        favorites.onFocusChangeListener = scaleOnFocus
+        settings.onFocusChangeListener = scaleOnFocus
+        favorites.setOnClickListener {
+            // The first section with favorites (Browse keeps them per section).
+            val type = listOf(ContentType.LIVE, ContentType.MOVIE, ContentType.SERIES).firstOrNull { prefs.favoriteIds(it).isNotEmpty() } ?: ContentType.LIVE
+            startActivity(
+                Intent(this, BrowseActivity::class.java)
+                    .putExtra(BrowseActivity.EXTRA_TYPE, type.name)
+                    .putExtra(BrowseActivity.EXTRA_OPEN_FAVORITES, true),
+            )
+        }
+        settings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+    }
+
+    private var drawer: View? = null
+
+    /** Menu key on Home opens the quick drawer; Back or Menu closes it. */
+    private fun handleDrawerKey(event: android.view.KeyEvent): Boolean {
+        val open = drawer?.visibility == View.VISIBLE
+        val key = event.keyCode
+        if (key == android.view.KeyEvent.KEYCODE_MENU && (open || prefs.homeMenuButton == 0)) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (open) closeDrawer() else openDrawer()
+            }
+            return true
+        }
+        if (!open) return false
+        if (key == android.view.KeyEvent.KEYCODE_BACK) {
+            if (event.action == android.view.KeyEvent.ACTION_UP) closeDrawer()
+            return true
+        }
+        return key == android.view.KeyEvent.KEYCODE_DPAD_UP || key == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+    }
+
+    private var focusBeforeDrawer: View? = null
+
+    private fun openDrawer() {
+        val view = drawer ?: layoutInflater.inflate(R.layout.view_quick_drawer, findViewById<android.view.ViewGroup>(android.R.id.content), false).also { v ->
+            drawer = v
+            findViewById<android.view.ViewGroup>(android.R.id.content).addView(v)
+            fun tile(id: Int, action: () -> Unit) = v.findViewById<View>(id).setOnClickListener {
+                closeDrawer()
+                action()
+            }
+            tile(R.id.drawer_refresh) { refreshLists() }
+            tile(R.id.drawer_updates) { Updates.checkNow(this, lifecycleScope) }
+            tile(R.id.drawer_playlists) { playlistsAction?.onClick(v) }
+            tile(R.id.drawer_guide) { startActivity(Intent(this, GuideActivity::class.java)) }
+            tile(R.id.drawer_settings) { startActivity(Intent(this, SettingsActivity::class.java)) }
+            // The row is the whole drawer: Left and Right stop at its ends.
+            v.findViewById<View>(R.id.drawer_refresh).nextFocusLeftId = R.id.drawer_refresh
+            v.findViewById<View>(R.id.drawer_settings).nextFocusRightId = R.id.drawer_settings
+        }
+        view.findViewById<TextView>(R.id.drawer_account).text = accountView.text
+        view.findViewById<TextView>(R.id.drawer_version).text = "Version ${BuildConfig.VERSION_NAME}"
+        focusBeforeDrawer = currentFocus
+        view.visibility = View.VISIBLE
+        val panel = view.findViewById<View>(R.id.drawer_panel)
+        panel.translationY = 200 * resources.displayMetrics.density
+        panel.animate().translationY(0f).setDuration(180).start()
+        view.findViewById<View>(R.id.drawer_refresh).requestFocus()
+    }
+
+    private fun closeDrawer() {
+        drawer?.visibility = View.GONE
+        focusBeforeDrawer?.requestFocus()
     }
 
     private val bottomRow = intArrayOf(R.id.refresh_lists, R.id.check_updates, R.id.logout)
@@ -200,6 +277,7 @@ class HomeActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (handleDrawerKey(event)) return true
         val id = currentFocus?.id
         val stop = (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && id != null && id in bottomRow) ||
             (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && id != null && id in topBar)
@@ -289,6 +367,8 @@ class HomeActivity : AppCompatActivity() {
 
     /** "5,537 channels" under each tile's name (lists come from the device cache). */
     private fun loadCounts() {
+        findViewById<TextView?>(R.id.tile_favorites_count)?.text =
+            "${ContentType.values().sumOf { prefs.favoriteIds(it).size }} saved"
         val tiles = listOf(
             R.id.tile_live_count to ContentType.LIVE,
             R.id.tile_movies_count to ContentType.MOVIE,

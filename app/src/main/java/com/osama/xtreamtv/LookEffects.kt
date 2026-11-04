@@ -35,6 +35,7 @@ object Look {
     /** In onCreate before setContentView (with the theme colour). */
     fun applyBackground(activity: Activity) {
         val prefs = Prefs(activity)
+        FocusFx.install(activity)
         // A palette or theme brings its own background.
         if (prefs.paletteIndex == 0 && prefs.themeIndex == 0) {
             val index = prefs.backgroundStyle.coerceIn(0, BACKGROUND_STYLES.size - 1)
@@ -53,7 +54,7 @@ object Look {
 
     /**
      * Screen titles (tagged "screen_title") in the theme's title style: Cinema bold spaced
-     * capitals, Coastal light wide capitals, Coconut serif italic. True once done.
+     * capitals, Glass slightly tight medium. True once done.
      */
     private fun styleTitles(activity: Activity): Boolean {
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return false
@@ -63,14 +64,8 @@ object Look {
         fun walk(v: View) {
             if (v.tag == "screen_title" && v is android.widget.TextView) {
                 when (theme) {
-                    1 -> { v.isAllCaps = true; v.letterSpacing = 0.12f; v.typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD) }
-                    2 -> { v.isAllCaps = true; v.letterSpacing = 0.2f; v.typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL) }
-                    3 -> {
-                        v.typeface = android.graphics.Typeface.create("serif", android.graphics.Typeface.BOLD_ITALIC)
-                        // Italic letters lean past the text box: a little room so the edge letter isn't cut.
-                        val extra = (8 * v.resources.displayMetrics.density).toInt()
-                        v.setPadding(v.paddingLeft + extra, v.paddingTop, v.paddingRight + extra, v.paddingBottom)
-                    }
+                    Appearance.THEME_CINEMA -> { v.isAllCaps = true; v.letterSpacing = 0.12f; v.typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD) }
+                    Appearance.THEME_GLASS -> { v.letterSpacing = -0.02f; v.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) }
                 }
             }
             if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
@@ -104,7 +99,11 @@ object Look {
             return true
         }
         val prefs = Prefs(activity)
-        val key = "${prefs.themeIndex}/${prefs.paletteIndex}/${prefs.backgroundStyle}/${prefs.accentIndex}/${w}x$h"
+        if (GlassDrift.wanted(activity, prefs)) {
+            GlassDrift.attach(activity, content, holder)
+            return true
+        }
+        val key = "${prefs.themeIndex}/${prefs.paletteIndex}/${prefs.backgroundStyle}/${prefs.accentIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.movingBackground}/${w}x$h"
         val bitmap = flatBitmap.takeIf { flatKey == key } ?: try {
             android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
                 bg.setBounds(0, 0, w, h)
@@ -118,6 +117,14 @@ object Look {
         holder.background = android.graphics.drawable.BitmapDrawable(activity.resources, bitmap)
         activity.window.setBackgroundDrawable(null)
         return true
+    }
+
+    /** Glass: a poster behind a screen is always heavily blurred and a little less saturated. */
+    fun blurBackdrop(image: ImageView) {
+        image.colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.7f) })
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            image.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(40f, 40f, android.graphics.Shader.TileMode.CLAMP))
+        }
     }
 
     private var light: Boolean? = null
@@ -195,7 +202,7 @@ class ShimmerDrawable : Drawable() {
  * V1: the screen's background becomes a faded copy of the highlighted poster, changing smoothly
  * as the highlight moves. Off in Settings > Look.
  */
-class FocusBackdrop private constructor(private val image: ImageView, private val strength: Float = 0.42f) {
+class FocusBackdrop private constructor(private val image: ImageView, private val strength: Float = 0.42f, private val blurred: Boolean = false) {
 
     private var shown: String? = null
     private val pending = Runnable { load() }
@@ -215,6 +222,8 @@ class FocusBackdrop private constructor(private val image: ImageView, private va
         image.animate().alpha(0f).setDuration(150).withEndAction {
             image.load(url) {
                 crossfade(false)
+                // Older TVs have no blur: a tiny picture scaled up gives the same softness.
+                if (blurred && android.os.Build.VERSION.SDK_INT < 31) size(32, 48)
                 listener(onSuccess = { _, _ -> image.animate().alpha(strength).setDuration(350).start() })
             }
         }.start()
@@ -243,7 +252,137 @@ class FocusBackdrop private constructor(private val image: ImageView, private va
             }
             content.addView(image, 0)
             content.addView(shade, 1)
+            if (Prefs(activity).themeIndex == Appearance.THEME_GLASS) {
+                // Subtle, top-right, faded into the scene: never a coloured blob.
+                Look.blurBackdrop(image)
+                image.layoutParams = FrameLayout.LayoutParams((activity.resources.displayMetrics.widthPixels * 0.62f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.END)
+                return FocusBackdrop(image, 0.38f, blurred = true)
+            }
             return FocusBackdrop(image, if (cinema) 0.62f else 0.42f)
         }
+    }
+}
+
+/**
+ * Glass theme, Settings > Look > Effects > Moving background: the wallpaper's glows as three small
+ * views (scaled up: soft shapes need no detail) that drift on the GPU, so nothing is redrawn.
+ */
+object GlassDrift {
+    private const val SCALE = 4f
+
+    fun wanted(activity: Activity, prefs: Prefs): Boolean {
+        if (prefs.themeIndex != Appearance.THEME_GLASS || !prefs.movingBackground) return false
+        if (Look.isLightDevice(activity) || activity is PlayerActivity) return false
+        // Never next to video: the channel preview in Live TV.
+        val livePreview = activity is BrowseActivity && prefs.channelPreview && activity.intent.getStringExtra(BrowseActivity.EXTRA_TYPE) == ContentType.LIVE.name
+        return !livePreview && PlayerActivity.miniTitle() == null
+    }
+
+    fun attach(activity: Activity, content: ViewGroup, holder: View) {
+        holder.background = null
+        content.setBackgroundColor(activity.themeColor(R.attr.appBg))
+        activity.window.setBackgroundDrawable(null)
+        val w = activity.resources.displayMetrics.widthPixels.toFloat()
+        val h = activity.resources.displayMetrics.heightPixels.toFloat()
+        val d = activity.resources.displayMetrics.density
+        val glows = listOf(
+            glow(activity, R.attr.appGlowC, w, h, 0.70f, 1.00f, 0.32f, -0.72f, 0f),
+            glow(activity, R.attr.appGlowB, w, h, 1.25f, 1.50f, 0.20f, 0.40f, 0f),
+            glow(activity, R.attr.appGlowA, w, h, 1.10f, 1.35f, -0.45f, -0.80f, -25f),
+        )
+        glows.forEach { content.addView(it, 0) }
+        val anims = listOf(
+            drift(glows[2], 90 * d, 50 * d, -25f, -18f),
+            drift(glows[1], -110 * d, -60 * d, 0f, 0f),
+        )
+        (activity as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> anims.forEach { if (PlayerActivity.miniTitle() == null) it.resume() }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> anims.forEach { it.pause() }
+                androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> anims.forEach { it.cancel() }
+                else -> {}
+            }
+        })
+    }
+
+    private fun glow(activity: Activity, colorAttr: Int, w: Float, h: Float, sizeX: Float, sizeY: Float, left: Float, top: Float, rotation: Float): View {
+        val vw = (w * sizeX / SCALE).toInt()
+        val vh = (h * sizeY / SCALE).toInt()
+        val color = activity.themeColor(colorAttr)
+        return View(activity).apply {
+            layoutParams = FrameLayout.LayoutParams(vw, vh)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+                gradientRadius = maxOf(vw, vh) * 0.42f
+                colors = intArrayOf(color, color and 0x00FFFFFF)
+            }
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            pivotX = vw / 2f
+            pivotY = vh / 2f
+            scaleX = SCALE
+            scaleY = SCALE
+            // Laid out in the top-left corner: move its centre to where the recipe puts it.
+            translationX = w * (left + sizeX / 2) - vw / 2f
+            translationY = h * (top + sizeY / 2) - vh / 2f
+            this.rotation = rotation
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+    }
+
+    /** About 6 seconds there and back. */
+    private fun drift(v: View, dx: Float, dy: Float, fromRotation: Float, toRotation: Float): android.animation.Animator =
+        android.animation.ObjectAnimator.ofPropertyValuesHolder(
+            v,
+            android.animation.PropertyValuesHolder.ofFloat(View.TRANSLATION_X, v.translationX, v.translationX + dx),
+            android.animation.PropertyValuesHolder.ofFloat(View.TRANSLATION_Y, v.translationY, v.translationY + dy),
+            android.animation.PropertyValuesHolder.ofFloat(View.ROTATION, fromRotation, toRotation),
+        ).apply {
+            duration = 3000
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            start()
+        }
+}
+
+/** Glass theme: WinDock's on/off switch for settings rows. */
+class GlassSwitch(context: android.content.Context, private val daylight: Boolean) : View(context) {
+    var on = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+    private val density = resources.displayMetrics.density
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val box = android.graphics.RectF()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
+        setMeasuredDimension((40 * density).toInt(), (24 * density).toInt())
+
+    override fun onDraw(canvas: Canvas) {
+        val fill: Int
+        val stroke: Int
+        val knob: Int
+        if (daylight) {
+            fill = if (on) context.themeColor(R.attr.appAccent) else 0x141E2822
+            stroke = if (on) context.themeColor(R.attr.appAccent) else 0x331E2822
+            knob = if (on) 0xFFFFFFFF.toInt() else 0xFF8A948E.toInt()
+        } else {
+            fill = if (on) 0x4FD6F5E5 else 0x6115242B
+            stroke = if (on) 0x7AD6F5E5 else 0x28FFFFFF
+            knob = if (on) 0xFFE5FFF2.toInt() else 0xFFB7C9C7.toInt()
+        }
+        val r = height / 2f
+        box.set(density / 2, density / 2, width - density / 2, height - density / 2)
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = fill
+        canvas.drawRoundRect(box, r, r, paint)
+        paint.style = android.graphics.Paint.Style.STROKE
+        paint.strokeWidth = density
+        paint.color = stroke
+        canvas.drawRoundRect(box, r, r, paint)
+        paint.style = android.graphics.Paint.Style.FILL
+        paint.color = knob
+        canvas.drawCircle(if (on) width - r else r, r, 8 * density, paint)
     }
 }

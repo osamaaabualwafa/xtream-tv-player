@@ -6,4 +6,6 @@ local.properties
 .DS_Store
 captures/
 .kotlin/
+.uitest/
+__pycache__/
 qa/server/media/live_long.ts

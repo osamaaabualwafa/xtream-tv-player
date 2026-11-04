@@ -2,16 +2,26 @@
 <!-- Playlist tile: frosted glass; focused = soft blue glass with a white border. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
-        <shape>
-            <solid android:color="?attr/appAccent4D" />
+        <layer-list>
+            <item>
+                <shape>
+            <solid android:color="?attr/appFocusTile" />
             <stroke android:width="?attr/appFocusStrokeThick" android:color="?attr/appFocusStroke" />
             <corners android:radius="?attr/appCorner28" />
         </shape>
+            </item>
+            <item android:bottom="1dp" android:left="1dp" android:right="1dp" android:top="1dp">
+                <shape>
+                    <stroke android:width="?attr/appFocusGlowWidth" android:color="?attr/appFocusGlow" />
+                    <corners android:radius="?attr/appCorner28" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item>
         <shape>
-            <solid android:color="?attr/appGlassFill" />
-            <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
+            <solid android:color="?attr/appGlassCard" />
+            <stroke android:width="1dp" android:color="?attr/appCardStroke" />
             <corners android:radius="?attr/appCorner28" />
         </shape>
     </item>

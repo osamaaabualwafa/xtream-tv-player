@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
-        <shape>
-            <solid android:color="?attr/appAccent80" />
+        <layer-list>
+            <item>
+                <shape>
+            <solid android:color="?attr/appFocusPill" />
             <stroke android:width="?attr/appFocusStrokeThin" android:color="?attr/appFocusStroke" />
             <corners android:radius="?attr/appCorner24" />
         </shape>
+            </item>
+            <item android:bottom="1dp" android:left="1dp" android:right="1dp" android:top="1dp">
+                <shape>
+                    <stroke android:width="?attr/appFocusGlowWidth" android:color="?attr/appFocusGlow" />
+                    <corners android:radius="?attr/appCorner24" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item>
         <shape>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Count under a Home tile name: highlight text colour while the tile is focused. -->
+<!-- On any highlight: the theme's highlight text colour. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:color="?attr/appFocusText" android:state_focused="true" />
-    <item android:color="?attr/appTileCount" />
+    <item android:color="?attr/appSideIcon" />
 </selector>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FocusFx: this view grows through FocusFx.grow; this scrolling area has reserved its room. -->
+    <item name="focus_fx" type="id" />
+    <item name="focus_box" type="id" />
+</resources>

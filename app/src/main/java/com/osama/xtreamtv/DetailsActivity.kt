@@ -192,7 +192,15 @@ class DetailsActivity : AppCompatActivity() {
             placeholder(R.drawable.placeholder)
             error(R.drawable.placeholder)
         }
-        findViewById<ImageView>(R.id.backdrop).load(url) { crossfade(true) }
+        val glass = Prefs(this).themeIndex == Appearance.THEME_GLASS
+        findViewById<ImageView>(R.id.backdrop).let { backdrop ->
+            if (glass) Look.blurBackdrop(backdrop)
+            backdrop.load(url) {
+                crossfade(true)
+                // Older TVs have no blur: a tiny picture scaled up gives the same softness.
+                if (glass && android.os.Build.VERSION.SDK_INT < 31) size(32, 48)
+            }
+        }
     }
 
     /** Rating, year, length, genre as glass chips. */

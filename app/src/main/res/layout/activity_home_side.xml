@@ -53,23 +53,27 @@
                     android:layout_height="26dp"
                     android:layout_marginRight="14dp"
                     android:importantForAccessibility="no"
-                    android:src="@drawable/ic_home_live" />
+                    android:src="@drawable/ic_home_live"
+                    android:duplicateParentState="true"
+                    android:tint="@color/on_focus_side_icon" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Live TV"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="18sp" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/tile_live_count"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="?attr/appTileCount"
+                    android:textColor="@color/on_focus_count"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -82,23 +86,27 @@
                     android:layout_height="26dp"
                     android:layout_marginRight="14dp"
                     android:importantForAccessibility="no"
-                    android:src="@drawable/ic_home_movies" />
+                    android:src="@drawable/ic_home_movies"
+                    android:duplicateParentState="true"
+                    android:tint="@color/on_focus_side_icon" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Movies"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="18sp" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/tile_movies_count"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="?attr/appTileCount"
+                    android:textColor="@color/on_focus_count"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -111,23 +119,27 @@
                     android:layout_height="26dp"
                     android:layout_marginRight="14dp"
                     android:importantForAccessibility="no"
-                    android:src="@drawable/ic_home_series" />
+                    android:src="@drawable/ic_home_series"
+                    android:duplicateParentState="true"
+                    android:tint="@color/on_focus_side_icon" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Series"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="18sp" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/tile_series_count"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="?attr/appTileCount"
+                    android:textColor="@color/on_focus_count"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -140,15 +152,18 @@
                     android:layout_height="26dp"
                     android:layout_marginRight="14dp"
                     android:importantForAccessibility="no"
-                    android:src="@drawable/ic_home_search" />
+                    android:src="@drawable/ic_home_search"
+                    android:duplicateParentState="true"
+                    android:tint="@color/on_focus_side_icon" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:singleLine="true"
                     android:text="Search"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="18sp" />
             </LinearLayout>
 
@@ -207,6 +222,7 @@
                 android:textStyle="bold" />
 
             <LinearLayout
+                android:duplicateParentState="true"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginLeft="10dp"
@@ -214,20 +230,22 @@
                 android:orientation="vertical">
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/playlist_name"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:singleLine="true"
-                    android:textColor="?attr/appText"
+                    android:textColor="@color/on_focus_text"
                     android:textSize="15sp" />
 
                 <TextView
+                android:duplicateParentState="true"
                     android:id="@+id/expiry_chip"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textColor="?attr/appTextSecondary"
+                    android:textColor="@color/on_focus_secondary"
                     android:textSize="12sp"
                     android:visibility="gone" />
             </LinearLayout>
@@ -235,7 +253,7 @@
 
     </LinearLayout>
 
-    <ScrollView
+    <com.osama.xtreamtv.FocusScrollView
         android:id="@+id/home_scroll"
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -345,5 +363,5 @@
             android:textSize="13sp" />
 
         </LinearLayout>
-    </ScrollView>
+    </com.osama.xtreamtv.FocusScrollView>
 </LinearLayout>

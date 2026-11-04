@@ -32,60 +32,19 @@
         <item name="appTileFocusSearchEnd">#4DC42530</item>
     </style>
 
-    <!-- Coastal: round pills, solid sea-glass highlight with dark text (no outline), waves. -->
-    <style name="Look.Coastal">
-        <item name="appCorner8">20dp</item>
-        <item name="appCorner10">26dp</item>
-        <item name="appCorner12">18dp</item>
-        <item name="appCorner16">24dp</item>
-        <item name="appCorner20">26dp</item>
-        <item name="appCorner22">34dp</item>
-        <item name="appCorner23">26dp</item>
-        <item name="appCorner24">26dp</item>
-        <item name="appCorner26">28dp</item>
-        <item name="appCorner28">36dp</item>
-        <item name="appFocusFill">#FFE3ECF1</item>
-        <item name="appFocusText">#FF141B20</item>
-        <item name="appFocusStrokeThin">0dp</item>
-        <item name="appFocusStrokeThick">0dp</item>
+    <!-- Glass: radii from THEME.md section 6; fill, ring and text come from Focus.*. -->
+    <style name="Look.Glass">
+        <item name="appCorner8">11dp</item>
+        <item name="appCorner10">11dp</item>
+        <item name="appCorner12">16dp</item>
+        <item name="appCorner16">17dp</item>
+        <item name="appCorner20">11dp</item>
+        <item name="appCorner22">18dp</item>
+        <item name="appCorner23">11dp</item>
+        <item name="appCorner24">14dp</item>
+        <item name="appCorner26">16dp</item>
+        <item name="appCorner28">24dp</item>
+        <item name="appCornerTabbar">20dp</item>
         <item name="android:fontFamily">sans-serif</item>
-        <item name="appBackground">@drawable/bg_theme_coastal</item>
-            <item name="appTileFocusLiveStart">#FFE3ECF1</item>
-        <item name="appTileFocusLiveEnd">#FFE3ECF1</item>
-        <item name="appTileFocusMoviesStart">#FFE3ECF1</item>
-        <item name="appTileFocusMoviesEnd">#FFE3ECF1</item>
-        <item name="appTileFocusSeriesStart">#FFE3ECF1</item>
-        <item name="appTileFocusSeriesEnd">#FFE3ECF1</item>
-        <item name="appTileFocusSearchStart">#FFE3ECF1</item>
-        <item name="appTileFocusSearchEnd">#FFE3ECF1</item>
-    </style>
-
-    <!-- Coconut: square cards, gold frame highlight on warm wood, serif type, wood grain. -->
-    <style name="Look.Coconut">
-        <item name="appCorner8">3dp</item>
-        <item name="appCorner10">4dp</item>
-        <item name="appCorner12">3dp</item>
-        <item name="appCorner16">4dp</item>
-        <item name="appCorner20">4dp</item>
-        <item name="appCorner22">5dp</item>
-        <item name="appCorner23">4dp</item>
-        <item name="appCorner24">4dp</item>
-        <item name="appCorner26">4dp</item>
-        <item name="appCorner28">5dp</item>
-        <item name="appFocusFill">#FF3A2617</item>
-        <item name="appFocusStroke">#FFD9A766</item>
-        <item name="appFocusText">#FFF1E6D8</item>
-        <item name="appFocusStrokeThin">2dp</item>
-        <item name="appFocusStrokeThick">3dp</item>
-        <item name="android:fontFamily">serif</item>
-        <item name="appBackground">@drawable/bg_theme_coconut</item>
-            <item name="appTileFocusLiveStart">#FF3A2617</item>
-        <item name="appTileFocusLiveEnd">#FF3A2617</item>
-        <item name="appTileFocusMoviesStart">#FF3A2617</item>
-        <item name="appTileFocusMoviesEnd">#FF3A2617</item>
-        <item name="appTileFocusSeriesStart">#FF3A2617</item>
-        <item name="appTileFocusSeriesEnd">#FF3A2617</item>
-        <item name="appTileFocusSearchStart">#FF3A2617</item>
-        <item name="appTileFocusSearchEnd">#FF3A2617</item>
     </style>
 </resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- On any highlight: the theme's highlight text colour. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?attr/appFocusSecondaryText" android:state_focused="true" />
+    <item android:color="?attr/appGold" />
+</selector>

@@ -15,6 +15,14 @@
         android:padding="14dp">
 
         <TextView
+            android:id="@+id/settings_eyebrow"
+            style="@style/GlassEyebrow"
+            android:layout_marginLeft="10dp"
+            android:layout_marginTop="6dp"
+            android:text="XTREAM TV"
+            android:visibility="gone" />
+
+        <TextView
         android:tag="screen_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -27,7 +35,7 @@
             android:textStyle="bold" />
 
         <!-- Scrolls when large text makes the menu taller than the screen. -->
-        <ScrollView
+        <com.osama.xtreamtv.FocusScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
@@ -52,10 +60,10 @@
 
                 <TextView android:id="@+id/menu_about" style="@style/SettingsMenuItem" android:text="About" />
             </LinearLayout>
-        </ScrollView>
+        </com.osama.xtreamtv.FocusScrollView>
     </LinearLayout>
 
-    <ScrollView
+    <com.osama.xtreamtv.FocusScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_marginLeft="32dp"
@@ -72,6 +80,12 @@
             android:paddingTop="8dp"
             android:paddingRight="12dp"
             android:paddingBottom="16dp">
+
+            <TextView
+                android:id="@+id/section_eyebrow"
+                style="@style/GlassEyebrow"
+                android:layout_marginBottom="2dp"
+                android:visibility="gone" />
 
             <TextView
         android:tag="screen_title"
@@ -99,5 +113,5 @@
                 android:clipToPadding="false"
                 android:orientation="vertical" />
         </LinearLayout>
-    </ScrollView>
+    </com.osama.xtreamtv.FocusScrollView>
 </LinearLayout>

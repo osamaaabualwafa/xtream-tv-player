@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glass theme wallpaper, Ember: base, three soft glows, bottom shade (painted once into a picture). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FF221615" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.10" android:centerY="-0.12" android:endColor="#00A45F43" android:gradientRadius="88%" android:startColor="#CCA45F43" android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.83" android:centerY="1.15" android:endColor="#005B3F6C" android:gradientRadius="98%" android:startColor="#CC5B3F6C" android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:centerX="0.67" android:centerY="-0.22" android:endColor="#00C19E75" android:gradientRadius="58%" android:startColor="#66C19E75" android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient android:angle="90" android:centerY="0.4" android:centerColor="#00070F18" android:endColor="#00070F18" android:startColor="#45070F18" />
+        </shape>
+    </item>
+</layer-list>

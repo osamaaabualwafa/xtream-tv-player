@@ -22,6 +22,7 @@
         android:textStyle="bold" />
 
     <TextView
+                android:duplicateParentState="true"
         android:id="@+id/title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -29,13 +30,14 @@
         android:layout_weight="1"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textColor="?attr/appText"
+        android:textColor="@color/on_focus_text"
         android:textSize="18sp" />
 
     <TextView
+                android:duplicateParentState="true"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Change  ›"
-        android:textColor="?attr/appTextSecondary"
+        android:textColor="@color/on_focus_secondary"
         android:textSize="15sp" />
 </LinearLayout>

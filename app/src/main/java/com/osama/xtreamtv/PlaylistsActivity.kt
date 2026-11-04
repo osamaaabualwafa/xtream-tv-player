@@ -170,12 +170,13 @@ class PlaylistsActivity : AppCompatActivity() {
             val status = statuses[p.id]
             // The one that opens at start gets a star in front of its status.
             vh.subtitle?.text = (if (p.id == prefs.defaultPlaylistId) "★ Opens at start" + (status?.first?.let { "  ·  $it" } ?: "") else status?.first) ?: ""
-            vh.subtitle?.setTextColor(themeColor(if (status?.second == true) R.attr.appError else R.attr.appTextSecondary))
+            if (status?.second == true) vh.subtitle?.setTextColor(themeColor(R.attr.appError))
+            else vh.subtitle?.setTextColor(androidx.core.content.ContextCompat.getColorStateList(this, R.color.on_focus_secondary))
         }
         // The focused tile grows a little.
+        FocusFx.markGrows(vh.itemView)
         vh.itemView.setOnFocusChangeListener { v, hasFocus ->
-            val scale = if (hasFocus) 1.08f else 1f
-            v.animate().scaleX(scale).scaleY(scale).setDuration(150).start()
+            FocusFx.growTile(v, hasFocus)
             if (hasFocus && p.id != ADD_ID) lastFocused = p
         }
     }

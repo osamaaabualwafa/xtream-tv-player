@@ -21,18 +21,20 @@
         android:paddingTop="20dp">
 
         <TextView
+                android:duplicateParentState="true"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="☰"
-            android:textColor="?attr/appText"
+            android:textColor="@color/on_focus_text"
             android:textSize="24sp" />
 
         <TextView
+                android:duplicateParentState="true"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:text="‹"
-            android:textColor="?attr/appTextSecondary"
+            android:textColor="@color/on_focus_secondary"
             android:textSize="28sp" />
     </LinearLayout>
 
