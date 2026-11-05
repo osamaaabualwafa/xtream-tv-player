@@ -11,7 +11,10 @@
     </style>
 
     <style name="Glass.Frosted">
-        <item name="appGlassFill">#24CADCEB</item>
+        <item name="appGlassFill">#18CADCEB</item>
+        <item name="appText">#FFFFFFFF</item>
+        <item name="appTextSecondary">#FFE4ECEC</item>
+        <item name="appTileCount">#FFE4ECEC</item>
         <item name="appGlassStroke">#47EFFAFF</item>
         <item name="appGlassCard">#0CEDF5FF</item>
     </style>
@@ -66,7 +69,7 @@
         <item name="appFocusStrokeThin">1.5dp</item>
         <item name="appFocusStrokeThick">1.5dp</item>
         <item name="appFocusText">#FFFFFFFF</item>
-        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appFocusSecondaryText">#FFE6EEEC</item>
         <item name="appButtonFocusText">#FFFFFFFF</item>
         <item name="appFocusGlow">?attr/appFocusGlowColor</item>
         <item name="appFocusGlowWidth">3dp</item>
@@ -93,7 +96,7 @@
         <item name="appFocusStrokeThin">1dp</item>
         <item name="appFocusStrokeThick">1dp</item>
         <item name="appFocusText">#FFF2FFF9</item>
-        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appFocusSecondaryText">#FFE6EEEC</item>
         <item name="appButtonFocusText">#FFF2FFF9</item>
         <item name="appFocusGlow">#00000000</item>
         <item name="appFocusGlowWidth">0dp</item>
@@ -147,7 +150,7 @@
         <item name="appFocusStrokeThin">0dp</item>
         <item name="appFocusStrokeThick">0dp</item>
         <item name="appFocusText">#FFFFFFFF</item>
-        <item name="appFocusSecondaryText">#FFD8E2E0</item>
+        <item name="appFocusSecondaryText">#FFE6EEEC</item>
         <item name="appButtonFocusText">#FFFFFFFF</item>
         <item name="appFocusGlow">#00000000</item>
         <item name="appFocusGlowWidth">0dp</item>

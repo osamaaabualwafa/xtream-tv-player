@@ -73,6 +73,14 @@ class PlaylistsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Back from the TV's launcher with the app already open (it started some other way: an installer,
+        // an update, another app): Android starts this screen on top. Step aside, back to the open page.
+        val fromLauncher = intent.action == Intent.ACTION_MAIN &&
+            (intent.hasCategory(Intent.CATEGORY_LAUNCHER) || intent.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER))
+        if (fromLauncher && !isTaskRoot) {
+            finish()
+            return
+        }
         prefs = Prefs(this)
         Appearance.apply(this)
         setContentView(R.layout.activity_playlists)
@@ -300,7 +308,7 @@ class PlaylistsActivity : AppCompatActivity() {
                     val count = Backup.import(this, read())
                     Session.clear()
                     message.visibility = View.GONE
-                    Toast.makeText(this, "Restored $count playlist${if (count == 1) "" else "s"}", Toast.LENGTH_LONG).show()
+                    showToast(this, "Restored $count playlist${if (count == 1) "" else "s"}", Toast.LENGTH_LONG)
                     showList(prefs.playlists())
                 } catch (e: Exception) {
                     showMessage("Restore failed: ${e.message ?: e.javaClass.simpleName}")
@@ -330,11 +338,9 @@ class PlaylistsActivity : AppCompatActivity() {
                     1 -> AvatarPicker.show(this, p) { showList(prefs.playlists()) }
                     2 -> {
                         prefs.defaultPlaylistId = if (isDefault) null else p.id
-                        android.widget.Toast.makeText(
+                        showToast(
                             this,
-                            if (isDefault) "The app will ask which playlist to open" else "${p.name} will open at start",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+                            if (isDefault) "The app will ask which playlist to open" else "${p.name} will open at start", android.widget.Toast.LENGTH_SHORT)
                         showList(prefs.playlists())
                     }
                     3 -> confirmDelete(p)
@@ -366,6 +372,11 @@ class PlaylistsActivity : AppCompatActivity() {
             try {
                 val api = XtreamApi(p.toAccount(), cacheDir)
                 val info = api.userInfo()
+                Diag.log(
+                    "account",
+                    "status ${info.status ?: "?"} · expires ${info.expDate?.let { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(it * 1000)) } ?: "never"}" +
+                        " · connections ${info.activeCons ?: "?"} of ${info.maxConnections ?: "?"} in use · formats ${info.formats.joinToString(",")}",
+                )
                 val problem = accountProblem(info)
                 if (problem != null) {
                     showError("${p.name}: $problem")

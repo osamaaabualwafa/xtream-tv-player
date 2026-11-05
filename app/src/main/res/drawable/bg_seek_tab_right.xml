@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#30FFFFFF" />
+    <!-- Fixed colours, not the theme's: this sits on the video, which can be any brightness. -->
+    <solid android:color="#E6101418" />
+    <stroke android:width="1dp" android:color="#59FFFFFF" />
     <corners
         android:bottomLeftRadius="110dp"
         android:bottomRightRadius="0dp"

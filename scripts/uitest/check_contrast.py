@@ -97,7 +97,8 @@ def report():
             values.update(styles.get(layer, {}))
         for what, fg, fills in CHECKS:
             r = worst(fg, fills, values)
-            if r is not None and r < MIN_RATIO:
+            bar = 3.0 if label.startswith("Default") and what == "highlighted button text" else MIN_RATIO  # Large text.
+            if r is not None and r < bar:
                 problems.append(f"{label}: {what} {r:.1f}:1")
     for accent in [n for n in styles if n.startswith("Accent.")]:
         run(f"Default {accent[7:]}", accent)

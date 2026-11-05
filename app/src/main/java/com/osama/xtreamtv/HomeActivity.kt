@@ -95,18 +95,6 @@ class HomeActivity : AppCompatActivity() {
             setOnClickListener { startActivity(Intent(this@HomeActivity, SearchActivity::class.java)) }
         }
         findViewById<View>(R.id.tile_live).requestFocus()
-        // Right on the last tile: stay (Android would otherwise jump to the row below).
-        if (prefs.homeStyle == Appearance.HOME_TILES || prefs.homeStyle == Appearance.HOME_HERO) {
-            findViewById<View>(R.id.tile_search).nextFocusRightId = R.id.tile_search
-        }
-        // Up from the tiles reaches the top-bar chips (they sit far to the right).
-        if (prefs.homeStyle != Appearance.HOME_SIDE_MENU && prefs.homeStyle != Appearance.HOME_DOCK) {
-            findViewById<View>(R.id.tile_live).nextFocusUpId = R.id.playlist_chip
-            findViewById<View>(R.id.tile_movies).nextFocusUpId = R.id.playlist_chip
-            findViewById<View>(R.id.tile_series).nextFocusUpId = R.id.settings_button
-            findViewById<View>(R.id.tile_search).nextFocusUpId = R.id.settings_button
-        }
-
         val openPlaylists = View.OnClickListener {
             Session.clear()
             startActivity(PlaylistsActivity.manageIntent(this))
@@ -114,12 +102,18 @@ class HomeActivity : AppCompatActivity() {
         }
         playlistsAction = openPlaylists
         setupDock()
+        setupTabBar()
         findViewById<View>(R.id.logout).setOnClickListener(openPlaylists)
-        findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        // The TV keeps the remote's Menu button for itself: this opens the quick drawer instead.
+        findViewById<View?>(R.id.more_button)?.setOnClickListener { openDrawer() }
+        findViewById<View?>(R.id.tile_more)?.setOnClickListener { openDrawer() }
         findViewById<View>(R.id.playlist_chip).setOnClickListener(openPlaylists)
         findViewById<View>(R.id.refresh_lists).setOnClickListener { refreshLists() }
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
+        hideBottomOfHome()
         pinPageEdges()
+        setupFocusMap()
         // Rebuilt in another layout: the restored highlight may sit on a view this layout hides.
         findViewById<View>(android.R.id.content).post {
             if (currentFocus?.isShown != true) findViewById<View>(R.id.tile_live).requestFocus()
@@ -158,6 +152,11 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         MiniPlayerBar.attach(this)
+        // Diagnostics: the reminder dot on Settings, and once after a crash the message to share.
+        val dot = Diag.dotColor()
+        DiagUi.applyDot(findViewById(R.id.settings_button), dot)
+        DiagUi.applyDot(findViewById(R.id.tile_settings), dot)
+        window.decorView.post { if (!isFinishing) DiagUi.crashPrompt(this) }
         if (!::continueAdapter.isInitialized) return
         if (lookKey() != builtLook) {
             recreate()
@@ -213,12 +212,58 @@ class HomeActivity : AppCompatActivity() {
         settings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
     }
 
+    /** Tabs: when the bar can't hold everything, the counts give way so every name stays whole. */
+    private fun setupTabBar() {
+        val bar = findViewById<android.view.ViewGroup?>(R.id.tab_bar) ?: return
+        val counts = listOf(R.id.tile_live_count, R.id.tile_movies_count, R.id.tile_series_count)
+        fun needs(tab: android.view.ViewGroup) = tab.paddingLeft + tab.paddingRight + (0 until tab.childCount).sumOf { i ->
+            val text = tab.getChildAt(i) as? TextView
+            if (text == null || text.visibility == View.GONE) 0 else {
+                val margins = text.layoutParams as android.view.ViewGroup.MarginLayoutParams
+                text.paint.measureText(text.text.toString()).toInt() + 1 + margins.leftMargin + margins.rightMargin
+            }
+        }
+        // Measured from the text itself: a count can change before the bar has been laid out again.
+        bar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val needed = bar.paddingLeft + bar.paddingRight +
+                (0 until bar.childCount).sumOf { needs(bar.getChildAt(it) as android.view.ViewGroup) }
+            val room = (bar.parent as View).width
+            if (room > 0 && needed > room) bar.post { counts.forEach { findViewById<View>(it).visibility = View.GONE } }
+        }
+    }
+
+    /**
+     * The bottom of Home (account line, Refresh lists, Check for updates, Playlists, version) repeated
+     * the quick drawer, which ☰ More and INFO open. Hidden in every layout; the views stay, because the
+     * drawer copies the account line from them. (In the Side menu, Playlists is a menu entry: it stays.)
+     */
+    private fun hideBottomOfHome() {
+        val refresh = findViewById<View?>(R.id.refresh_lists)
+        val row = refresh?.parent as? android.view.ViewGroup
+        for (id in intArrayOf(R.id.account, R.id.version, R.id.refresh_lists, R.id.check_updates)) {
+            findViewById<View?>(id)?.visibility = View.GONE
+        }
+        findViewById<View?>(R.id.logout)?.let { if (it.parent === row) it.visibility = View.GONE }
+        // The row that held them takes no room either (unless something else still shows in it).
+        if (row != null && row.id != android.R.id.content && (0 until row.childCount).none { row.getChildAt(it).visibility == View.VISIBLE }) {
+            row.visibility = View.GONE
+        }
+    }
+
     private var drawer: View? = null
 
     /** Menu key on Home opens the quick drawer; Back or Menu closes it. */
     private fun handleDrawerKey(event: android.view.KeyEvent): Boolean {
         val open = drawer?.visibility == View.VISIBLE
         val key = event.keyCode
+        // INFO, a short press: the quick drawer (this TV keeps the Menu button for itself).
+        // Held down, INFO marks a problem instead (see Diag), so act on release and only when short.
+        if (key == android.view.KeyEvent.KEYCODE_INFO) {
+            if (event.action == android.view.KeyEvent.ACTION_UP && event.eventTime - event.downTime < 500) {
+                if (open) closeDrawer() else openDrawer()
+            }
+            return true
+        }
         if (key == android.view.KeyEvent.KEYCODE_MENU && (open || prefs.homeMenuButton == 0)) {
             if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                 if (open) closeDrawer() else openDrawer()
@@ -248,6 +293,8 @@ class HomeActivity : AppCompatActivity() {
             tile(R.id.drawer_playlists) { playlistsAction?.onClick(v) }
             tile(R.id.drawer_guide) { openGuide() }
             tile(R.id.drawer_settings) { startActivity(Intent(this, SettingsActivity::class.java)) }
+            tile(R.id.drawer_share) { DiagUi.shareFlow(this) }
+            tile(R.id.drawer_mark) { DiagUi.mark("the quick drawer", this) }
             // The row is the whole drawer: Left and Right stop at its ends.
             v.findViewById<View>(R.id.drawer_refresh).nextFocusLeftId = R.id.drawer_refresh
             v.findViewById<View>(R.id.drawer_settings).nextFocusRightId = R.id.drawer_settings
@@ -268,7 +315,7 @@ class HomeActivity : AppCompatActivity() {
             try {
                 val channels = allStreams(ContentType.LIVE).await()
                 if (channels.isEmpty()) {
-                    android.widget.Toast.makeText(this@HomeActivity, "No channels to show", android.widget.Toast.LENGTH_SHORT).show()
+                    showToast(this@HomeActivity, "No channels to show", android.widget.Toast.LENGTH_SHORT)
                     return@launch
                 }
                 Session.zapList = channels
@@ -277,7 +324,7 @@ class HomeActivity : AppCompatActivity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                android.widget.Toast.makeText(this@HomeActivity, "Couldn't load the channels", android.widget.Toast.LENGTH_SHORT).show()
+                showToast(this@HomeActivity, "Couldn't load the channels", android.widget.Toast.LENGTH_SHORT)
             }
         }
     }
@@ -288,7 +335,7 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private val bottomRow = intArrayOf(R.id.refresh_lists, R.id.check_updates, R.id.logout)
-    private val topBar = intArrayOf(R.id.playlist_chip, R.id.settings_button)
+    private val topBar = intArrayOf(R.id.playlist_chip, R.id.more_button, R.id.settings_button)
 
     /**
      * Scrolling Home layouts: the bottom buttons bring the whole page end into view (account and
@@ -302,10 +349,48 @@ class HomeActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         if (handleDrawerKey(event)) return true
-        val id = currentFocus?.id
-        val stop = (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && id != null && id in bottomRow) ||
-            (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && id != null && id in topBar)
-        return if (stop) true else super.dispatchKeyEvent(event)
+        return focusMap.handle(event) || super.dispatchKeyEvent(event)
+    }
+
+    private val focusMap = FocusMap { currentFocus }
+
+    /**
+     * Sections of Home. Every layout: a stack from top to bottom, Left and Right stay inside a section.
+     * Side menu: the menu column on the left, with Left and Right moving between it and the stack.
+     */
+    private fun setupFocusMap() {
+        fun views(vararg ids: Int): () -> List<View> {
+            val list = ids.toList().mapNotNull { findViewById<View?>(it) }
+            return { list }
+        }
+        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_recent)
+            .map { focusMap.section(roots = views(it)) }
+        val featured = focusMap.section(ownsSideKeys = true, roots = views(R.id.featured))
+        val stack = ArrayList(rows + featured)
+        if (prefs.homeStyle == Appearance.HOME_SIDE_MENU) {
+            val menu = focusMap.section(roots = views(R.id.tile_live, R.id.tile_movies, R.id.tile_series, R.id.tile_search, R.id.more_button, R.id.settings_button, R.id.logout, R.id.playlist_chip))
+            stack += focusMap.section(roots = views(R.id.refresh_lists, R.id.check_updates))
+            var lastInStack: FocusMap.Section? = null
+            for (s in stack) s.exits[View.FOCUS_LEFT] = {
+                lastInStack = s
+                menu.entry()
+            }
+            menu.exits[View.FOCUS_RIGHT] = {
+                val chosen = lastInStack?.takeIf { it.shown } ?: stack.filter { it.shown }.minByOrNull { s ->
+                    val at = IntArray(2)
+                    s.roots().first { it.isShown }.getLocationOnScreen(at)
+                    at[1]
+                }
+                chosen?.entry()
+            }
+        } else {
+            stack += focusMap.section(roots = views(R.id.playlist_chip, R.id.more_button, R.id.settings_button))
+            stack += focusMap.section(roots = views(R.id.hero))
+            stack += focusMap.section(roots = views(R.id.tile_live, R.id.tile_movies, R.id.tile_series, R.id.tile_search, R.id.tile_favorites, R.id.tile_settings, R.id.tile_more))
+            stack += focusMap.section(roots = views(R.id.refresh_lists, R.id.check_updates, R.id.logout))
+        }
+        focusMap.stack(stack)
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, new -> focusMap.note(new) }
     }
 
     private fun row(
@@ -447,8 +532,6 @@ class HomeActivity : AppCompatActivity() {
                 // Big tiles layout: tiles → banner → top bar.
                 if (prefs.homeStyle == Appearance.HOME_TILES) {
                     listOf(R.id.tile_live, R.id.tile_movies, R.id.tile_series, R.id.tile_search).forEach { findViewById<View>(it).nextFocusUpId = R.id.featured }
-                    banner.nextFocusUpId = R.id.playlist_chip
-                    banner.nextFocusDownId = R.id.tile_live
                 }
                 val dots = findViewById<android.widget.LinearLayout>(R.id.featured_dots)
                 dots.removeAllViews()
@@ -567,7 +650,7 @@ class HomeActivity : AppCompatActivity() {
         Session.streamCache.clear()
         Session.categoryCache.clear()
         allLists.clear()
-        Toast.makeText(this, "Lists will reload from the server", Toast.LENGTH_SHORT).show()
+        showToast(this, "Lists will reload from the server", Toast.LENGTH_SHORT)
         loadCounts()
         loadRecentlyAdded()
     }

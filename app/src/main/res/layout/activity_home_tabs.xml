@@ -77,6 +77,14 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/more_button"
+                style="@style/GlassChip"
+                android:layout_marginLeft="10dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:text="☰" />
+
+            <TextView
                 android:id="@+id/settings_button"
                 style="@style/GlassChip"
                 android:layout_marginLeft="10dp"
@@ -103,6 +111,7 @@
             android:clipChildren="false">
 
             <LinearLayout
+                android:id="@+id/tab_bar"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_horizontal"

@@ -76,6 +76,7 @@ GLASS = {"theme": 4, "glass_scene": 0, "glass_style": 0, "focus_style": 3, "ui_s
 DEFAULT = {"theme": 0, "palette": 0, "ui_size": 0, "text_size": 1, "focus_style": 0}
 COMBOS = {
     "quick": [("glass-lift", GLASS)],
+    "ring": [("glass-ring", {**GLASS, "focus_style": 0})],
     "large": [("default-large", {**DEFAULT, "ui_size": 2, "text_size": 3}), ("glass-large", {**GLASS, "ui_size": 2, "text_size": 3})],
     "push": [("glass-lift", GLASS), ("default", DEFAULT)],
     "full": [("default", DEFAULT), ("cinema", {**DEFAULT, "theme": 1}),
@@ -331,7 +332,11 @@ def main():
     print(text)
     with open(os.path.join(WORK, "report.txt"), "w", encoding="utf-8") as f:
         f.write(text + "\n")
-    sys.exit(1 if results["crops"] or results["problems"] else 0)
+    size_failed = False
+    if level == "push":
+        print("Text cut off at the biggest sizes:")
+        size_failed = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "size_check.py")]).returncode != 0
+    sys.exit(1 if results["crops"] or results["problems"] or size_failed else 0)
 
 
 if __name__ == "__main__":

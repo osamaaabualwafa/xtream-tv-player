@@ -10,6 +10,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import coil.dispose
 import coil.load
 import org.json.JSONArray
 import org.json.JSONObject
@@ -655,7 +656,7 @@ fun confirmRemoveProgress(activity: Activity, prefs: Prefs, item: StreamItem, on
         .setMessage("${item.name}\nThe saved position is deleted too.")
         .setPositiveButton("Remove") { _, _ ->
             prefs.removeProgress(item.id)
-            android.widget.Toast.makeText(activity, "Removed from Continue watching", android.widget.Toast.LENGTH_SHORT).show()
+            showToast(activity, "Removed from Continue watching", android.widget.Toast.LENGTH_SHORT)
             onRemoved()
         }
         .setNegativeButton("Keep", null)
@@ -861,8 +862,22 @@ class ItemAdapter(
 
     private var recycler: RecyclerView? = null
 
+    /**
+     * A grid builds about 48 cards the first time it scrolls (a slow step: the first hold of a
+     * direction stuttered). Build them while the screen has nothing else to do.
+     */
+    private fun prepareSpareCards(rv: RecyclerView) {
+        var built = 0
+        android.os.Looper.myQueue().addIdleHandler {
+            if (!rv.isAttachedToWindow || rv.recycledViewPool.getRecycledViewCount(0) >= 24) return@addIdleHandler false
+            rv.recycledViewPool.putRecycledView(createViewHolder(rv, 0))
+            ++built < 24
+        }
+    }
+
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         recycler = recyclerView
+        if (grid) prepareSpareCards(recyclerView)
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
@@ -871,6 +886,17 @@ class ItemAdapter(
 
     /** Pictures already asked for (so scrolling back and forth doesn't ask again). */
     private val prefetched = HashSet<String>()
+
+    private fun loadPoster(holder: VH, url: String?) {
+        holder.image.load(url) {
+            // Short fade over a still placeholder: a moving shimmer on every card still loading,
+            // plus long fades, keep the whole grid redrawing while it scrolls.
+            crossfade(120)
+            placeholder(PLACEHOLDER_TINT)
+            error(R.drawable.placeholder)
+            fallback(R.drawable.placeholder)
+        }
+    }
 
     /** Start the picture two rows ahead now, at the size it will be shown. */
     private fun prefetchAhead(holder: VH, position: Int) {
@@ -888,7 +914,27 @@ class ItemAdapter(
         )
     }
 
+    /**
+     * A card still animating (the highlight growing or shrinking) as it scrolls away counts as busy,
+     * and Android would throw it away and build a new one, a slow step done many times a second while
+     * a direction is held. Stop the animation and reuse the card instead.
+     */
+    override fun onFailedToRecycleView(holder: VH): Boolean {
+        resetCard(holder.itemView)
+        return true
+    }
+
+    override fun onViewRecycled(holder: VH) = resetCard(holder.itemView)
+
+    private fun resetCard(v: View) {
+        v.animate().cancel()
+        v.scaleX = 1f
+        v.scaleY = 1f
+        v.translationY = 0f
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        if (BuildConfig.DEBUG) android.util.Log.v("ItemInflate", "new card")
         val view = LayoutInflater.from(parent.context)
             .inflate(layout ?: if (grid) R.layout.item_poster else R.layout.item_channel, parent, false)
         if (grid) {
@@ -936,14 +982,7 @@ class ItemAdapter(
             }
         }
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
-        holder.image.load(item.image) {
-            // Short fade over a still placeholder: a moving shimmer on every card still loading,
-            // plus long fades, keep the whole grid redrawing while it scrolls.
-            crossfade(120)
-            placeholder(PLACEHOLDER_TINT)
-            error(R.drawable.placeholder)
-            fallback(R.drawable.placeholder)
-        }
+        loadPoster(holder, item.image)
         prefetchAhead(holder, position)
         holder.itemView.setOnClickListener {
             val p = holder.bindingAdapterPosition
@@ -970,7 +1009,8 @@ class ItemAdapter(
 fun centerOnFocus(parent: RecyclerView, child: View, immediate: Boolean): Boolean {
     val dy = (child.top + child.height / 2) - (parent.height * 9 / 20)
     if (Math.abs(dy) < 4) return false
-    if (immediate) parent.scrollBy(0, dy) else parent.smoothScrollBy(0, dy)
+    // While a direction is held, straight to the next row: gliding animations would pile up.
+    if (immediate || RemoteHold.active) parent.scrollBy(0, dy) else parent.smoothScrollBy(0, dy)
     return true
 }
 
@@ -1008,6 +1048,32 @@ class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyc
 }
 
 /** Smooth list settings for TV lists and grids. */
+/**
+ * Rows half scrolled out of a list fade by how much of them is hidden, instead of showing a strip
+ * cut through their letters. (Android's own fading edge doesn't draw on lists that let rows draw
+ * past their edge, which these do for the highlight.)
+ */
+fun RecyclerView.softEdges() {
+    if (BuildConfig.DEBUG && !context.getSharedPreferences("xtream", android.content.Context.MODE_PRIVATE).getBoolean("dbg_soft_edges", true)) return
+    val horizontal = (layoutManager as? LinearLayoutManager)?.orientation == RecyclerView.HORIZONTAL
+    addItemDecoration(object : RecyclerView.ItemDecoration() {
+        override fun onDraw(c: android.graphics.Canvas, parent: RecyclerView, state: RecyclerView.State) {
+            for (i in 0 until parent.childCount) {
+                val child = parent.getChildAt(i)
+                val start = if (horizontal) child.left + child.translationX else child.top + child.translationY
+                val size = if (horizontal) child.width else child.height
+                val end = start + size
+                val limit = if (horizontal) parent.width else parent.height
+                if (size <= 0) continue
+                val shown = ((minOf(end, limit.toFloat()) - maxOf(start, 0f)) / size).coerceIn(0f, 1f)
+                // Fully shown rows stay as they are; a row half out is barely there.
+                val alpha = if (shown >= 0.999f) 1f else shown * shown
+                if (child.alpha != alpha && !child.isFocused) child.alpha = alpha
+            }
+        }
+    })
+}
+
 fun RecyclerView.tuneForTv() {
     setHasFixedSize(true)
     setItemViewCacheSize(24)

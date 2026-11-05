@@ -58,3 +58,10 @@ Login input: accept `host:port`, with/without scheme or trailing slash, and also
 4. Details: movie (poster, plot, rating, Play/Resume) and series (seasons → episodes).
 5. Player as above.
 All items must be focusable with a visible focus highlight (D-pad only, no touch).
+
+## Size rule (all themes)
+- Interface size and text size multiply; `Look.wrap` limits the two together (`MAX_COMBINED_SIZE`). Layouts must fit at that limit.
+- Anything holding text grows with it: use `minHeight`, not a fixed height, when a label can wrap to two lines.
+- Short labels (names, buttons, tabs) always show in full: give them room or let the row scroll. "…" (the theme default) is only for long content titles.
+- A row of choices fits on screen (use `FlowRow`: one row when it fits, a second only when needed): nothing is left half cut at the edge. A word never breaks in two.
+- Debug builds log `SizeClip` for cut text. `python scripts/uitest/size_check.py` walks the screens at the biggest sizes, and `run.py push` runs it too.

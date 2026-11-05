@@ -17,7 +17,7 @@ android {
         minSdk = 21
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "1.2.0"
+        versionName = "1.3.0"
         multiDexEnabled = true
         // Weekly QA (qa/README.md): UI tests on an Android TV emulator against a fake Xtream server.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -88,6 +88,7 @@ dependencies {
     implementation("androidx.tvprovider:tvprovider:1.0.0")
 
     // Weekly QA tests only (never inside the APK the TV installs).
+    testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")

@@ -56,7 +56,7 @@ class SearchActivity : AppCompatActivity() {
     private lateinit var bars: List<View>
 
     private val askMic = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening() else Toast.makeText(this, "Allow the microphone to search by voice", Toast.LENGTH_LONG).show()
+        if (granted) startListening() else showToast(this, "Allow the microphone to search by voice", Toast.LENGTH_LONG)
     }
 
     /** Fallback for TVs without an in-app recogniser: the voice service's own window. */
@@ -127,7 +127,7 @@ class SearchActivity : AppCompatActivity() {
                     android.speech.SpeechRecognizer.ERROR_CLIENT -> null // stopped by the user
                     else -> "Voice search isn't working right now."
                 }
-                message?.let { Toast.makeText(this@SearchActivity, it, Toast.LENGTH_SHORT).show() }
+                message?.let { showToast(this@SearchActivity, it, Toast.LENGTH_SHORT) }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -151,7 +151,7 @@ class SearchActivity : AppCompatActivity() {
             speechWindow.launch(intent)
         } catch (e: android.content.ActivityNotFoundException) {
             showListening(false)
-            Toast.makeText(this, "Voice search isn't available on this TV", Toast.LENGTH_SHORT).show()
+            showToast(this, "Voice search isn't available on this TV", Toast.LENGTH_SHORT)
         }
     }
 
@@ -241,6 +241,12 @@ class SearchActivity : AppCompatActivity() {
             .forEach { (id, type) -> findViewById<View>(id).setOnClickListener { showSection(type) } }
 
         query.doAfterTextChanged { scheduleSearch() }
+        // Debug builds: a word left in files/debug_search.txt is searched for once (the test tool
+        // that types on the emulator cannot type Arabic).
+        if (BuildConfig.DEBUG) java.io.File(filesDir, "debug_search.txt").takeIf { it.exists() }?.let { f ->
+            query.setText(f.readText().trim())
+            f.delete()
+        }
         query.setOnEditorActionListener { v, _, _ ->
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0)
             results.post { focusFirstResult() }
@@ -306,6 +312,7 @@ class SearchActivity : AppCompatActivity() {
             }
             val total = found.values.sumOf { it.size }
             status.text = if (total == 0) "No results for \"$text\"." else "$total results for \"$text\"."
+            Diag.log("search", "${text.length} letters · $total results${Diag.title(text)}")
             // The chosen section has no results this time: back to All.
             if (section != null && found[section].isNullOrEmpty()) section = null
             showResults()

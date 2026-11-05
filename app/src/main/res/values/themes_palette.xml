@@ -119,8 +119,8 @@
     <!-- Glass: text and quiet surfaces; the scene and glass style bring the rest (THEME.md 4 and 5). -->
     <style name="Palette.Glass">
         <item name="appText">#FFF0F6F6</item>
-        <item name="appTextSecondary">#FFA0AFAF</item>
-        <item name="appTileCount">#FFA0AFAF</item>
+        <item name="appTextSecondary">#FFCDD8D8</item>
+        <item name="appTileCount">#FFCDD8D8</item>
         <item name="appOnAccent">#FFDAE4DF</item>
         <item name="appGold">#FFE8C97A</item>
         <item name="appError">#FFF2A69B</item>
@@ -146,5 +146,7 @@
         <item name="appButtonStroke">#16FFFFFF</item>
         <item name="appDialogFill">#C409121D</item>
         <item name="appDialogStroke">#1CC9DDEE</item>
+    <item name="appRowDivider">#12FFFFFF</item>
+        <item name="appProgressTrack">#26FFFFFF</item>
     </style>
 </resources>

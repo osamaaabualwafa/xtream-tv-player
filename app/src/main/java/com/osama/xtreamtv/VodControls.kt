@@ -162,6 +162,13 @@ class VodControls(private val root: View, private val host: Host) {
     }
 
     /** Full controls with focus on Pause (or keep the current focus if already open). */
+    val playFocused: Boolean get() = play.isFocused
+
+    /** The same as pressing Play/Pause on screen. */
+    fun pressPlay() {
+        play.performClick()
+    }
+
     fun show() {
         val wasShown = mode == Mode.FULL
         setMode(Mode.FULL)

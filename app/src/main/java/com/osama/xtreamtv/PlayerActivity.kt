@@ -92,11 +92,23 @@ class PlayerActivity : AppCompatActivity() {
         private const val EXTRA_ASK_RESUME = "ask_resume"
         private const val EXTRA_CATCHUP = "catchup"
         private val SUBTITLE_SIZES = listOf("Small" to 0.8f, "Medium" to 1.0f, "Large" to 1.3f, "Extra large" to 1.6f)
-        private val PICTURE_SIZES = listOf(
+        // On a 16:9 video and a 16:9 TV the first three look the same, which is why the setting seemed
+        // broken; the last two change the picture on every video.
+        val PICTURE_SIZES = listOf(
             "Fit" to AspectRatioFrameLayout.RESIZE_MODE_FIT,
-            "Zoom (fill screen)" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+            "Fill (crop)" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
             "Stretch" to AspectRatioFrameLayout.RESIZE_MODE_FILL,
+            "4:3" to AspectRatioFrameLayout.RESIZE_MODE_FILL,
+            "Zoom 125%" to AspectRatioFrameLayout.RESIZE_MODE_FILL,
         )
+        private const val SEEK_HOLD_MS = 800L
+        private const val SEEK_REPEAT_MS = 250L
+        private const val SEEK_DOUBLE_MS = 80L
+        private const val PICTURE_4_3 = 3
+        private const val PICTURE_ZOOM = 4
+
+        /** Resume Watching only changes after this much real playback (not from opening an item). */
+        private const val WATCHED_MS = 30_000L
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         const val SUBTITLES_OFF = "off"
         /** The player on screen (full or mini); a new video closes the old one first. */
@@ -185,7 +197,7 @@ class PlayerActivity : AppCompatActivity() {
     private var speed = 1f
     private val sleepNow = Runnable {
         player?.playWhenReady = false
-        Toast.makeText(this, "Sleep timer: playback stopped", Toast.LENGTH_LONG).show()
+        showToast(this, "Sleep timer: playback stopped", Toast.LENGTH_LONG)
         finish()
     }
 
@@ -322,13 +334,17 @@ class PlayerActivity : AppCompatActivity() {
         playFlash = findViewById(R.id.play_flash)
         seekForward = findViewById(R.id.seek_forward)
         seekBack = findViewById(R.id.seek_back)
+        styleSeekBubbles()
         seekForwardText = findViewById(R.id.seek_forward_text)
         seekBackText = findViewById(R.id.seek_back_text)
         seekForwardTime = findViewById(R.id.seek_forward_time)
         seekBackTime = findViewById(R.id.seek_back_time)
         numberEntry = findViewById(R.id.number_entry)
         applySubtitleStyle()
-        playerView.resizeMode = PICTURE_SIZES[prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)].second
+        applyPictureSize()
+        playerView.addOnLayoutChangeListener { v, l, t, r, b, oldL, oldT, oldR, oldB ->
+            if (r - l != oldR - oldL || b - t != oldB - oldT) v.post { applyPictureSize() }
+        }
 
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         if (isLive) {
@@ -356,7 +372,7 @@ class PlayerActivity : AppCompatActivity() {
                     finish()
                     return
                 }
-                Toast.makeText(this, "${ExternalPlayer.PLAYERS.getOrNull(prefs.vodPlayer)?.first ?: "That player"} isn't installed. Playing here.", Toast.LENGTH_LONG).show()
+                showToast(this, "${ExternalPlayer.PLAYERS.getOrNull(prefs.vodPlayer)?.first ?: "That player"} isn't installed. Playing here.", Toast.LENGTH_LONG)
             }
             // Our own controls (VodControls) replace the standard ones.
             playerView.useController = false
@@ -458,6 +474,8 @@ class PlayerActivity : AppCompatActivity() {
             .setLoadControl(PlaybackTuning.loadControl(prefs.bufferSize))
             .build()
         p.addListener(playerListener)
+        p.addListener(diagPlayer)
+        p.addAnalyticsListener(diagVideo)
         applyTrackPreferences(p)
         player = p
         mediaSession = try {
@@ -478,6 +496,7 @@ class PlayerActivity : AppCompatActivity() {
         // Settings > Player > "Start from the beginning" (an explicit Resume button still resumes).
         if (askResume && !resumeAsked && startPosition > 5_000 && prefs.resumeMode == 2) startPosition = 0
         p.setMediaItem(mediaItem(vodUrl, vodMimeType))
+        diagPlayStart = SystemClock.elapsedRealtime()
         if (startPosition > 0) p.seekTo(startPosition)
         p.prepare()
         p.setPlaybackSpeed(speed)
@@ -568,8 +587,10 @@ class PlayerActivity : AppCompatActivity() {
     private fun switchFrameRate(fps: Float) {
         if (frameRateFor == currentUrl) return
         frameRateFor = currentUrl
-        if (PlaybackTuning.matchFrameRate(this, fps)) {
-            Toast.makeText(this, "Matching ${"%.3f".format(java.util.Locale.US, fps).trimEnd('0').trimEnd('.')} fps", Toast.LENGTH_SHORT).show()
+        val matched = PlaybackTuning.matchFrameRate(this, fps)
+        Diag.log("framerate", "${"%.3f".format(java.util.Locale.US, fps)} fps video: the TV ${if (matched) "switched to it" else "did not switch"}")
+        if (matched) {
+            showToast(this, "Matching ${"%.3f".format(java.util.Locale.US, fps).trimEnd('0').trimEnd('.')} fps", Toast.LENGTH_SHORT)
         }
     }
 
@@ -602,12 +623,27 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun releasePlayer() {
         val p = player ?: return
+        if (diagDropped > 0) Diag.log("video", "dropped $diagDropped frames while playing")
+        diagDropped = 0
         // A jump still waiting: save the place it was going to.
         if (seekTarget >= 0) p.seekTo(seekTarget)
         cancelPendingSeek()
         fpsProbe?.let { (p as? ExoPlayer)?.clearVideoFrameMetadataListener(it) }
         fpsProbe = null
-        if (!isLive) saveVodPosition(p)
+        if (!isLive) {
+            saveVodPosition(p)
+            val watched = playedSoFar()
+            Diag.log(
+                "resume",
+                if (watched >= WATCHED_MS) "Resume Watching set at ${formatDuration(p.currentPosition)}"
+                else "Resume Watching unchanged: watched only ${watched / 1000} s",
+            )
+        }
+        // This player is going away, and it won't report that it stopped.
+        if (playingSince > 0) {
+            playedMs += android.os.SystemClock.elapsedRealtime() - playingSince
+            playingSince = 0
+        }
         p.removeListener(playerListener)
         mediaSession?.release()
         mediaSession = null
@@ -615,6 +651,12 @@ class PlayerActivity : AppCompatActivity() {
         player = null
         playerView.player = null
     }
+
+    private var playedMs = 0L
+    private var playingSince = 0L
+    private var okPressedAt = 0L
+
+    private fun playedSoFar() = playedMs + if (playingSince > 0) android.os.SystemClock.elapsedRealtime() - playingSince else 0
 
     private fun saveVodPosition(p: Player) {
         if (isCatchup) return
@@ -627,17 +669,33 @@ class PlayerActivity : AppCompatActivity() {
             prefs.setWatched(resumeKey, true)
             startPosition = 0
         } else if (pos > 5_000) {
-            prefs.savePosition(resumeKey, pos)
             startPosition = pos
-            watchEntry?.let { e ->
-                val dur = if (duration != C.TIME_UNSET && duration > 0) duration else 0L
-                prefs.saveProgress(e.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
+            // Opening an item and leaving soon after must not replace what was really being watched.
+            if (playedSoFar() >= WATCHED_MS) {
+                prefs.savePosition(resumeKey, pos)
+                watchEntry?.let { e ->
+                    val dur = if (duration != C.TIME_UNSET && duration > 0) duration else 0L
+                    prefs.saveProgress(e.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
+                }
             }
         }
     }
 
     private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) = scheduleScreensaver()
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (isPlaying) {
+                playingSince = now
+            } else if (playingSince > 0) {
+                playedMs += now - playingSince
+                playingSince = 0
+            }
+            if (BuildConfig.DEBUG && okPressedAt > 0) {
+                android.util.Log.d("PlayerOk", "ok-to-state ${now - okPressedAt} ms playing=$isPlaying")
+                okPressedAt = 0
+            }
+            scheduleScreensaver()
+        }
 
         override fun onPlaybackStateChanged(state: Int) {
             progress.visibility = if (state == Player.STATE_BUFFERING && !isInPictureInPictureModeCompat()) View.VISIBLE else View.GONE
@@ -668,6 +726,7 @@ class PlayerActivity : AppCompatActivity() {
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
             if (isLive) showLiveQuality()
             applyFrameRate()
+            applyPictureSize()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -693,6 +752,7 @@ class PlayerActivity : AppCompatActivity() {
             // the previous stream) is retried up to 5 times from the same spot before giving up.
             if (!isLive && vodRetries < VOD_RETRIES && error.errorCode.let { it in 2000..2999 || it == PlaybackException.ERROR_CODE_TIMEOUT }) {
                 vodRetries++
+                Diag.log("retry", "connection lost (${error.errorCodeName}), reconnecting $vodRetries of $VOD_RETRIES")
                 val position = p.currentPosition
                 errorView.text = "Connection lost. Reconnecting…  ($vodRetries of $VOD_RETRIES)"
                 errorView.visibility = View.VISIBLE
@@ -771,7 +831,7 @@ class PlayerActivity : AppCompatActivity() {
         progress.visibility = View.GONE
         val what = if (isLive) "This channel can't be played right now." else "This video can't be played."
         val hint = if (isLive) "\n\nPress Up/Down to change channel." else ""
-        errorView.text = "$what\n$reason$hint"
+        errorView.text = "$what\n$reason$hint" + if (Diag.enabled) "\n\nPress OK to mark this for Claude." else ""
         errorView.visibility = View.VISIBLE
         if (!isLive) controls.hide()
     }
@@ -820,6 +880,7 @@ class PlayerActivity : AppCompatActivity() {
         playerView.removeCallbacks(startZap)
         playerView.removeCallbacks(retryLive)
         if (!retry) liveRetries = 0
+        diagPlayStart = SystemClock.elapsedRealtime()
         val list = Session.zapList
         if (list.isEmpty()) return finish()
         channelIndex = ((index % list.size) + list.size) % list.size
@@ -1000,6 +1061,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        Diag.log("mini", if (isInPictureInPictureMode) "went to the mini player" else "left the mini player")
         if (isInPictureInPictureMode) {
             wasMini = true
             // Only the picture in the corner.
@@ -1107,8 +1169,28 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun isInPictureInPictureModeCompat() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
 
+    private fun isOkKey(keyCode: Int) =
+        keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Screensaver up: any key just takes it away (and the minute starts again).
+        // An error on screen: OK marks it for the diagnostics report, with the error attached.
+        if (Diag.enabled && ::errorView.isInitialized && errorView.visibility == View.VISIBLE && isOkKey(event.keyCode)) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                DiagUi.mark("the error screen", this, "error: ${errorView.text.toString().substringBefore("\n\nPress OK").replace('\n', ' ')}")
+            }
+            return true
+        }
+        // Screensaver up: OK takes it away and plays, in one press.
+        if (screensaver?.visibility == View.VISIBLE && isOkKey(event.keyCode)) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                swallowOkRelease = true
+                hideScreensaver()
+                player?.playWhenReady = true
+                showPlayPauseFlash(true)
+            }
+            return true
+        }
+        // Any other key just takes it away (and the minute starts again).
         if (screensaver?.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_UP) {
                 hideScreensaver()
@@ -1136,7 +1218,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             if (!::playerView.isInitialized || event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
             // The OK that answered a prompt must not also "click" play/pause when it is released.
-            if (swallowOkRelease && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
+            if (swallowOkRelease && isOkKey(event.keyCode)) {
                 if (event.action == KeyEvent.ACTION_UP) swallowOkRelease = false
                 return true
             }
@@ -1172,7 +1254,7 @@ class PlayerActivity : AppCompatActivity() {
                 else -> 0L
             }
             if (mediaSeek != 0L) {
-                if (event.action == KeyEvent.ACTION_DOWN) {
+                if (event.action == KeyEvent.ACTION_DOWN && acceptSeekKey(event)) {
                     if (controlsShown()) {
                         seekVod(mediaSeek)
                         controls.poke()
@@ -1213,6 +1295,15 @@ class PlayerActivity : AppCompatActivity() {
                     if (event.action == KeyEvent.ACTION_DOWN) controls.show()
                     return true
                 }
+                // OK on Play/Pause acts when pressed, not when released, and holding it doesn't repeat.
+                if (isOkKey(event.keyCode) && controls.playFocused) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                        okPressedAt = android.os.SystemClock.elapsedRealtime()
+                        swallowOkRelease = true
+                        controls.pressPlay()
+                    }
+                    return true
+                }
                 if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                     if (event.action == KeyEvent.ACTION_DOWN && controls.moveFocus(event.keyCode)) return true
                     if (event.action == KeyEvent.ACTION_UP) return true
@@ -1226,11 +1317,10 @@ class PlayerActivity : AppCompatActivity() {
                 else -> 0L
             }
             if (seekDelta != 0L) {
-                if (event.action == KeyEvent.ACTION_DOWN) quickSeek(seekDelta)
+                if (event.action == KeyEvent.ACTION_DOWN && acceptSeekKey(event)) quickSeek(seekDelta)
                 return true
             }
-            val isOk = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER ||
-                event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+            val isOk = isOkKey(event.keyCode)
             // OK answers the "Next episode" prompt.
             if (cardAction != CardAction.NONE && isOk) {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -1239,11 +1329,16 @@ class PlayerActivity : AppCompatActivity() {
                 }
                 return true
             }
-            // OK / Up / Down open the controls with focus on Pause (the OK release must not press it).
+            // Every OK plays or pauses, and shows the controls with focus on Play/Pause (the release must
+            // not press it again). Up and Down only show them.
             if (isOk || event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    if (isOk) swallowOkRelease = true
                     controls.show()
+                    if (isOk) {
+                        okPressedAt = android.os.SystemClock.elapsedRealtime()
+                        swallowOkRelease = true
+                        controls.pressPlay()
+                    }
                 }
                 return true
             }
@@ -1353,6 +1448,9 @@ class PlayerActivity : AppCompatActivity() {
     private fun seekPosition(): Long = if (seekTarget >= 0) seekTarget else player?.currentPosition ?: 0
 
     private fun requestSeek(target: Long) {
+        // For the report: where a run of presses started, where it asked to go, and when.
+        diagSeek = longArrayOf(diagSeek?.get(0) ?: (player?.currentPosition ?: 0), target, SystemClock.elapsedRealtime())
+        diagSeekCount++
         val now = SystemClock.uptimeMillis()
         val burst = seekTarget >= 0 || now - lastSeekAt < 500
         lastSeekAt = now
@@ -1520,13 +1618,15 @@ class PlayerActivity : AppCompatActivity() {
         val watched = !prefs.isWatched(key)
         prefs.setWatched(key, watched)
         if (watched && index != episodeIndex) prefs.removeProgress(key)
-        Toast.makeText(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT).show()
+        showToast(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT)
         episodeAdapter.items.indexOfFirst { it.id == ep.id }.takeIf { it >= 0 }?.let { episodeAdapter.notifyItemChanged(it, "watched") }
     }
 
     private fun playEpisodeAt(index: Int) {
         val ep = episodes.getOrNull(index) ?: return
         player?.let { saveVodPosition(it) }
+        playedMs = 0
+        if (playingSince > 0) playingSince = android.os.SystemClock.elapsedRealtime()
         vodRetries = 0
         playerView.removeCallbacks(retryVod)
         episodeIndex = index
@@ -1650,6 +1750,14 @@ class PlayerActivity : AppCompatActivity() {
         p.trackSelectionParameters = builder.build()
     }
 
+    /**
+     * The player adds a closed-caption track to every TS video in case captions are inside. With no name
+     * or language, it is almost always empty: listing it made streams with no subtitles look broken.
+     */
+    private fun isEmptyCaptions(format: androidx.media3.common.Format) =
+        (format.sampleMimeType == MimeTypes.APPLICATION_CEA608 || format.sampleMimeType == MimeTypes.APPLICATION_CEA708) &&
+            format.language == null && format.label == null
+
     private fun showTrackPicker() {
         val p = player ?: return
         val names = DefaultTrackNameProvider(resources)
@@ -1657,11 +1765,20 @@ class PlayerActivity : AppCompatActivity() {
         val actions = ArrayList<() -> Unit>()
         val groups = p.currentTracks.groups
 
+        var unnamedAudio = 0
+        val audioNames = ArrayList<String>()
+        val unknownName = getString(androidx.media3.ui.R.string.exo_track_unknown)
         for (group in groups.filter { it.type == C.TRACK_TYPE_AUDIO }) {
             for (i in 0 until group.length) {
                 if (!group.isTrackSupported(i)) continue
                 val format = group.getTrackFormat(i)
-                labels += (if (group.isTrackSelected(i)) "●  " else "○  ") + "Audio:  " + names.getTrackName(format)
+                var audioName = format.label ?: names.getTrackName(format)
+                if (audioName == unknownName) audioName = "Track ${++unnamedAudio}"
+                // Tracks with the same name ("Stereo") must still be told apart.
+                val sameName = audioNames.count { it == audioName }
+                audioNames += audioName
+                if (sameName > 0) audioName = "$audioName ${sameName + 1}"
+                labels += (if (group.isTrackSelected(i)) "●  " else "○  ") + "Audio:  " + audioName
                 actions += {
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                         .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
@@ -1671,24 +1788,35 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        val textGroups = groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        if (labels.isEmpty()) {
+            labels += "Audio:  Not available"
+            actions += {}
+        }
+
+        val textGroups = groups.filter { g -> g.type == C.TRACK_TYPE_TEXT && (0 until g.length).any { g.isTrackSupported(it) && !isEmptyCaptions(g.getTrackFormat(it)) } }
+        if (textGroups.isEmpty()) {
+            labels += "Subtitles:  Not available"
+            actions += {}
+        }
         val subtitlesOff = C.TRACK_TYPE_TEXT in p.trackSelectionParameters.disabledTrackTypes || textGroups.none { it.isSelected }
-        labels += (if (subtitlesOff) "●  " else "○  ") + "Subtitles:  Off"
-        actions += {
-            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                .build()
-            prefs.subtitleLanguage = SUBTITLES_OFF
+        if (textGroups.isNotEmpty()) {
+            labels += (if (subtitlesOff) "●  " else "○  ") + "Subtitles:  Off"
+            actions += {
+                p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
+                prefs.subtitleLanguage = SUBTITLES_OFF
+            }
         }
         var untagged = 0
         for (group in textGroups) {
             for (i in 0 until group.length) {
-                if (!group.isTrackSupported(i)) continue
+                if (!group.isTrackSupported(i) || isEmptyCaptions(group.getTrackFormat(i))) continue
                 val format = group.getTrackFormat(i)
                 val selected = !subtitlesOff && group.isTrackSelected(i)
                 // Untagged tracks would read "Unknown": number them instead.
-                var name = names.getTrackName(format)
-                if (name == getString(androidx.media3.ui.R.string.exo_track_unknown)) name = "Track ${++untagged}"
+                var name = format.label ?: names.getTrackName(format)
+                if (name == unknownName) name = "Track ${++untagged}"
                 labels += (if (selected) "●  " else "○  ") + "Subtitles:  " + name
                 actions += {
                     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
@@ -1700,10 +1828,6 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        if (labels.size <= 1) {
-            Toast.makeText(this, "This video has no other audio or subtitles", Toast.LENGTH_SHORT).show()
-            return
-        }
         AlertDialog.Builder(this)
             .setTitle("Audio & subtitles")
             .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
@@ -1734,11 +1858,172 @@ class PlayerActivity : AppCompatActivity() {
         seekTotal = 0
     }
 
+    private var lastSeekKey = 0
+    private var lastSeekKeyAt = 0L
+
+    /**
+     * One press is one seek. A remote sends repeats as soon as a press lasts a little long, and each one
+     * counted as a whole seek: that was the "jumps more than the setting". Repeats now count only when the
+     * key is really being held, at a steady pace; a press some remotes deliver twice counts once.
+     */
+    /**
+     * The seek bubble's colours follow the look: Default a navy bubble edged with its colour, Cinema a deep
+     * red one, and Glass a dark bubble tinted from the chosen background (Midnight is the reference).
+     */
+    private fun styleSeekBubbles() {
+        fun mix(a: Int, b: Int, t: Float) = android.graphics.Color.rgb(
+            (android.graphics.Color.red(a) * (1 - t) + android.graphics.Color.red(b) * t).toInt(),
+            (android.graphics.Color.green(a) * (1 - t) + android.graphics.Color.green(b) * t).toInt(),
+            (android.graphics.Color.blue(a) * (1 - t) + android.graphics.Color.blue(b) * t).toInt(),
+        )
+        fun alpha(c: Int, a: Int) = (c and 0x00FFFFFF) or (a shl 24)
+        val black = android.graphics.Color.BLACK
+        val white = android.graphics.Color.WHITE
+        // Fill, border (0 = none), main text, time text.
+        val colors: IntArray = when (prefs.themeIndex) {
+            Appearance.THEME_CINEMA -> intArrayOf(0xE61C0608.toInt(), 0x99E50914.toInt(), white, 0xFFF0C8CC.toInt())
+            Appearance.THEME_GLASS -> {
+                val scene = prefs.glassScene.coerceIn(0, Appearance.SCENE_SWATCHES.size - 1)
+                val swatch = Appearance.SCENE_SWATCHES[scene]
+                when (Appearance.SCENE_NAMES[scene]) {
+                    "Midnight" -> intArrayOf(0xE6101418.toInt(), 0x59FFFFFF, white, 0xFFC9CED6.toInt())
+                    // The light background gets a light bubble with dark text.
+                    "Daylight" -> intArrayOf(0xEBF7F7F3.toInt(), alpha(swatch[2], 0xCC), 0xFF1B232B.toInt(), 0xFF4A5560.toInt())
+                    else -> intArrayOf(alpha(mix(swatch[1], black, 0.35f), 0xE6), alpha(swatch[0], 0x8C), white, mix(swatch[0], white, 0.55f))
+                }
+            }
+            // Default: its navy, edged with the chosen colour.
+            else -> intArrayOf(0xE60F1B2E.toInt(), alpha(themeColor(R.attr.appAccent), 0x99), white, 0xFFB9C6D8.toInt())
+        }
+        for (bubble in listOf(seekForward, seekBack)) {
+            (bubble.background.mutate() as? android.graphics.drawable.GradientDrawable)?.apply {
+                setColor(colors[0])
+                setStroke(if (colors[1] == 0) 0 else (resources.displayMetrics.density).toInt().coerceAtLeast(1), colors[1])
+            }
+            val group = bubble as android.view.ViewGroup
+            for (i in 0 until group.childCount) (group.getChildAt(i) as? TextView)?.setTextColor(if (i == group.childCount - 1) colors[3] else colors[2])
+        }
+    }
+
+    // ---- Diagnostics (Settings > About): what playback really did, for the report ----
+
+    private var diagPlayStart = 0L
+    private var diagBufferAt = 0L
+    private var diagSeek: LongArray? = null
+    private var diagSeekCount = 0
+    private var diagDropped = 0
+    private var diagTracks = ""
+    private var diagPicture = -1
+
+    private fun diagSecs(ms: Long) = "%.1f".format(java.util.Locale.US, ms / 1000.0)
+
+    private val diagPlayer = object : Player.Listener {
+        override fun onRenderedFirstFrame() {
+            if (diagPlayStart == 0L) return
+            val kind = if (isLive) "live" else if (episodes.isNotEmpty()) "episode" else "movie"
+            Diag.log(
+                "play",
+                "$kind · file type ${currentUrl.substringAfterLast('.', "?").take(5)} · started after " +
+                    "${diagSecs(SystemClock.elapsedRealtime() - diagPlayStart)} s · decoder ${prefs.decoderMode}, buffer ${prefs.bufferSize}, " +
+                    "frame-rate matching ${if (prefs.matchFrameRate) "on" else "off"}${Diag.title(if (isLive) currentChannel?.name else vodTitle)}",
+            )
+            diagPlayStart = 0
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            val p = player ?: return
+            val now = SystemClock.elapsedRealtime()
+            if (state == Player.STATE_BUFFERING && diagSeek == null && diagPlayStart == 0L) diagBufferAt = now
+            if (state != Player.STATE_READY) return
+            if (diagBufferAt > 0) {
+                if (now - diagBufferAt >= 500) Diag.log("buffering", "${diagSecs(now - diagBufferAt)} s at ${formatDuration(p.currentPosition)}")
+                diagBufferAt = 0
+            }
+            val seek = diagSeek ?: return
+            diagSeek = null
+            val landed = p.currentPosition
+            val readyAt = now
+            val count = diagSeekCount
+            // Three seconds on, playback should be about three seconds further: more means it jumped.
+            playerView.postDelayed({
+                val q = player ?: return@postDelayed
+                if (count != diagSeekCount) return@postDelayed
+                val expected = landed + if (q.isPlaying) SystemClock.elapsedRealtime() - readyAt else 0
+                val off = q.currentPosition - expected
+                val jumped = when {
+                    off > 2000 -> " · then jumped forward ${off / 1000} s ←"
+                    off < -2000 && q.isPlaying -> " · then jumped back ${-off / 1000} s ←"
+                    else -> ""
+                }
+                val distance = kotlin.math.abs(seek[1] - seek[0]) / 1000
+                Diag.log(
+                    "seek",
+                    "${if (seek[1] >= seek[0]) "forward" else "back"} $distance s · asked ${formatDuration(seek[1])} · " +
+                        "landed ${formatDuration(landed)} · loading ${diagSecs(readyAt - seek[2])} s$jumped",
+                )
+            }, 3000)
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val cause = error.cause
+            Diag.log("error", "${error.errorCodeName} · ${cause?.javaClass?.simpleName ?: ""} ${cause?.message ?: error.message ?: ""}")
+        }
+
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val summary = trackSummary()
+            if (summary != diagTracks) {
+                diagTracks = summary
+                Diag.log("tracks", summary)
+            }
+        }
+    }
+
+    private val diagVideo = object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+        override fun onVideoInputFormatChanged(
+            eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+            format: androidx.media3.common.Format,
+            decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?,
+        ) {
+            val fps = if (format.frameRate > 0) " · ${"%.3f".format(java.util.Locale.US, format.frameRate)} fps" else ""
+            Diag.log("video", "${format.width}x${format.height} · ${format.sampleMimeType?.substringAfter('/') ?: "?"}$fps")
+        }
+
+        override fun onVideoDecoderInitialized(
+            eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            val software = decoderName.startsWith("c2.android") || decoderName.startsWith("OMX.google")
+            Diag.log("decoder", "$decoderName (${if (software) "the app's own decoder" else "the TV's video chip"})")
+        }
+
+        override fun onDroppedVideoFrames(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            diagDropped += droppedFrames
+        }
+    }
+
+    private fun acceptSeekKey(event: KeyEvent): Boolean {
+        val now = event.eventTime
+        val sameKey = event.keyCode == lastSeekKey
+        val accept = if (event.repeatCount == 0) {
+            !sameKey || now - lastSeekKeyAt >= SEEK_DOUBLE_MS
+        } else {
+            now - event.downTime >= SEEK_HOLD_MS && now - lastSeekKeyAt >= SEEK_REPEAT_MS
+        }
+        if (accept) {
+            lastSeekKey = event.keyCode
+            lastSeekKeyAt = now
+        }
+        return accept
+    }
+
     private fun quickSeek(deltaMs: Long) {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        val target = (seekPosition() + deltaMs).coerceIn(0, max)
+        val before = seekPosition()
+        val target = (before + deltaMs).coerceIn(0, max)
         requestSeek(target)
         (if (deltaMs > 0) seekForwardTime else seekBackTime).text =
             if (duration != C.TIME_UNSET && duration > 0) "${formatDuration(target)} / ${formatDuration(duration)}" else formatDuration(target)
@@ -1746,18 +2031,18 @@ class PlayerActivity : AppCompatActivity() {
         val shown = if (forward) seekForward else seekBack
         val other = if (forward) seekBack else seekForward
         // Presses in the same direction add up ("30 seconds"); changing direction starts again.
-        seekTotal = if (shown.visibility == View.VISIBLE && (seekTotal > 0) == forward) seekTotal + deltaMs else deltaMs
+        // What really moved: near the start or end of a video that is less than one step.
+        val moved = target - before
+        seekTotal = if (shown.visibility == View.VISIBLE && (seekTotal > 0) == forward) seekTotal + moved else moved
         (if (forward) seekForwardText else seekBackText).text = "${kotlin.math.abs(seekTotal) / 1000} seconds"
         other.animate().cancel()
         other.visibility = View.GONE
+        // At once, with no fade in: the seek itself can keep the screen busy for a moment.
         shown.animate().cancel()
-        if (shown.visibility != View.VISIBLE) {
-            shown.alpha = 0f
-            shown.visibility = View.VISIBLE
-        }
-        shown.animate().alpha(1f).setDuration(120).start()
+        shown.alpha = 1f
+        shown.visibility = View.VISIBLE
         seekForward.removeCallbacks(hideSeekRipple)
-        seekForward.postDelayed(hideSeekRipple, 1_000)
+        seekForward.postDelayed(hideSeekRipple, 1_500)
     }
 
     /**
@@ -2035,7 +2320,8 @@ class PlayerActivity : AppCompatActivity() {
             isActivated = selected
             this.tag = tag
             setPadding(dp(6), dp(4), dp(6), dp(4))
-            layoutParams = android.widget.LinearLayout.LayoutParams(0, dp(52), weight).apply { rightMargin = dp(6) }
+            minimumHeight = dp(52) // Grows with its text; the others in the row match it.
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.MATCH_PARENT, weight).apply { rightMargin = dp(6) }
             if (icon != null) addView(android.widget.ImageView(context).apply {
                 setImageResource(icon)
                 imageTintList = iconTint
@@ -2097,7 +2383,7 @@ class PlayerActivity : AppCompatActivity() {
             addView(header)
             addView(android.widget.LinearLayout(context).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
-                tiles.forEach { addView(it) }
+                isBaselineAligned = false; tiles.forEach { addView(it) }
             })
         }
         fun row(vararg cards: View) = android.widget.LinearLayout(this).apply {
@@ -2108,7 +2394,7 @@ class PlayerActivity : AppCompatActivity() {
         val pictureCard = card("Picture size", pictureLabel(), R.drawable.ic_glass_picture, PICTURE_SIZES.mapIndexed { i, size ->
             tile(size.first, R.drawable.ic_glass_picture, "picture$i", i == pictureIndex) {
                 prefs.pictureSize = i
-                playerView.resizeMode = size.second
+                applyPictureSize()
                 refresh("picture$i")
             }
         })
@@ -2119,7 +2405,7 @@ class PlayerActivity : AppCompatActivity() {
             setSleepTimer(0)
             sleepAtEnd = true
             sleepChoice = 0
-            Toast.makeText(this, "Playback will stop at the end", Toast.LENGTH_SHORT).show()
+            showToast(this, "Playback will stop at the end", Toast.LENGTH_SHORT)
         }
         val sleepCard = card("Sleep timer", sleepLabel(), R.drawable.ic_glass_moon, sleepOptions.mapIndexed { i, (label, selected, action) ->
             tile(label, R.drawable.ic_glass_moon, "sleep$i", selected) {
@@ -2188,7 +2474,12 @@ class PlayerActivity : AppCompatActivity() {
             }
             return null
         }
-        return "Audio: ${selected(androidx.media3.common.C.TRACK_TYPE_AUDIO) ?: "Default"}  ·  Subtitles: ${selected(androidx.media3.common.C.TRACK_TYPE_TEXT) ?: "Off"}"
+        fun present(type: Int) = player?.currentTracks?.groups.orEmpty().any { g ->
+            g.type == type && (0 until g.length).any { !isEmptyCaptions(g.getTrackFormat(it)) }
+        }
+        val audio = selected(androidx.media3.common.C.TRACK_TYPE_AUDIO) ?: if (present(androidx.media3.common.C.TRACK_TYPE_AUDIO)) "Default" else "Not available"
+        val text = selected(androidx.media3.common.C.TRACK_TYPE_TEXT) ?: if (present(androidx.media3.common.C.TRACK_TYPE_TEXT)) "Off" else "Not available"
+        return "Audio: $audio  ·  Subtitles: $text"
     }
 
     private fun firstFocusableIn(v: View): View? {
@@ -2212,7 +2503,8 @@ class PlayerActivity : AppCompatActivity() {
                 "Picture size:  ${pictureLabel()}" to { pickPictureSize() },
                 "Sleep timer:  ${sleepLabel()}" to { pickSleepTimer() },
                 "Stream info" to { showStreamInfo() },
-            ),
+                if (Diag.enabled) "Mark a problem" to { DiagUi.mark("the player menu", this) } else null,
+            ).filterNotNull(),
         )
     }
 
@@ -2222,9 +2514,11 @@ class PlayerActivity : AppCompatActivity() {
         items += "TV guide" to { openGuide() }
         lastChannel?.let { items += "Last channel:  ${it.second.name}" to { switchToLastChannel() } }
         items += "Jump to live" to { playChannel(channelIndex) }
+        items += "Audio and subtitles" to { showTrackPicker() }
         items += "Picture size:  ${pictureLabel()}" to { pickPictureSize() }
         items += "Sleep timer:  ${sleepLabel()}" to { pickSleepTimer() }
         items += "Stream info" to { showStreamInfo() }
+        if (Diag.enabled) items += "Mark a problem" to { DiagUi.mark("the player menu", this) }
         showMenu(currentChannel?.name ?: "Options", items)
     }
 
@@ -2269,7 +2563,44 @@ class PlayerActivity : AppCompatActivity() {
     private fun pickPictureSize() {
         showChoices("Picture size", PICTURE_SIZES.map { it.first }, prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)) { which ->
             prefs.pictureSize = which
-            playerView.resizeMode = PICTURE_SIZES[which].second
+            applyPictureSize()
+        }
+    }
+
+    /** The one place the picture size is applied: at the start, when picked, and when the video or window changes. */
+    private fun applyPictureSize() {
+        val index = if (isInPictureInPictureModeCompat()) 0 else prefs.pictureSize.coerceIn(0, PICTURE_SIZES.size - 1)
+        if (index != diagPicture) {
+            diagPicture = index
+            Diag.log("picture", "size ${PICTURE_SIZES[index].first}")
+        }
+        playerView.resizeMode = PICTURE_SIZES[index].second
+        val frame = playerView.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame) ?: return
+        val width = playerView.width
+        val height = playerView.height
+        val video = player?.videoSize
+        val ratio = if (video != null && video.width > 0 && video.height > 0) video.width * video.pixelWidthHeightRatio / video.height else 16f / 9f
+        var w = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        var h = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        if (width > 0 && height > 0) when (index) {
+            PICTURE_4_3 -> {
+                h = height
+                w = minOf(width, height * 4 / 3)
+                h = w * 3 / 4
+            }
+            PICTURE_ZOOM -> {
+                // The Fit picture, 25% bigger; what goes past the screen edges is cut.
+                val fits = width.toFloat() / height > ratio
+                w = ((if (fits) height * ratio else width.toFloat()) * 1.25f).toInt()
+                h = ((if (fits) height.toFloat() else width / ratio) * 1.25f).toInt()
+            }
+        }
+        val lp = frame.layoutParams as android.widget.FrameLayout.LayoutParams
+        if (lp.width != w || lp.height != h || lp.gravity != android.view.Gravity.CENTER) {
+            lp.width = w
+            lp.height = h
+            lp.gravity = android.view.Gravity.CENTER
+            frame.layoutParams = lp
         }
     }
 
@@ -2287,7 +2618,7 @@ class PlayerActivity : AppCompatActivity() {
             options += (if (episodes.isNotEmpty()) "End of this episode" else "End of this video") to {
                 setSleepTimer(0)
                 sleepAtEnd = true
-                Toast.makeText(this, "Playback will stop at the end", Toast.LENGTH_SHORT).show()
+                showToast(this, "Playback will stop at the end", Toast.LENGTH_SHORT)
             }
         }
         showMenu("Sleep timer", options)
@@ -2300,9 +2631,9 @@ class PlayerActivity : AppCompatActivity() {
         if (minutes > 0) {
             sleepAt = SystemClock.uptimeMillis() + minutes * 60_000L
             playerView.postDelayed(sleepNow, minutes * 60_000L)
-            Toast.makeText(this, "Playback will stop in $minutes minutes", Toast.LENGTH_SHORT).show()
+            showToast(this, "Playback will stop in $minutes minutes", Toast.LENGTH_SHORT)
         } else {
-            Toast.makeText(this, "Sleep timer off", Toast.LENGTH_SHORT).show()
+            showToast(this, "Sleep timer off", Toast.LENGTH_SHORT)
         }
     }
 
@@ -2398,14 +2729,14 @@ class PlayerActivity : AppCompatActivity() {
                 Session.zapTitle = "All channels"
                 playChannel(index)
             } else {
-                Toast.makeText(this@PlayerActivity, "There's no channel $typed", Toast.LENGTH_SHORT).show()
+                showToast(this@PlayerActivity, "There's no channel $typed", Toast.LENGTH_SHORT)
             }
         }
     }
 
     private fun switchToLastChannel() {
         val (list, channel, title) = lastChannel ?: run {
-            Toast.makeText(this, "No previous channel yet", Toast.LENGTH_SHORT).show()
+            showToast(this, "No previous channel yet", Toast.LENGTH_SHORT)
             return
         }
         val index = list.indexOfFirst { it.id == channel.id }

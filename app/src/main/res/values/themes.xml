@@ -1,5 +1,11 @@
 <resources>
+    <!-- The size rule's safety net, for all themes: text that doesn't fit ends in "…", it never just loses letters. -->
+    <style name="AppText" parent="Widget.AppCompat.TextView">
+        <item name="android:ellipsize">end</item>
+    </style>
+
     <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:textViewStyle">@style/AppText</item>
         <item name="colorPrimary">?attr/appSurface</item>
         <item name="colorPrimaryDark">?attr/appBg</item>
         <item name="appAccent">#FF3D8BFD</item>
@@ -108,6 +114,9 @@
         <item name="appFocusGlowWidth">0dp</item>
         <item name="appCornerTabbar">32dp</item>
         <item name="appFocusScale">1.0</item>
+        <item name="appRowDivider">#00000000</item>
+        <item name="appProgressTrack">#99000000</item>
+        <item name="appCornerMeta">16dp</item>
         <item name="appRowFocusFill">?attr/appSurfaceFocus</item>
         <item name="appSideIcon">#FFFFFFFF</item>
         <item name="appVcFocusText">#FFFFFFFF</item>
@@ -115,6 +124,7 @@
 
     <!-- Dialog buttons get the same strong focus highlight as the rest of the app (D-pad only). -->
     <style name="TvDialog" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:textViewStyle">@style/AppText</item>
         <item name="colorAccent">?attr/appAccent</item>
         <item name="android:windowBackground">@drawable/bg_glass_dialog</item>
         <item name="android:textColorPrimary">?attr/appText</item>
@@ -244,8 +254,8 @@
         <item name="android:clickable">true</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:orientation">horizontal</item>
-        <item name="android:paddingLeft">26dp</item>
-        <item name="android:paddingRight">26dp</item>
+        <item name="android:paddingLeft">18dp</item>
+        <item name="android:paddingRight">18dp</item>
     </style>
 
     <style name="SettingsMenuItem">

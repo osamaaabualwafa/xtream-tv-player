@@ -29,7 +29,8 @@ class LayoutThumbView @JvmOverloads constructor(
         val a = context.obtainStyledAttributes(intArrayOf(R.attr.appAccent))
         color = a.getColor(0, 0xFF3D8BFD.toInt())
         a.recycle()
-        alpha = 190
+        // Glass: quiet pictures, like the rest of its surfaces.
+        alpha = if (Prefs(context).themeIndex == Appearance.THEME_GLASS) 90 else 190
     }
     private val rect = RectF()
 

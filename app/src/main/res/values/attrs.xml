@@ -104,4 +104,7 @@
     <attr name="appVcFocusText" format="color" />
     <attr name="appSideIcon" format="color" />
     <attr name="appRowFocusFill" format="color" />
+    <attr name="appRowDivider" format="color" />
+    <attr name="appProgressTrack" format="color" />
+    <attr name="appCornerMeta" format="dimension" />
 </resources>

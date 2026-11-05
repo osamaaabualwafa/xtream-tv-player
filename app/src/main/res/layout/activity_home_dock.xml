@@ -331,6 +331,48 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/tile_more"
+                android:layout_width="240dp"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="136dp"
+                    android:layout_height="136dp"
+                    android:background="@drawable/bg_dock_tile"
+                    android:duplicateParentState="true">
+
+                    <ImageView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="center"
+                        android:duplicateParentState="true"
+                        android:importantForAccessibility="no"
+                        android:tint="@color/on_focus_icon"
+                        android:src="@drawable/ic_glass_list" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="More"
+                    android:textColor="?attr/appText"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="Look and colours"
+                    android:textColor="?attr/appTextSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
         </LinearLayout>
     </LinearLayout>
 

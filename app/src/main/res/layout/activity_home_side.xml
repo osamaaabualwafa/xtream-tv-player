@@ -168,6 +168,20 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/more_button"
+                style="@style/SideMenuItem">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:singleLine="true"
+                    android:text="☰   More"
+                    android:textColor="?attr/appText"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/settings_button"
                 style="@style/SideMenuItem">
 

@@ -57,7 +57,7 @@
         <activity
             android:name=".LoginActivity"
             android:screenOrientation="landscape"
-            android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
+            android:windowSoftInputMode="adjustNothing|stateAlwaysHidden" />
         <activity android:name=".HomeActivity" android:screenOrientation="landscape" />
         <activity
             android:name=".BrowseActivity"

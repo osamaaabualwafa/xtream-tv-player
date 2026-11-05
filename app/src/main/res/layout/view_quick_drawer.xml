@@ -88,7 +88,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:duplicateParentState="true"
-                    android:text="Check for updates"
+                    android:text="Updates"
                     android:textColor="@color/on_focus_text"
                     android:textSize="12sp" />
             </LinearLayout>
@@ -126,6 +126,7 @@
 
             <LinearLayout
                 android:id="@+id/drawer_guide"
+                android:visibility="gone"
                 android:layout_width="0dp"
                 android:layout_height="88dp"
                 android:layout_marginLeft="4dp"
@@ -151,6 +152,68 @@
                     android:layout_marginTop="6dp"
                     android:duplicateParentState="true"
                     android:text="TV guide"
+                    android:textColor="@color/on_focus_text"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/drawer_share"
+                android:layout_width="0dp"
+                android:layout_height="88dp"
+                android:layout_marginLeft="4dp"
+                android:layout_marginRight="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_glass_choice"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:duplicateParentState="true"
+                    android:importantForAccessibility="no"
+                    android:tint="@color/on_focus_icon"
+                    android:src="@drawable/ic_glass_share" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:duplicateParentState="true"
+                    android:text="Share report"
+                    android:textColor="@color/on_focus_text"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/drawer_mark"
+                android:layout_width="0dp"
+                android:layout_height="88dp"
+                android:layout_marginLeft="4dp"
+                android:layout_marginRight="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_glass_choice"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:duplicateParentState="true"
+                    android:importantForAccessibility="no"
+                    android:tint="@color/on_focus_icon"
+                    android:src="@drawable/ic_glass_flag" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:duplicateParentState="true"
+                    android:text="Mark a problem"
                     android:textColor="@color/on_focus_text"
                     android:textSize="12sp" />
             </LinearLayout>

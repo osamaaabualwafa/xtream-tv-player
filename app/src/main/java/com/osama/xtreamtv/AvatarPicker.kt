@@ -29,6 +29,7 @@ object AvatarPicker {
         val root = LayoutInflater.from(activity).inflate(R.layout.dialog_avatar, null)
         dialog.setContentView(root)
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        FocusFx.auditPopup(dialog.window)
 
         val density = activity.resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
@@ -88,6 +89,15 @@ object AvatarPicker {
         for (g in groupIds) {
             val chip = LayoutInflater.from(activity).inflate(R.layout.item_glass_pill, groups, false) as TextView
             chip.text = if (g == LETTER_GROUP) "Letter" else Appearance.AVATAR_GROUPS[g].first
+            // Six tabs share the row, so all of them always fit.
+            chip.minWidth = 0
+            chip.minimumWidth = 0
+            chip.maxLines = 1
+            chip.textSize = 15f
+            chip.setPadding(dp(12), 0, dp(12), 0)
+            chip.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, chip.layoutParams.height, 1f).apply {
+                if (g != groupIds.last()) rightMargin = dp(8)
+            }
             chip.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) showGroup(g) }
             chip.setOnClickListener { showGroup(g); emojiRow.getChildAt(0)?.requestFocus() }
             groups.addView(chip)
@@ -113,6 +123,26 @@ object AvatarPicker {
             dialog.dismiss()
             onSaved()
         }
+
+        // Four rows: Up and Down land on the last-used group, then the selected emoji and colour.
+        val focusMap = FocusMap { root.findFocus() }
+        val rows = listOf(
+            focusMap.section { listOf<View>(groups) },
+            focusMap.section { listOf<View>(emojiRow) },
+            focusMap.section { listOf<View>(colors) },
+            focusMap.section { listOf(root.findViewById<View>(R.id.avatar_cancel), root.findViewById<View>(R.id.avatar_save)) },
+        )
+        focusMap.stack(rows)
+        FocusMap.choices(emojiRow)
+        FocusMap.choices(colors)
+        val emojiSection = rows[1]
+        val colorSection = rows[2]
+        rows[0].exits[View.FOCUS_DOWN] = { FocusMap.activated(emojiRow) ?: emojiSection.entry() }
+        emojiSection.exits[View.FOCUS_DOWN] = { FocusMap.activated(colors) ?: colorSection.entry() }
+        rows[3].exits[View.FOCUS_UP] = { FocusMap.activated(colors) ?: colorSection.entry() }
+        colorSection.exits[View.FOCUS_UP] = { FocusMap.activated(emojiRow) ?: emojiSection.entry() }
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, new -> focusMap.note(new) }
+        dialog.setOnKeyListener { _, _, event -> focusMap.handle(event) }
 
         // Start on the group that holds the current avatar.
         val startGroup = emoji?.let { e -> Appearance.AVATAR_GROUPS.indexOfFirst { e in it.second } }?.takeIf { it >= 0 } ?: LETTER_GROUP

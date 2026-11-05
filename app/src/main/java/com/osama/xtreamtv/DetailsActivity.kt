@@ -162,7 +162,7 @@ class DetailsActivity : AppCompatActivity() {
                     false
                 }
             }
-            if (!started) Toast.makeText(this, "Install YouTube to watch trailers", Toast.LENGTH_LONG).show()
+            if (!started) showToast(this, "Install YouTube to watch trailers", Toast.LENGTH_LONG)
         }
     }
 
@@ -232,7 +232,8 @@ class DetailsActivity : AppCompatActivity() {
         for (v in values.filter { it.isNotBlank() }) {
             meta.addView(TextView(this).apply {
                 text = v
-                setTextColor(themeColor(R.attr.appText))
+                // Glass: the rating stands out in the live colour.
+                setTextColor(themeColor(if (v.startsWith("★") && Prefs(context).themeIndex == Appearance.THEME_GLASS) R.attr.appLive else R.attr.appText))
                 textSize = 14f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -346,7 +347,7 @@ class DetailsActivity : AppCompatActivity() {
                 val watched = !prefs.isWatched(key)
                 prefs.setWatched(key, watched)
                 if (watched) prefs.removeProgress(key)
-                Toast.makeText(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT).show()
+                showToast(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT)
                 episodeAdapter.notifyItemChanged(index, "watched")
             },
         )

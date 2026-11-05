@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -34,34 +35,24 @@ class SettingsActivity : AppCompatActivity() {
     /** Left-hand menu: entry id and the section it opens. */
     private var menu: List<Pair<Int, Section>> = emptyList()
 
-    /**
-     * Left from the options: back to the menu entry of the section that is open (Android would
-     * pick whichever entry happens to sit beside the row, e.g. About from a low Player option).
-     * Left inside a row of the options (colour dots, layout cards) still moves along the row.
-     */
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-        if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
-            val focused = currentFocus
-            if (focused != null && isInside(focused, body)) {
-                val next = focused.focusSearch(View.FOCUS_LEFT)
-                if (next == null || !isInside(next, body)) {
-                    if (event.action == android.view.KeyEvent.ACTION_DOWN) {
-                        menu.firstOrNull { it.second == section }?.let { findViewById<View>(it.first).requestFocus() }
-                    }
-                    return true
-                }
-            }
-        }
-        return super.dispatchKeyEvent(event)
-    }
+    private val focusMap = FocusMap { currentFocus }
 
-    private fun isInside(v: View, parent: View): Boolean {
-        var p: View? = v
-        while (p != null) {
-            if (p === parent) return true
-            p = p.parent as? View
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        focusMap.handle(event) || super.dispatchKeyEvent(event)
+
+    /**
+     * Two sections. Right from the menu: the open section's first option. Left from the options: back
+     * to that section's menu entry. Up and Down stop at the ends of each.
+     */
+    private fun setupFocusMap() {
+        val entries = menu.map { findViewById<View>(it.first) }
+        val menuSection = focusMap.section { entries }
+        val options = focusMap.section { listOf(body) }
+        menuSection.exits[View.FOCUS_RIGHT] = {
+            focusFirstOption()
+            null
         }
-        return false
+        options.exits[View.FOCUS_LEFT] = { menu.firstOrNull { it.second == section }?.let { findViewById<View>(it.first) } }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -72,7 +63,7 @@ class SettingsActivity : AppCompatActivity() {
         Appearance.apply(this)
         setContentView(R.layout.activity_settings)
         body = findViewById(R.id.section_body)
-        if (glass) findViewById<View>(R.id.settings_eyebrow).visibility = View.VISIBLE
+        if (glass) glassFrame()
 
         menu = listOf(
             R.id.menu_home to Section.HOME,
@@ -87,13 +78,8 @@ class SettingsActivity : AppCompatActivity() {
             val item = findViewById<View>(id)
             item.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) show(s) }
             item.setOnClickListener { show(s); focusFirstOption() }
-            // Right from the menu: the section's first option, not whichever row is beside it.
-            item.setOnKeyListener { _, keyCode, event ->
-                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_RIGHT) return@setOnKeyListener false
-                if (event.action == android.view.KeyEvent.ACTION_DOWN) focusFirstOption()
-                true
-            }
         }
+        setupFocusMap()
         // After changing the colour the screen is rebuilt: come back to the same section.
         val start = savedInstanceState?.getString("section")?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
         show(start)
@@ -104,6 +90,28 @@ class SettingsActivity : AppCompatActivity() {
             picked?.requestFocus() ?: chosenDot?.takeIf { section == Section.COLOR }?.requestFocus() ?: focusFirstOption()
         }
         else findViewById<View>(menu.first { it.second == start }.first).requestFocus()
+    }
+
+    /** Glass: slimmer menu column, smaller titles, more room for the options. */
+    private fun glassFrame() {
+        val eyebrow = findViewById<View>(R.id.settings_eyebrow)
+        eyebrow.visibility = View.VISIBLE
+        val column = eyebrow.parent as View
+        column.layoutParams = column.layoutParams.apply { width = dp(232) }
+        val scroll = body.parent.parent as View
+        scroll.layoutParams = (scroll.layoutParams as android.view.ViewGroup.MarginLayoutParams).apply { leftMargin = dp(16) }
+        findViewById<TextView>(R.id.section_title).textSize = 21f
+        findViewById<TextView>(R.id.section_hint).apply {
+            textSize = 13f
+            layoutParams = (layoutParams as android.view.ViewGroup.MarginLayoutParams).apply { bottomMargin = dp(12) }
+        }
+        for ((id, _) in menu) findViewById<TextView>(id).apply {
+            textSize = 15f
+            layoutParams = (layoutParams as android.view.ViewGroup.MarginLayoutParams).apply {
+                height = dp(44)
+                bottomMargin = dp(2)
+            }
+        }
     }
 
     /** First option of the shown section, scrolled into view at the top. */
@@ -145,6 +153,7 @@ class SettingsActivity : AppCompatActivity() {
                 title.text = "Home layout"
                 hint.text = "How the first screen after choosing a playlist looks"
                 choiceCards("H", Appearance.HOME_NAMES, prefs.homeStyle) { prefs.homeStyle = it }
+                if (glass) plainCard()
                 option("Menu button on Home", listOf(0 to "Opens the quick drawer", 1 to "Does nothing"), { prefs.homeMenuButton }, { prefs.homeMenuButton = it })
             }
             Section.BROWSE -> {
@@ -180,7 +189,7 @@ class SettingsActivity : AppCompatActivity() {
                         { prefs.defaultPlaylistId },
                         { prefs.defaultPlaylistId = it },
                     )
-                    heading("Avatars")
+                    heading("Avatars", R.drawable.ic_glass_user)
                 }
                 avatars()
             }
@@ -195,8 +204,159 @@ class SettingsActivity : AppCompatActivity() {
                 val check = pill("Check for updates")
                 check.setOnClickListener { Updates.checkNow(this, lifecycleScope) }
                 body.addView(check)
+                diagnostics()
             }
         }
+    }
+
+    /**
+     * About: the diagnostics report (see Diag), shared over the home Wi-Fi. Glass: two cards side by
+     * side, its settings on the left and the report with its actions on the right.
+     */
+    private fun diagnostics() {
+        var right: LinearLayout? = null
+        if (glass) {
+            val columns = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) }
+            }
+            fun column(rightMargin: Int) = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { this.rightMargin = rightMargin }
+            }
+            val left = column(dp(12))
+            right = column(0)
+            columns.addView(left)
+            columns.addView(right)
+            body.addView(columns)
+            cardHost = left
+        }
+        heading("Diagnostics", R.drawable.ic_glass_pulse)
+        (target ?: body).addView(TextView(this).apply {
+            setTextColor(themeColor(R.attr.appTextSecondary))
+            textSize = 13f
+            setPadding(dp(10), 0, dp(10), dp(8))
+            text = "Keeps a report of how the app behaves. No addresses, logins or passwords."
+        })
+        option("Diagnostics", listOf(true to "On", false to "Off"), { Diag.enabled }, { Diag.enabled = it })
+        option("Include titles", listOf(true to "On", false to "Off"), { Diag.includeTitles }, { Diag.includeTitles = it })
+        option("Keep report for", Diag.KEEP_DAYS.map { it to "$it days" }, { Diag.keepDays }, { Diag.keepDays = it; recreate() })
+
+        if (right != null) cardHost = right
+        heading("Report", R.drawable.ic_glass_file)
+        val host = target ?: body
+        val stats = Diag.stats()
+        val fullPercent = stats.kb * 1024 * 100 / (10L * 1024 * 1024)
+        host.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            // One inset for everything in this card: the same as the rows in the card beside it.
+            setPadding(dp(10), dp(2), dp(10), dp(10))
+            for ((label, value) in listOf(
+                "Entries" to stats.entries.toString(),
+                "Size" to "${stats.kb} KB",
+                "Days left" to (stats.daysLeft?.toString() ?: "–"),
+            )) {
+                val lastBox = label == "Days left"
+                // Size turns yellow from 80% full and red from 95%.
+                val warn = if (label == "Size" && fullPercent >= 95) DiagUi.RED else if (label == "Size" && fullPercent >= 80) DiagUi.YELLOW
+                    else if (label == "Days left" && (stats.daysLeft ?: 99) <= 3 && stats.entries > 0) DiagUi.RED else null
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    if (warn != null) {
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            cornerRadius = dp(14).toFloat()
+                            setColor((warn and 0x00FFFFFF) or 0x22000000)
+                            setStroke(dp(1), (warn and 0x00FFFFFF) or 0x66000000)
+                        }
+                    } else {
+                        setBackgroundResource(R.drawable.bg_value_chip)
+                    }
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { if (!lastBox) rightMargin = dp(8) }
+                    addView(TextView(context).apply {
+                        text = label
+                        textSize = 12f
+                        setTextColor(themeColor(R.attr.appTextSecondary))
+                    })
+                    addView(TextView(context).apply {
+                        text = value
+                        textSize = 17f
+                        setTextColor(warn ?: themeColor(R.attr.appText))
+                    })
+                })
+            }
+        })
+        // Warnings: a crash to send, almost full, entries about to go, marked problems waiting.
+        for (w in Diag.warnings()) {
+            host.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(14).toFloat()
+                    setColor((w.color and 0x00FFFFFF) or 0x22000000)
+                    setStroke(dp(1), (w.color and 0x00FFFFFF) or 0x66000000)
+                }
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(10)
+                    rightMargin = dp(10)
+                    bottomMargin = dp(10)
+                }
+                addView(TextView(context).apply {
+                    text = w.text
+                    textSize = 13f
+                    setTextColor(w.color)
+                })
+            })
+        }
+        fun action(label: String, icon: Int, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
+            b.setOnClickListener { onClick() }
+            b.background = DiagUi.buttonBackground(this, 999)
+            b.minHeight = dp(46)
+            // Icon then words, from the left, like the rows in the card beside it.
+            b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            b.setPadding(dp(16), 0, dp(16), 0)
+            val drawable = androidx.core.content.ContextCompat.getDrawable(this, icon)!!.mutate()
+            drawable.setBounds(0, 0, dp(20), dp(20))
+            if (danger) androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, 0xFFF2A7A7.toInt())
+            b.setCompoundDrawablesRelative(drawable, null, null, null)
+            b.compoundDrawablePadding = dp(12)
+            b.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+                bottomMargin = dp(10)
+            }
+            if (danger) b.setTextColor(0xFFF2A7A7.toInt())
+            host.addView(b)
+        }
+        action("Share report", R.drawable.ic_glass_share) { DiagUi.shareFlow(this) }
+        action("Mark a problem now", R.drawable.ic_glass_flag) {
+            DiagUi.mark("Settings", this)
+        }
+        action("Clear report", R.drawable.ic_glass_trash, danger = true) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Clear the report?")
+                .setMessage("Everything recorded so far is deleted. Recording goes on if Diagnostics is on.")
+                .setPositiveButton("Clear") { _, _ -> Diag.clear(); recreate() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        host.addView(TextView(this).apply {
+            text = "Last shared: ${stats.lastShare ?: "not yet"}"
+            textSize = 13f
+            setTextColor(themeColor(R.attr.appTextSecondary))
+            setPadding(dp(12), 0, dp(10), dp(8))
+        })
+        // Both cards end at the same height.
+        right?.let { r ->
+            val left = (r.parent as android.view.ViewGroup).getChildAt(0) as android.view.ViewGroup
+            for (column in listOf(left, r)) {
+                column.layoutParams = (column.layoutParams as LinearLayout.LayoutParams).apply { height = LinearLayout.LayoutParams.MATCH_PARENT }
+                column.getChildAt(0)?.let { card -> card.layoutParams = card.layoutParams.apply { height = LinearLayout.LayoutParams.MATCH_PARENT } }
+            }
+        }
+        cardHost = null
+        target = null
     }
 
     private fun pill(text: String): TextView =
@@ -207,11 +367,12 @@ class SettingsActivity : AppCompatActivity() {
         val cards = ArrayList<View>()
         var row: LinearLayout? = null
         names.forEachIndexed { index, name ->
-            if (index % 2 == 0) {
+            if (index % 2 == 0 && (!glass || index == 0)) {
                 row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
+                    FocusMap.choices(this)
                     layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                        .apply { bottomMargin = dp(18) }
+                        .apply { bottomMargin = if (glass) dp(12) else dp(18) }
                 }
                 body.addView(row)
             }
@@ -222,7 +383,7 @@ class SettingsActivity : AppCompatActivity() {
                 isFocusable = true
                 isClickable = true
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    if (index % 2 == 0) rightMargin = dp(18)
+                    if (glass) { if (index < names.lastIndex) rightMargin = dp(8) } else if (index % 2 == 0) rightMargin = dp(18)
                 }
                 onFocusChangeListener = scaleOnFocus
             }
@@ -233,7 +394,7 @@ class SettingsActivity : AppCompatActivity() {
             val label = TextView(this).apply {
                 setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
                 isDuplicateParentStateEnabled = true
-                textSize = 17f
+                textSize = if (glass) 14f else 17f
                 gravity = Gravity.CENTER
                 setPadding(0, dp(8), 0, 0)
             }
@@ -242,7 +403,8 @@ class SettingsActivity : AppCompatActivity() {
             fun mark(chosen: Int) {
                 cards.forEachIndexed { i, c ->
                     c.isActivated = i == chosen
-                    (c.tag as TextView).text = (if (i == chosen) "✓  " else "") + "$prefix${i + 1} · ${names[i]}"
+                    // Glass marks the chosen card with its fill.
+                    (c.tag as TextView).text = if (glass) names[i] else (if (i == chosen) "✓  " else "") + "$prefix${i + 1} · ${names[i]}"
                 }
             }
             card.setOnClickListener {
@@ -251,7 +413,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             cards.add(card)
             row!!.addView(card)
-            if (index == names.lastIndex && index % 2 == 0) row!!.addView(View(this).apply {
+            if (!glass && index == names.lastIndex && index % 2 == 0) row!!.addView(View(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
             })
             if (index == names.lastIndex) mark(current)
@@ -262,7 +424,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun playerOptions() {
         val languages = listOf(null to "Automatic", "ar" to "Arabic", "en" to "English", "fr" to "French", "tr" to "Turkish")
         val subtitleLanguages = listOf(PlayerActivity.SUBTITLES_OFF to "Off", "ar" to "Arabic", "en" to "English", "fr" to "French", "tr" to "Turkish")
-        heading("Playback")
+        heading("Playback", R.drawable.ic_glass_play)
         option("Forward jump", listOf(5, 10, 15, 30, 60).map { it to "$it seconds" }, { prefs.seekForwardSeconds }, { prefs.seekForwardSeconds = it })
         option("Back jump", listOf(5, 10, 15, 30).map { it to "$it seconds" }, { prefs.seekBackSeconds }, { prefs.seekBackSeconds = it })
         option("Saved position", listOf(0 to "Ask each time", 1 to "Always resume", 2 to "Start from the beginning"), { prefs.resumeMode }, { prefs.resumeMode = it })
@@ -275,24 +437,23 @@ class SettingsActivity : AppCompatActivity() {
         )
         option("Episodes list", listOf(0 to "Side panel", 1 to "Bottom shelf"), { prefs.episodesStyle }, { prefs.episodesStyle = it })
         if (glass) {
-            labelRow("Player menu")
-            buttonRow(listOf("Small pop-up", "Side panel", "Cards"), prefs.playerMenuStyle, "player_menu", rebuild = false) { prefs.playerMenuStyle = it }
+            inlineButtons("Player menu", listOf("Small pop-up", "Side panel", "Cards"), prefs.playerMenuStyle, "player_menu") { prefs.playerMenuStyle = it }
         } else {
             option("Player menu", listOf(0 to "Small pop-up", 1 to "Side panel", 2 to "Cards"), { prefs.playerMenuStyle }, { prefs.playerMenuStyle = it })
         }
         option("Home button during a video", listOf(true to "Keep playing in a corner", false to "Stop the video"), { prefs.miniPlayer }, { prefs.miniPlayer = it })
         option("Screensaver when paused", listOf(true to "On", false to "Off"), { prefs.pauseScreensaver }, { prefs.pauseScreensaver = it })
         option("Hide controls after", listOf(3, 5, 8, 15).map { it to "$it seconds" }, { prefs.controlsHideSeconds }, { prefs.controlsHideSeconds = it })
-        heading("Picture and sound")
+        heading("Picture and sound", R.drawable.ic_glass_picture)
         option("Match frame rate", listOf(false to "Off", true to "On (TV switches to the video's rate)"), { prefs.matchFrameRate }, { prefs.matchFrameRate = it })
         option("Decoder", PlaybackTuning.DECODER_NAMES.mapIndexed { i, n -> i to n }, { prefs.decoderMode }, { prefs.decoderMode = it })
         option("Buffer size", PlaybackTuning.BUFFER_NAMES.mapIndexed { i, n -> i to n }, { prefs.bufferSize }, { prefs.bufferSize = it })
-        option("Picture size", listOf(0 to "Fit", 1 to "Zoom (fill screen)", 2 to "Stretch"), { prefs.pictureSize }, { prefs.pictureSize = it })
+        option("Picture size", PlayerActivity.PICTURE_SIZES.mapIndexed { i, size -> i to size.first }, { prefs.pictureSize }, { prefs.pictureSize = it })
         option("Audio language", languages, { prefs.audioLanguage }, { prefs.audioLanguage = it })
         option("Subtitles", subtitleLanguages, { prefs.subtitleLanguage ?: PlayerActivity.SUBTITLES_OFF }, { prefs.subtitleLanguage = it })
         option("Subtitle size", listOf(0 to "Small", 1 to "Medium", 2 to "Large", 3 to "Extra large"), { prefs.subtitleSize }, { prefs.subtitleSize = it })
         option("Subtitle background", listOf(false to "Off", true to "Dark box"), { prefs.subtitleBackground }, { prefs.subtitleBackground = it })
-        heading("Live TV")
+        heading("Live TV", R.drawable.ic_glass_tv)
         option("Channel preview in the list", listOf(true to "On", false to "Off"), { prefs.channelPreview }, { prefs.channelPreview = it })
         option("Stream type", listOf(0 to "Automatic", 1 to "HLS (m3u8)", 2 to "MPEG-TS"), { prefs.streamType }, { prefs.streamType = it })
     }
@@ -430,12 +591,12 @@ class SettingsActivity : AppCompatActivity() {
         val columns = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        fun column(rightMargin: Int) = LinearLayout(this).apply {
+        fun column(weight: Float, rightMargin: Int) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { this.rightMargin = rightMargin }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight).apply { this.rightMargin = rightMargin }
         }
-        val left = column(dp(14))
-        val right = column(0)
+        val left = column(1f, dp(12))
+        val right = column(1.3f, 0)
         columns.addView(left)
         columns.addView(right)
         body.addView(columns)
@@ -451,7 +612,7 @@ class SettingsActivity : AppCompatActivity() {
         option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
 
         cardHost = right
-        heading("Selected item", R.drawable.ic_glass_spark)
+        heading("Selected item", R.drawable.ic_glass_focus)
         labelRow("How the item under the remote looks")
         buttonRow(Appearance.FOCUS_NAMES, prefs.focusStyle, "focus_style") { prefs.focusStyle = it }
         heading("Effects", R.drawable.ic_glass_spark)
@@ -467,15 +628,16 @@ class SettingsActivity : AppCompatActivity() {
     private fun labelRow(text: String) {
         (target ?: body).addView(TextView(this).apply {
             this.text = text
-            setTextColor(themeColor(R.attr.appTextSecondary))
+            setTextColor(themeColor(R.attr.appText))
             textSize = 14f
-            setPadding(dp(4), dp(10), 0, dp(6))
+            setPadding(dp(10), dp(10), 0, dp(6))
         })
     }
 
     /** One choice per button; the current one uses Selected. [rebuild]: the choice changes the look. */
     private fun buttonRow(names: List<String>, current: Int, tagPrefix: String, rebuild: Boolean = true, pick: (Int) -> Unit) {
         val row = LinearLayout(this).apply {
+            FocusMap.choices(this)
             orientation = LinearLayout.HORIZONTAL
             // One-line and two-line labels stay lined up.
             isBaselineAligned = false
@@ -485,15 +647,18 @@ class SettingsActivity : AppCompatActivity() {
                 text = name
                 tag = "$tagPrefix$i"
                 gravity = Gravity.CENTER
-                textSize = 12f
-                setPadding(dp(4), 0, dp(4), 0)
+                textSize = 13f
+                setPadding(dp(4), dp(3), dp(4), dp(3))
                 setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
                 setBackgroundResource(R.drawable.bg_glass_choice)
                 isFocusable = true
                 isClickable = true
                 isActivated = i == current
                 maxLines = 2
-                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (i < names.lastIndex) rightMargin = dp(6) }
+                // Grows with its text; the others in the row match it.
+                minHeight = dp(38)
+                // Sized from its name, so a longer name gets more of the row and no word breaks in two.
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { if (i < names.lastIndex) rightMargin = dp(6) }
                 setOnClickListener {
                     pick(i)
                     if (rebuild) {
@@ -505,18 +670,70 @@ class SettingsActivity : AppCompatActivity() {
                 }
             })
         }
-        (target ?: body).addView(row)
+        val host = target ?: body
+        host.addView(row)
+        if (host is LinearLayout && host.orientation == LinearLayout.VERTICAL && host !== body) {
+            row.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+                bottomMargin = dp(8)
+            }
+        }
     }
 
-    /** Background scenes as swatch tiles (5 + 4), picked directly. */
-    private fun sceneSwatches() {
+    /** Name on the left, its choices as buttons on the right, on one line. */
+    private fun inlineButtons(name: String, names: List<String>, current: Int, tagPrefix: String, pick: (Int) -> Unit) {
         val host = target ?: body
+        addDivider(host)
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            addView(TextView(context).apply {
+                text = name
+                textSize = 14f
+                setTextColor(themeColor(R.attr.appText))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+        }
+        host.addView(line)
+        target = line
+        buttonRow(names, current, tagPrefix, rebuild = false, pick = pick)
+        target = host as? LinearLayout
+        line.getChildAt(1).layoutParams = LinearLayout.LayoutParams(dp(104) * names.size, LinearLayout.LayoutParams.WRAP_CONTENT)
+    }
+
+    /** Faint line between rows of a card. */
+    private fun addDivider(host: android.view.ViewGroup) {
+        if (host === body || host.childCount == 0) return
+        if (host.getChildAt(host.childCount - 1).tag == "divider") return
+        host.addView(View(this).apply {
+            tag = "divider"
+            setBackgroundColor(themeColor(R.attr.appRowDivider))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+            }
+        })
+    }
+
+    /** Background scenes as swatch tiles (3 a row, wide enough for their names), picked directly. */
+    private fun sceneSwatches() {
+        val host = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            FocusMap.choices(this)
+        }
+        (target ?: body).addView(host)
         var row: LinearLayout? = null
         Appearance.SCENE_NAMES.forEachIndexed { i, name ->
-            if (i % 5 == 0) {
+            if (i % 3 == 0) {
                 row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        leftMargin = dp(10)
+                        rightMargin = dp(10)
+                        bottomMargin = dp(6)
+                    }
                 }
                 host.addView(row)
             }
@@ -534,7 +751,7 @@ class SettingsActivity : AppCompatActivity() {
                 outlineProvider = object : android.view.ViewOutlineProvider() {
                     override fun getOutline(v: View, outline: android.graphics.Outline) = outline.setRoundRect(0, 0, v.width, v.height, dp(8).toFloat())
                 }
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(26))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(32))
             }
             val tile = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -544,7 +761,7 @@ class SettingsActivity : AppCompatActivity() {
                 isFocusable = true
                 isClickable = true
                 isActivated = i == prefs.glassScene
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 5 != 4) rightMargin = dp(6) }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 3 != 2) rightMargin = dp(6) }
                 addView(swatch)
                 addView(TextView(context).apply {
                     text = name
@@ -566,8 +783,8 @@ class SettingsActivity : AppCompatActivity() {
             row!!.addView(tile)
         }
         // Keep the last row's tiles the same size as the first row's.
-        if (Appearance.SCENE_NAMES.size % 5 != 0) row!!.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 0, (5 - Appearance.SCENE_NAMES.size % 5).toFloat())
+        if (Appearance.SCENE_NAMES.size % 3 != 0) row!!.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 0, (3 - Appearance.SCENE_NAMES.size % 3).toFloat())
         })
     }
 
@@ -575,19 +792,27 @@ class SettingsActivity : AppCompatActivity() {
         isDuplicateParentStateEnabled = true
     }
 
-    /** Glass: a heading starts a new card, with an accent icon. */
-    private fun startCard(text: String, icon: Int) {
+    /** Glass: an empty card that the next rows go into. */
+    private fun plainCard(): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             FocusBox.open(this)
             setBackgroundResource(R.drawable.bg_settings_card)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(12) }
         }
+        (cardHost ?: body).addView(card)
+        target = card
+        return card
+    }
+
+    /** Glass: a heading starts a new card, with an accent icon. */
+    private fun startCard(text: String, icon: Int) {
+        val card = plainCard()
         card.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(6))
+            setPadding(dp(10), dp(4), 0, dp(8))
             addView(android.widget.ImageView(context).apply {
                 setImageResource(icon)
                 layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(10) }
@@ -599,8 +824,7 @@ class SettingsActivity : AppCompatActivity() {
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             })
         })
-        (cardHost ?: body).addView(card)
-        target = card
+        addDivider(card)
     }
 
     private fun heading(text: String, icon: Int = R.drawable.ic_glass_spark) {
@@ -623,10 +847,11 @@ class SettingsActivity : AppCompatActivity() {
         if (glass) {
             // Slimmer rows inside the cards.
             row.layoutParams = (row.layoutParams as android.view.ViewGroup.MarginLayoutParams).apply {
-                height = dp(44)
-                bottomMargin = dp(2)
+                height = dp(48)
+                bottomMargin = 0
             }
             row.setPadding(dp(10), 0, dp(10), 0)
+            addDivider(host)
             row.findViewById<TextView>(R.id.title).textSize = 14f
             value.textSize = 13f
         }
@@ -654,7 +879,7 @@ class SettingsActivity : AppCompatActivity() {
         if (glass) {
             // Pick-from-a-list rows: the value as a small button.
             value.setBackgroundResource(R.drawable.bg_value_chip)
-            value.setPadding(dp(10), dp(4), dp(10), dp(4))
+            value.setPadding(dp(12), dp(6), dp(12), dp(6))
             value.setTextColor(androidx.core.content.ContextCompat.getColorStateList(this, R.color.on_focus_text))
         }
         row.setOnClickListener {
@@ -674,7 +899,7 @@ class SettingsActivity : AppCompatActivity() {
 
     /** Settings > Look: background, text size and the visual effects. */
     private fun lookOptions() {
-        heading("Screen")
+        heading("Screen", R.drawable.ic_glass_screen)
         if (prefs.paletteIndex == 0 && prefs.themeIndex == 0) {
             option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
         }
@@ -691,7 +916,7 @@ class SettingsActivity : AppCompatActivity() {
     private var chosenDot: View? = null
 
     private fun colors() {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val dots = ArrayList<View>()
         val name = TextView(this).apply {
             setTextColor(themeColor(R.attr.appTextSecondary))
             textSize = 16f
@@ -701,13 +926,16 @@ class SettingsActivity : AppCompatActivity() {
         }
         fun addDot(color: Int, label: String, active: Boolean, pick: () -> Unit) {
             val dot = AvatarPicker.colorDot(this, color)
-            dot.layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply { rightMargin = dp(8) }
+            dot.layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply {
+                rightMargin = dp(8)
+                bottomMargin = dp(6)
+            }
             (dot.getChildAt(0).layoutParams as android.widget.FrameLayout.LayoutParams).apply { width = dp(38); height = dp(38) }
             dot.isActivated = active
             if (active) chosenDot = dot
             dot.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) name.text = label }
             dot.setOnClickListener { if (!active) { pick(); recreate() } }
-            row.addView(dot)
+            dots.add(dot)
         }
         // Theme colours: the accent only (background chosen below)…
         Appearance.ACCENT_COLORS.forEachIndexed { index, color ->
@@ -722,13 +950,10 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.paletteIndex = i
             }
         }
-        // Scrolls sideways, so every colour stays reachable at large interface and text sizes.
-        val scroller = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            FocusBox.usePadding(this)
-            addView(row)
-        }
-        body.addView(scroller)
+        // One row when they fit, more when they don't: every colour is on screen, none cut at the edge.
+        val rows = FlowRow(this).apply { FocusMap.choices(this) }
+        dots.forEach(rows::addView)
+        body.addView(rows, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         body.addView(name)
     }
 

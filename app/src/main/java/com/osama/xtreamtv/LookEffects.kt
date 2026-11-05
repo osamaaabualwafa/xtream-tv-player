@@ -32,6 +32,14 @@ object Look {
     val TEXT_SIZE_NAMES = listOf("Small", "Normal", "Large", "Extra large")
     private val TEXT_SCALES = floatArrayOf(0.9f, 1f, 1.12f, 1.25f)
 
+    /**
+     * The size rule, for every theme and screen. Interface size and text size multiply each other,
+     * and layouts are built to fit up to this much bigger than Normal interface with Normal text. Beyond it,
+     * the app's text setting gives way; the TV's own text setting still counts.
+     */
+    private const val MAX_COMBINED_SIZE = 1.25f
+    private const val BASE_WIDTH_DP = 960f
+
     /** In onCreate before setContentView (with the theme colour). */
     fun applyBackground(activity: Activity) {
         val prefs = Prefs(activity)
@@ -144,8 +152,10 @@ object Look {
         val index = Prefs(base).textSize.coerceIn(0, TEXT_SCALES.size - 1)
         val config = Configuration(base.resources.configuration)
         var changed = false
-        if (index != 1) {
-            config.fontScale = config.fontScale * TEXT_SCALES[index]
+        val interfaceScale = BASE_WIDTH_DP / UI_WIDTHS_DP[Prefs(base).uiSize.coerceIn(0, UI_WIDTHS_DP.size - 1)]
+        val textScale = minOf(TEXT_SCALES[index], MAX_COMBINED_SIZE / interfaceScale)
+        if (textScale != 1f) {
+            config.fontScale = config.fontScale * textScale
             changed = true
         }
         // Scale to the screen width, whatever density the TV reports (720p sets, 4K sets), and

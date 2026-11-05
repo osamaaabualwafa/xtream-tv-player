@@ -46,5 +46,6 @@
         <item name="appCorner28">24dp</item>
         <item name="appCornerTabbar">20dp</item>
         <item name="android:fontFamily">sans-serif</item>
+    <item name="appCornerMeta">14dp</item>
     </style>
 </resources>

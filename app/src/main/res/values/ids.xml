@@ -3,4 +3,6 @@
     <!-- FocusFx: this view grows through FocusFx.grow; this scrolling area has reserved its room. -->
     <item name="focus_fx" type="id" />
     <item name="focus_box" type="id" />
+    <!-- FocusMap: a list of choices; entering it lands on the selected one. -->
+    <item name="focus_choices" type="id" />
 </resources>

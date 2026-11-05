@@ -79,6 +79,14 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/more_button"
+                style="@style/GlassChip"
+                android:layout_marginLeft="10dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:text="☰  More" />
+
+            <TextView
                 android:id="@+id/settings_button"
                 style="@style/GlassChip"
                 android:layout_marginLeft="10dp"

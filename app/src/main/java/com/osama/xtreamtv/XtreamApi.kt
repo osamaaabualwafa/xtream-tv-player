@@ -429,7 +429,28 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
         return out
     }
 
-    private suspend fun call(vararg params: Pair<String, String>): Any? = withContext(Dispatchers.IO) {
+    /** Every request, timed for the diagnostics report (the action only: never the address). */
+    private suspend fun call(vararg params: Pair<String, String>): Any? {
+        val action = params.firstOrNull { it.first == "action" }?.second ?: "account info"
+        val started = android.os.SystemClock.elapsedRealtime()
+        fun secs() = "%.1f".format(java.util.Locale.US, (android.os.SystemClock.elapsedRealtime() - started) / 1000.0)
+        return try {
+            callInner(*params).also { result ->
+                val size = when (result) {
+                    is org.json.JSONArray -> "${result.length()} items"
+                    else -> "answered"
+                }
+                Diag.log("server", "$action · $size · ${secs()} s")
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Diag.log("server", "$action failed after ${secs()} s: ${e.javaClass.simpleName} ${e.message ?: ""}")
+            throw e
+        }
+    }
+
+    private suspend fun callInner(vararg params: Pair<String, String>): Any? = withContext(Dispatchers.IO) {
         val url = StringBuilder(base)
             .append("/player_api.php?username=").append(user)
             .append("&password=").append(pass)

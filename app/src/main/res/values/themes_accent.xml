@@ -46,6 +46,7 @@
         <item name="appAccentCC">#CC14B8A6</item>
         <item name="appGlow">#FF0F3737</item>
         <item name="colorAccent">#FF14B8A6</item>
+    <item name="appOnAccent">#FF0B0F14</item>
     </style>
 
     <style name="Accent.Orange">
@@ -61,6 +62,7 @@
         <item name="appAccentCC">#CCF97316</item>
         <item name="appGlow">#FF422718</item>
         <item name="colorAccent">#FFF97316</item>
+    <item name="appOnAccent">#FF0B0F14</item>
     </style>
 
     <style name="Accent.Pink">
@@ -91,6 +93,7 @@
         <item name="appAccentCC">#CC22C55E</item>
         <item name="appGlow">#FF123927</item>
         <item name="colorAccent">#FF22C55E</item>
+    <item name="appOnAccent">#FF0B0F14</item>
     </style>
 
     <style name="Accent.Red">
@@ -121,6 +124,7 @@
         <item name="appAccentCC">#CCEAB308</item>
         <item name="appGlow">#FF3E3514</item>
         <item name="colorAccent">#FFEAB308</item>
+    <item name="appOnAccent">#FF0B0F14</item>
     </style>
 
 </resources>

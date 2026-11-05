@@ -168,8 +168,8 @@ class GuideActivity : AppCompatActivity() {
                 val url = api.timeshiftUrl(channel.id, e.timeshiftStart(), minutes)
                 startActivity(PlayerActivity.catchupIntent(this, url, "${channel.name}  ·  ${e.title}"))
             }
-            e.end <= now -> Toast.makeText(this, "Catch-up isn't available for this programme", Toast.LENGTH_SHORT).show()
-            else -> Toast.makeText(this, "This programme hasn't started yet", Toast.LENGTH_SHORT).show()
+            e.end <= now -> showToast(this, "Catch-up isn't available for this programme", Toast.LENGTH_SHORT)
+            else -> showToast(this, "This programme hasn't started yet", Toast.LENGTH_SHORT)
         }
     }
 

@@ -97,12 +97,9 @@ class BrowseActivity : AppCompatActivity() {
         rail = findViewById(R.id.category_rail)
 
         categoriesView = findViewById(R.id.categories)
-        // Rows half scrolled out fade away at the edges instead of showing as a cut-off strip.
         // No row animations: rows redrawn (highlight, counts) while the list slides would glide
-        // over each other for a moment.
+        // over each other for a moment. (Rows half scrolled out fade: see softEdges below.)
         categoriesView.itemAnimator = null
-        categoriesView.isVerticalFadingEdgeEnabled = true
-        categoriesView.setFadingEdgeLength((28 * resources.displayMetrics.density).toInt())
         itemsView = findViewById(R.id.items)
         // No change animations: a new category replaces the posters in one step.
         itemsView.itemAnimator = null
@@ -147,6 +144,7 @@ class BrowseActivity : AppCompatActivity() {
             this, if (style == Appearance.BROWSE_CHIPS) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, center = true,
         )
         categoriesView.tuneForTv()
+        categoriesView.softEdges()
         categoriesView.adapter = categoryAdapter
 
         val live = type == ContentType.LIVE
@@ -166,6 +164,7 @@ class BrowseActivity : AppCompatActivity() {
             else -> CenterGridLayoutManager(this, 8)
         }
         itemsView.tuneForTv()
+        setupFocusMap()
 
         if (!live && style != Appearance.BROWSE_PREVIEW) backdrop = FocusBackdrop.attach(this)
         if (live && prefs.channelPreview) {
@@ -423,15 +422,6 @@ class BrowseActivity : AppCompatActivity() {
         }
     }
 
-    private fun isInside(v: View, parent: View): Boolean {
-        var p: View? = v
-        while (p != null) {
-            if (p === parent) return true
-            p = p.parent as? View
-        }
-        return false
-    }
-
     /** The open category's row (scrolled into view if needed). */
     private fun focusOpenCategory() {
         val index = categoryAdapter.activeIndex.coerceAtLeast(0)
@@ -446,6 +436,62 @@ class BrowseActivity : AppCompatActivity() {
             val first = lm?.findFirstVisibleItemPosition()?.takeIf { it >= 0 } ?: 0
             (lm?.findViewByPosition(first) ?: itemsView).requestFocus()
         }
+    }
+
+    private val focusMap = FocusMap { currentFocus }
+    private lateinit var itemsSection: FocusMap.Section
+
+    /**
+     * Sections: categories (or the rail that opens them), the search and guide buttons above the
+     * items, and the items. Left from the items or the buttons returns to the open category, so moving
+     * around never changes the category by itself.
+     */
+    private fun setupFocusMap() {
+        val header = focusMap.section {
+            listOfNotNull(search, findViewById<View?>(R.id.tv_guide)).filter { it.isShown }
+        }
+        val categories = focusMap.section { listOf<View>(categoriesView) }
+        itemsSection = focusMap.section { listOf<View>(itemsView) }
+        header.exits[View.FOCUS_DOWN] = {
+            if (style == Appearance.BROWSE_CHIPS) categoryRow() else itemsSection.entry()
+        }
+        itemsSection.exits[View.FOCUS_UP] = {
+            if (style == Appearance.BROWSE_CHIPS) categoryRow() else search.takeIf { it.isShown }
+        }
+        if (style == Appearance.BROWSE_CHIPS) {
+            categories.exits[View.FOCUS_UP] = { search.takeIf { it.isShown } }
+            categories.exits[View.FOCUS_DOWN] = { itemsSection.entry() }
+        } else {
+            val toCategory: () -> View? = {
+                val r = rail
+                if (r != null && panel?.visibility != View.VISIBLE) r else {
+                    focusOpenCategory()
+                    null
+                }
+            }
+            header.exits[View.FOCUS_LEFT] = toCategory
+            itemsSection.exits[View.FOCUS_LEFT] = toCategory
+            categories.exits[View.FOCUS_RIGHT] = {
+                if (itemAdapter.itemCount > 0) {
+                    // Show the highlighted category first if it isn't open yet.
+                    categoriesView.removeCallbacks(selectFocused)
+                    focusedCategory?.takeIf { it != currentCategory && it.id != CAT_HIDDEN }?.let { selectCategory(it) }
+                    focusFirstItem()
+                }
+                null
+            }
+            rail?.let { r ->
+                val railSection = focusMap.section { listOf(r) }
+                railSection.exits[View.FOCUS_RIGHT] = { itemsSection.entry() }
+            }
+        }
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, new -> focusMap.note(new) }
+    }
+
+    /** The open category's chip. */
+    private fun categoryRow(): View? {
+        focusOpenCategory()
+        return null
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
@@ -464,46 +510,7 @@ class BrowseActivity : AppCompatActivity() {
             if (event.action == android.view.KeyEvent.ACTION_DOWN) closePanel()
             return true
         }
-        // Side category list (not the chips row): like Settings, Left from the items returns to the
-        // open category and Right from a category goes to the first item on screen, instead of
-        // whichever one happens to sit beside the highlight.
-        val sideList = style != Appearance.BROWSE_CHIPS && panel?.visibility != View.GONE
-        // Up from the first row: the search box above the items, not the category list beside them.
-        if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && itemsView.hasFocus() && search.visibility == View.VISIBLE) {
-            val next = currentFocus?.focusSearch(View.FOCUS_UP)
-            if (next == null || !isInside(next, itemsView)) {
-                if (event.action == android.view.KeyEvent.ACTION_DOWN) search.requestFocus()
-                return true
-            }
-        }
-        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT && itemsView.hasFocus()) {
-            val next = currentFocus?.focusSearch(View.FOCUS_LEFT)
-            if (next == null || !isInside(next, itemsView)) {
-                if (event.action == android.view.KeyEvent.ACTION_DOWN) focusOpenCategory()
-                return true
-            }
-        }
-        // Up from the top row goes to Search (above the grid), not across to the categories.
-        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && itemsView.hasFocus() && search.visibility == View.VISIBLE) {
-            val next = currentFocus?.focusSearch(View.FOCUS_UP)
-            if (next == null || !isInside(next, itemsView)) {
-                val focusedPos = currentFocus?.let { itemsView.findContainingViewHolder(it)?.bindingAdapterPosition } ?: -1
-                val span = (itemsView.layoutManager as? androidx.recyclerview.widget.GridLayoutManager)?.spanCount ?: 1
-                if (focusedPos in 0 until span) {
-                    if (event.action == android.view.KeyEvent.ACTION_DOWN) search.requestFocus()
-                    return true
-                }
-            }
-        }
-        if (sideList && event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && categoriesView.hasFocus() && itemAdapter.itemCount > 0) {
-            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
-                // Show the highlighted category first if it isn't open yet.
-                categoriesView.removeCallbacks(selectFocused)
-                focusedCategory?.takeIf { it != currentCategory && it.id != CAT_HIDDEN }?.let { selectCategory(it) }
-                focusFirstItem()
-            }
-            return true
-        }
+        if (focusMap.handle(event)) return true
         return super.dispatchKeyEvent(event)
     }
 
@@ -581,7 +588,7 @@ class BrowseActivity : AppCompatActivity() {
                     2 -> if (at < ids.size - 1) { ids.removeAt(at); ids.add(at + 1, cat.id) }
                     3 -> {
                         prefs.setHiddenCategories(type, prefs.hiddenCategories(type) + cat.id)
-                        Toast.makeText(this, "Hidden. Find it under \"Hidden categories\" at the bottom.", Toast.LENGTH_LONG).show()
+                        showToast(this, "Hidden. Find it under \"Hidden categories\" at the bottom.", Toast.LENGTH_LONG)
                         refreshCategoryList(null)
                         return@setItems
                     }
@@ -633,6 +640,8 @@ class BrowseActivity : AppCompatActivity() {
 
     private fun selectCategory(category: Category) {
         currentCategory = category
+        // The items are about to change: coming back lands on the first one, not an old row.
+        itemsSection.forget()
         // The strip described the old category's item: blank it (keeping its space) until one is highlighted.
         findViewById<View>(R.id.info_strip).visibility = View.INVISIBLE
         categoryAdapter.activeIndex = categoryAdapter.items.indexOf(category)
@@ -843,7 +852,7 @@ class BrowseActivity : AppCompatActivity() {
         }
         val added = prefs.toggleFavorite(item)
         if (counts.isNotEmpty()) refreshLocalCounts()
-        Toast.makeText(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT).show()
+        showToast(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT)
         if (!added && currentCategory?.id == CAT_FAV) {
             allItems = localItems(CAT_FAV)
             applyFilter(scrollToTop = false)

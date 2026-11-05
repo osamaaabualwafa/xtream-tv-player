@@ -30,7 +30,11 @@ object Updates {
 
     private const val LATEST = "https://api.github.com/repos/osamaaabualwafa/xtream-tv-player/releases/latest"
 
-    data class Release(val build: Int, val apkUrl: String)
+    /** [version]: the name people see ("1.3.0"), read from the release title "Version 1.3.0 (build 31)". */
+    data class Release(val build: Int, val apkUrl: String, val version: String?)
+
+    /** What people are shown: the version name, never the build number. */
+    private val currentVersion: String get() = BuildConfig.VERSION_NAME
 
     /** Checked once per app session automatically; the Home button checks on demand. */
     var checkedThisSession = false
@@ -50,7 +54,10 @@ object Updates {
             val assets = json.optJSONArray("assets") ?: return@withContext null
             for (i in 0 until assets.length()) {
                 val a = assets.optJSONObject(i) ?: continue
-                if (a.optString("name").endsWith(".apk")) return@withContext Release(build, a.optString("browser_download_url"))
+                if (a.optString("name").endsWith(".apk")) {
+                    val version = Regex("""Version\s+([0-9][0-9A-Za-z.\-]*)""").find(json.optString("name"))?.groupValues?.get(1)
+                    return@withContext Release(build, a.optString("browser_download_url"), version)
+                }
             }
             null
         } finally {
@@ -71,21 +78,37 @@ object Updates {
 
     /** "Check for updates" button: always answers. */
     fun checkNow(activity: Activity, scope: LifecycleCoroutineScope) {
-        Toast.makeText(activity, "Checking for updates…", Toast.LENGTH_SHORT).show()
+        showToast(activity, "Checking for updates…", Toast.LENGTH_SHORT)
         scope.launch {
             val release = try { latest() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
             when {
-                release == null -> Toast.makeText(activity, "Couldn't check for updates. Try again later.", Toast.LENGTH_LONG).show()
-                release.build > currentBuild -> offer(activity, scope, release)
-                else -> Toast.makeText(activity, "You have the latest version (build $currentBuild)", Toast.LENGTH_LONG).show()
+                release == null -> {
+                    Diag.log("update", "check failed")
+                    showToast(activity, "Couldn't check for updates. Try again later.", Toast.LENGTH_LONG)
+                }
+                release.build > currentBuild -> {
+                    Diag.log("update", "build ${release.build} available (this is build $currentBuild)")
+                    offer(activity, scope, release)
+                }
+                else -> showToast(activity, "You have the latest version ($currentVersion)", Toast.LENGTH_LONG)
             }
+        }
+    }
+
+    /** "Version 1.3.0 is ready (you have version 1.2.0)"; when the name didn't change, "An update to version 1.2.0 is ready." */
+    private fun offerText(release: Release): String {
+        val version = release.version
+        return when {
+            version == null -> "An update is ready (you have version $currentVersion)."
+            version == currentVersion -> "An update to version $version is ready."
+            else -> "Version $version is ready (you have version $currentVersion)."
         }
     }
 
     private fun offer(activity: Activity, scope: LifecycleCoroutineScope, release: Release) {
         AlertDialog.Builder(activity)
             .setTitle("Update available")
-            .setMessage("Build ${release.build} is ready (you have build $currentBuild).\nYour playlists, favorites and progress are kept.")
+            .setMessage(offerText(release) + "\nYour playlists, favorites and progress are kept.")
             .setPositiveButton("Install") { _, _ -> download(activity, scope, release) }
             .setNegativeButton("Later", null)
             .show()
@@ -106,12 +129,14 @@ object Updates {
                     label.text = if (percent >= 0) "$percent%" else "Starting…"
                 }
                 dialog.dismiss()
+                Diag.log("update", "build ${release.build} downloaded, installing")
                 install(activity, file)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 dialog.dismiss()
-                Toast.makeText(activity, "Download failed: ${e.message ?: "network error"}", Toast.LENGTH_LONG).show()
+                Diag.log("update", "download of build ${release.build} failed: ${e.message ?: "network error"}")
+                showToast(activity, "Download failed: ${e.message ?: "network error"}", Toast.LENGTH_LONG)
             }
         }
     }
@@ -160,7 +185,7 @@ object Updates {
     private fun install(activity: Activity, apk: File) {
         // Android 8+: the user must allow this app to install updates (asked once).
         if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Allow \"Install unknown apps\" for Xtream TV, then press Back and choose Install again", Toast.LENGTH_LONG).show()
+            showToast(activity, "Allow \"Install unknown apps\" for Xtream TV, then press Back and choose Install again", Toast.LENGTH_LONG)
             try {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             } catch (e: Exception) {
