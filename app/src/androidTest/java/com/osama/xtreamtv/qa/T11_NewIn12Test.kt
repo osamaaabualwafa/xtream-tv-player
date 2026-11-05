@@ -80,6 +80,7 @@ class T11_NewIn12Test : QaTest() {
         Qa.backTo(HomeActivity::class.java, "Home")
         Qa.settle(1500)
         val visibleAfterBack = highlightVisible()
+        val focusAfterBack = Qa.focusedDescription()
         Qa.shot("dock_after_settings", "Home rebuilt as Dock after Back (highlight: ${Qa.focusedDescription()})")
         Qa.step("highlight on screen after Back: $visibleAfterBack (${Qa.focusedDescription()})")
         Qa.down()
@@ -88,7 +89,7 @@ class T11_NewIn12Test : QaTest() {
         Qa.shot("dock_after_one_key", "After one Down press (highlight: ${Qa.focusedDescription()})")
         Qa.step("highlight on screen after one Down: $visibleAfterKey")
         assertTrue("After switching to Dock and pressing Back, an item on Home is highlighted " +
-            "(highlight was on ${Qa.focusedDescription()}; after one Down press it is ${if (visibleAfterKey) "visible" else "still hidden"})", visibleAfterBack)
+            "(the highlight was on the hidden view $focusAfterBack; after one Down press it is ${if (visibleAfterKey) "visible again" else "still hidden"})", visibleAfterBack)
     }
 
     @Test

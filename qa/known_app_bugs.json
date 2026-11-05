@@ -82,7 +82,7 @@
     "id": "5",
     "title": "Nothing is highlighted on Home after switching to the Dock layout",
     "screen": "Home (Dock layout), right after changing the layout in Settings",
-    "what": "Coming back from Settings after choosing Dock, Home is rebuilt with no visible highlight: the remote's focus sits on the gear button of the old layout, which Dock keeps hidden.",
+    "what": "Coming back from Settings after choosing Dock, Home is rebuilt with no visible highlight: the remote's focus sits on the gear button of the old layout, which Dock keeps hidden. One arrow press brings the highlight back (on Live TV).",
     "expected": "A Dock tile (for example Live TV) is highlighted.",
     "steps": [
       "Use the Big tiles Home layout.",
