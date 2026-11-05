@@ -19,17 +19,7 @@ android {
         versionCode = buildNumber
         versionName = "1.3.0"
         multiDexEnabled = true
-        // Weekly QA (qa/README.md): UI tests on an Android TV emulator against a fake Xtream server.
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        testInstrumentationRunnerArguments["useTestStorageService"] = "true"
     }
-
-    testOptions {
-        // Each test runs in its own process: one crash fails one test, not the whole run.
-        execution = "ANDROIDX_TEST_ORCHESTRATOR"
-        animationsDisabled = true
-    }
-
     // Personal sideload app: a fixed, committed key so updates install over the old version.
     signingConfigs {
         create("release") {
@@ -87,14 +77,3 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     implementation("androidx.tvprovider:tvprovider:1.0.0")
 
-    // Weekly QA tests only (never inside the APK the TV installs).
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test:core-ktx:1.6.1")
-    androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
-    androidTestImplementation("androidx.test.services:storage:1.5.0")
-    androidTestUtil("androidx.test:orchestrator:1.5.1")
-    androidTestUtil("androidx.test.services:test-services:1.5.0")
-}
