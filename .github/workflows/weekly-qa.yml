@@ -16,6 +16,10 @@ on:
         default: ''
   push:
     branches: [main]
+  # Once, for version 1.3.0: the full suite right after that push's short run (see plan's "if").
+  workflow_run:
+    workflows: ['Weekly QA (Android TV)']
+    types: [completed]
 
 permissions:
   contents: write
@@ -27,6 +31,7 @@ concurrency:
 
 jobs:
   plan:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_sha == 'f422e9976496081c3cca2673affe16bd2628966d')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
@@ -113,7 +118,7 @@ jobs:
 
   report:
     needs: tests
-    if: always()
+    if: always() && needs.tests.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
