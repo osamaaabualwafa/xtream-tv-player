@@ -76,4 +76,4 @@ dependencies {
     // Installs the startup profile (src/main/baseline-prof.txt) on sideloaded installs too.
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     implementation("androidx.tvprovider:tvprovider:1.0.0")
-
+}
