@@ -37,6 +37,12 @@ It does not change any code without approval.
 Automatic screen checks on every screenshot: nothing highlighted, highlight off screen, text cut
 with "…", text taller than its box, text outside the screen, low contrast, overlapping text.
 
+## After every push to main
+
+A short list runs on its own (`PUSH_SHARDS` in `qa/shards.py`): data, Live TV, what's new, and past
+crashes. Its report is on the **qa-report-push** branch, so the weekly **qa-report** is never replaced.
+It only warns: the release workflow publishes the APK whatever this finds.
+
 ## Run it now
 
 GitHub → Actions → **Weekly QA (Android TV)** → *Run workflow*. To run only some tests, enter

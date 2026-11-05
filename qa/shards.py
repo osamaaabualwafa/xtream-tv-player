@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Splits the test classes over parallel emulators. Prints the GitHub matrix.
-Usage: shards.py "<comma separated classes or empty>"   (empty = full suite)"""
+Usage: shards.py "<comma separated classes or empty>" [event]   (empty = full suite; event "push" = short list)"""
 import json
 import sys
 
@@ -13,6 +13,12 @@ SHARDS = [
     ("themes-b", ["T08_ThemesTest#glassBackgrounds1+glassBackgrounds2+glassBackgrounds3+glassStyles+glassHighlightsDark+glassHighlightsDaylight+glassMovingBackground"], False),
     ("themes-c", ["T08_ThemesTest#colours+palettesAndBackgrounds+sizesSmallSmall+sizesLargeExtraLarge+sizesCompactExtraLarge+sizesNormalLarge+sizesLargeLarge+effects"], False),
     ("stress-random", ["T09_StressTest"], True),
+]
+
+# After each push to main: the core checks, what's new, and past crashes. Warns only.
+PUSH_SHARDS = [
+    ("short-data-live", ["T01_DataTest", "T03_LiveTvTest"], False),
+    ("short-new-network", ["T11_NewIn12Test", "T10_BadNetworkTest#brokenServer", "T08_ThemesTest#sizesLargeExtraLarge"], False),
 ]
 
 
@@ -31,5 +37,7 @@ custom = sys.argv[1].strip() if len(sys.argv) > 1 else ""
 if custom:
     matrix = [{"shard": "custom", "tests": custom, "monkey": "0"}]
 else:
-    matrix = [{"shard": n, "tests": expand(c), "monkey": "1" if m else "0"} for n, c, m in SHARDS]
+    event = sys.argv[2] if len(sys.argv) > 2 else ""
+    chosen = PUSH_SHARDS if event == "push" else SHARDS
+    matrix = [{"shard": n, "tests": expand(c), "monkey": "1" if m else "0"} for n, c, m in chosen]
 print("matrix=" + json.dumps({"include": matrix}))

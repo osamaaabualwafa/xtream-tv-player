@@ -3,6 +3,8 @@ name: Weekly QA (Android TV)
 # Every Wednesday 02:00 Riyadh time (= Tuesday 23:00 UTC): the full UI test suite on Android TV
 # emulators (several in parallel) against a fake Xtream server (qa/server). Results: the
 # "qa-report" artifact, the qa-report branch (latest report only) and the run summary.
+# Every push to main: a short list instead (qa/shards.py), reported on the qa-report-push branch.
+# It only warns: the release workflow publishes the APK whatever this finds.
 on:
   schedule:
     - cron: '0 23 * * 2'
@@ -13,14 +15,15 @@ on:
         required: false
         default: ''
   push:
-    branches: [weekly-qa]
+    branches: [main]
 
 permissions:
   contents: write
 
 concurrency:
-  group: weekly-qa
-  cancel-in-progress: true
+  # Separate, so a push can't cancel the Wednesday run; a newer push replaces an older short run.
+  group: qa-${{ github.event_name == 'push' && 'push' || 'full' }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   plan:
@@ -30,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: m
-        run: python3 qa/shards.py "${{ github.event.inputs.tests }}" >> "$GITHUB_OUTPUT"
+        run: python3 qa/shards.py "${{ github.event.inputs.tests }}" "${{ github.event_name }}" >> "$GITHUB_OUTPUT"
 
   tests:
     needs: plan
@@ -131,15 +134,17 @@ jobs:
           path: report
           retention-days: 30
 
-      - name: Publish the latest report to the qa-report branch
+      - name: Publish the latest report (full runs and after-push runs each keep their own branch)
+        env:
+          REPORT_BRANCH: ${{ github.event_name == 'push' && 'qa-report-push' || 'qa-report' }}
         run: |
           cd report
-          git init -q -b qa-report
+          git init -q -b "$REPORT_BRANCH"
           git config user.name "weekly-qa"
           git config user.email "weekly-qa@users.noreply.github.com"
           git add -A
           git commit -q -m "QA report $(date -u +%Y-%m-%d) (run ${{ github.run_id }})"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" qa-report
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$REPORT_BRANCH"
 
       - name: Mark the run red if tests failed or the app crashed
         run: |
