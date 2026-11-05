@@ -120,6 +120,10 @@ class HomeActivity : AppCompatActivity() {
         findViewById<View>(R.id.refresh_lists).setOnClickListener { refreshLists() }
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
         pinPageEdges()
+        // Rebuilt in another layout: the restored highlight may sit on a view this layout hides.
+        findViewById<View>(android.R.id.content).post {
+            if (currentFocus?.isShown != true) findViewById<View>(R.id.tile_live).requestFocus()
+        }
 
         continueAdapter = row(R.id.row_continue, R.layout.item_poster_row, { _, item -> resume(item.id) }) { _, item ->
             confirmRemoveProgress(this, prefs, item) { loadLocalRows() }
@@ -242,7 +246,7 @@ class HomeActivity : AppCompatActivity() {
             tile(R.id.drawer_refresh) { refreshLists() }
             tile(R.id.drawer_updates) { Updates.checkNow(this, lifecycleScope) }
             tile(R.id.drawer_playlists) { playlistsAction?.onClick(v) }
-            tile(R.id.drawer_guide) { startActivity(Intent(this, GuideActivity::class.java)) }
+            tile(R.id.drawer_guide) { openGuide() }
             tile(R.id.drawer_settings) { startActivity(Intent(this, SettingsActivity::class.java)) }
             // The row is the whole drawer: Left and Right stop at its ends.
             v.findViewById<View>(R.id.drawer_refresh).nextFocusLeftId = R.id.drawer_refresh
@@ -256,6 +260,26 @@ class HomeActivity : AppCompatActivity() {
         panel.translationY = 200 * resources.displayMetrics.density
         panel.animate().translationY(0f).setDuration(180).start()
         view.findViewById<View>(R.id.drawer_refresh).requestFocus()
+    }
+
+    /** The guide lists Session.zapList, so give it every channel. */
+    private fun openGuide() {
+        lifecycleScope.launch {
+            try {
+                val channels = allStreams(ContentType.LIVE).await()
+                if (channels.isEmpty()) {
+                    android.widget.Toast.makeText(this@HomeActivity, "No channels to show", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                Session.zapList = channels
+                Session.zapTitle = "All channels"
+                startActivity(GuideActivity.intent(this@HomeActivity, 0, fromPlayer = false))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this@HomeActivity, "Couldn't load the channels", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun closeDrawer() {

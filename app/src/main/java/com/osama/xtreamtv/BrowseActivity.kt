@@ -307,7 +307,11 @@ class BrowseActivity : AppCompatActivity() {
             epg[item.id] = list
             epgLoading.remove(item.id)
             if (list.isNotEmpty()) {
-                itemAdapter.items.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }?.let { itemAdapter.notifyItemChanged(it, "epg") }
+                // Later, not now: a saved guide arrives while this row is being laid out, and changing
+                // the list during its layout closes the app.
+                itemsView.post {
+                    itemAdapter.items.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }?.let { itemAdapter.notifyItemChanged(it, "epg") }
+                }
             }
         }
     }

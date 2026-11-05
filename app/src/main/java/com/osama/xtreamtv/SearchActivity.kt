@@ -265,12 +265,15 @@ class SearchActivity : AppCompatActivity() {
         status.text = "Loading your channels, movies and series…"
         lifecycleScope.launch {
             try {
-                val parts = ContentType.values().map { type ->
-                    async {
-                        val key = "${type.name}:__all__"
-                        Session.streamCache[key] ?: api.streams(type, null).also { Session.streamCache[key] = it }
-                    }
-                }.map { it.await() }
+                // coroutineScope: one list failing lands in the catch below, instead of closing the app.
+                val parts = kotlinx.coroutines.coroutineScope {
+                    ContentType.values().map { type ->
+                        async {
+                            val key = "${type.name}:__all__"
+                            Session.streamCache[key] ?: api.streams(type, null).also { Session.streamCache[key] = it }
+                        }
+                    }.map { it.await() }
+                }
                 library = parts.flatten()
                 progress.visibility = View.GONE
                 status.text = "Type at least 2 letters to search ${parts[0].size} channels, ${parts[1].size} movies and ${parts[2].size} series."

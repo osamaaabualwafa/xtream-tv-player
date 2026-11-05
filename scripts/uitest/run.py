@@ -3,6 +3,7 @@
 
   python scripts/uitest/run.py quick home-tabs settings-look   one change: those screens, Glass + Lift
   python scripts/uitest/run.py push                            before a push: every screen, Glass + Lift and Default
+  python scripts/uitest/run.py large series                    those screens at large interface and text sizes
   python scripts/uitest/run.py full                            theme or highlight code changed: all themes and styles
   python scripts/uitest/run.py stop                            stop a run and put the emulator back
 
@@ -66,6 +67,8 @@ SCREENS = {
     "series": ({"home_style": 2, "browse_style": 0}, [R, R, OK, "wait BrowseActivity", D, D, R, OK, "wait DetailsActivity", "shot 1", D, D, "shot 2", R, R, "shot 3"]),
     "search": ({"home_style": 2}, [R, R, R, OK, "wait SearchActivity", "text mov", "shot 1", D, D, D, "shot 2", R, "shot 3"]),
     "playlists": ({"home_style": 2}, [MENU, R, R, OK, "wait PlaylistsActivity", "shot 1", R, "shot 2"]),
+    "drawer-guide": ({"home_style": 2}, [MENU, R, R, R, OK, "wait GuideActivity", "shot 1"]),
+    "dock-switch": ({"home_style": 2}, SETTINGS + [R, D, D, OK, "shot chosen", BACK, "wait HomeActivity", "shot home"]),
 }
 # Audit only: video never looks the same twice.
 AUDIT_ONLY = {"player": ({"home_style": 2, "browse_style": 0, "player_menu_style": 2}, [R, OK, "wait BrowseActivity", D, D, R, OK, "wait DetailsActivity", OK, "wait PlayerActivity", OK, "shot 1", R, R, "shot 2"])}
@@ -73,6 +76,7 @@ GLASS = {"theme": 4, "glass_scene": 0, "glass_style": 0, "focus_style": 3, "ui_s
 DEFAULT = {"theme": 0, "palette": 0, "ui_size": 0, "text_size": 1, "focus_style": 0}
 COMBOS = {
     "quick": [("glass-lift", GLASS)],
+    "large": [("default-large", {**DEFAULT, "ui_size": 2, "text_size": 3}), ("glass-large", {**GLASS, "ui_size": 2, "text_size": 3})],
     "push": [("glass-lift", GLASS), ("default", DEFAULT)],
     "full": [("default", DEFAULT), ("cinema", {**DEFAULT, "theme": 1}),
              ("glass-ring", {**GLASS, "focus_style": 0}), ("glass-white", {**GLASS, "focus_style": 1}),

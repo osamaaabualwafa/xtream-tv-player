@@ -93,6 +93,7 @@ class DetailsActivity : AppCompatActivity() {
         title = findViewById(R.id.title)
         meta = findViewById(R.id.meta)
         plot = findViewById(R.id.plot)
+        keepButtonsVisible()
         buttons = findViewById(R.id.buttons)
         playButton = findViewById(R.id.play)
         resumeButton = findViewById(R.id.resume)
@@ -182,6 +183,27 @@ class DetailsActivity : AppCompatActivity() {
         buttons.post { alignButtons() }
         val fav = item.id in prefs.favoriteIds(item.type)
         favoriteButton.text = if (fav) "★  Favorite" else "☆  Add to favorites"
+    }
+
+    /**
+     * Series page at large sizes: when the top block doesn't fit above the seasons, the description
+     * gives way a step at a time so the buttons stay fully visible.
+     */
+    private fun keepButtonsVisible() {
+        val info = findViewById<View?>(R.id.info) ?: return
+        val area = info.parent as? android.widget.ScrollView ?: return
+        val plot = findViewById<TextView>(R.id.plot)
+        val credits = findViewById<TextView>(R.id.credits)
+        area.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (info.height <= area.height - area.paddingTop - area.paddingBottom) return@addOnLayoutChangeListener
+            area.post {
+                when {
+                    credits.visibility != View.GONE -> credits.visibility = View.GONE
+                    plot.visibility != View.GONE && plot.maxLines > 1 -> plot.maxLines = 1
+                    plot.visibility != View.GONE -> plot.visibility = View.GONE
+                }
+            }
+        }
     }
 
     private fun loadPoster(url: String?) {
