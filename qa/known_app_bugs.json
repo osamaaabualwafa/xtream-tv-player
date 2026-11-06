@@ -48,9 +48,7 @@
       "Same after opening the Live TV list and coming back to Home."
     ],
     "cause": "HomeActivity's quick drawer starts GuideActivity with a plain Intent. GuideActivity.onCreate() takes its channels from Session.zapList and calls finish() when that list is empty; the list is only filled when a channel is played, when the guide is opened from the Live TV list, or from Search.",
-    "tests": [
-      "T11_NewIn12Test.quickDrawerGuide"
-    ],
+    "tests": [],
     "error_contains": [],
     "error_must_contain": [
       "TV guide in the quick drawer"

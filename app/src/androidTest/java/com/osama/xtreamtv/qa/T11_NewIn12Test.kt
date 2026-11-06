@@ -141,34 +141,16 @@ class T11_NewIn12Test : QaTest() {
         assertTrue("Menu does nothing when switched off", !drawerOpen())
     }
 
+    /** Version 1.3.0 took the TV guide out of the quick drawer (it is in the Live TV list). */
     @Test
-    fun quickDrawerGuide() {
+    fun quickDrawerHasNoGuide() {
         openHome(mapOf("theme" to Appearance.THEME_GLASS))
-        Qa.step("right after opening the app: Menu, then TV guide")
+        Qa.step("right after opening the app: Menu opens the quick drawer")
         Qa.key(KeyEvent.KEYCODE_MENU)
-        Qa.waitUntil(4000) { drawerOpen() }
-        Qa.focusId(R.id.drawer_guide, "drawer TV guide")
-        Qa.shot("drawer_guide_highlighted", "Quick drawer with TV guide highlighted")
-        Qa.ok()
-        val openedFirst = Qa.waitUntil(8000) { Qa.current() is GuideActivity }
-        Qa.shot("drawer_guide_result_first", "After OK on TV guide (Live TV not opened yet)")
-        if (openedFirst) Qa.backTo(HomeActivity::class.java, "Home")
-
-        Qa.step("after visiting Live TV once: Menu, then TV guide")
-        Qa.focusId(R.id.tile_live, "Live TV tile")
-        Qa.ok()
-        Qa.expect(BrowseActivity::class.java, "Live TV")
-        Qa.waitUntil(20_000) { Qa.listCount(R.id.items) > 0 }
-        Qa.backTo(HomeActivity::class.java, "Home")
-        Qa.key(KeyEvent.KEYCODE_MENU)
-        Qa.waitUntil(4000) { drawerOpen() }
-        Qa.focusId(R.id.drawer_guide, "drawer TV guide")
-        Qa.ok()
-        val openedAfter = Qa.waitUntil(8000) { Qa.current() is GuideActivity }
-        Qa.shot("drawer_guide_result_after_live", "After OK on TV guide (Live TV opened before)")
-        Qa.step("guide opened: right after start=$openedFirst, after visiting Live TV=$openedAfter")
-        assertTrue("TV guide in the quick drawer opens the guide right after starting the app " +
-            "(after visiting Live TV it ${if (openedAfter) "does" else "doesn't either"})", openedFirst)
+        assertTrue("Menu opens the quick drawer", Qa.waitUntil(4000) { drawerOpen() })
+        Qa.focusId(R.id.drawer_settings, "drawer Settings")
+        Qa.shot("drawer_without_guide", "Quick drawer: no TV guide")
+        assertTrue("TV guide is no longer in the quick drawer", !Qa.visible(R.id.drawer_guide))
     }
 
     private fun cards(theme: Int) {

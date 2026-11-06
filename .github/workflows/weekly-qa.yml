@@ -4,6 +4,7 @@ name: Weekly QA (Android TV)
 # emulators (several in parallel) against a fake Xtream server (qa/server). Results: the
 # "qa-report" artifact, the qa-report branch (latest report only) and the run summary.
 # Every push to main: a short list instead (qa/shards.py), reported on the qa-report-push branch.
+# Write [full qa] in a push's commit message and the full suite also runs, right after the short list.
 # It only warns: the release workflow publishes the APK whatever this finds.
 on:
   schedule:
@@ -16,13 +17,10 @@ on:
         default: ''
   push:
     branches: [main]
-  # Once, for version 1.3.0: the full suite right after that push's short run (see plan's "if").
-  workflow_run:
-    workflows: ['Weekly QA (Android TV)']
-    types: [completed]
 
 permissions:
   contents: write
+  actions: write   # the after-push run may start the full run (see the report job's last step)
 
 concurrency:
   # Separate, so a push can't cancel the Wednesday run; a newer push replaces an older short run.
@@ -31,7 +29,6 @@ concurrency:
 
 jobs:
   plan:
-    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_sha == 'f422e9976496081c3cca2673affe16bd2628966d')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
@@ -118,7 +115,7 @@ jobs:
 
   report:
     needs: tests
-    if: always() && needs.tests.result != 'skipped'
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +147,13 @@ jobs:
           git add -A
           git commit -q -m "QA report $(date -u +%Y-%m-%d) (run ${{ github.run_id }})"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$REPORT_BRANCH"
+
+      # A push whose commit message says [full qa]: the full suite starts once this short run is done.
+      - name: Start the full run after this one ([full qa] in the commit message)
+        if: always() && github.event_name == 'push' && contains(github.event.head_commit.message, '[full qa]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run weekly-qa.yml --repo "${{ github.repository }}" --ref main
 
       - name: Mark the run red if tests failed or the app crashed
         run: |
