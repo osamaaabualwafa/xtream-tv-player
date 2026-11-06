@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Review item 1.1R: every theme's text and highlight colours with their contrast ratios (JSON).
 
-  python scripts/uitest/colour_table.py > .uitest/colour_table.json
+  python scripts/uitest/colour_table.py           saves .uitest/colour_table.json and prints the lowest ratios
+  python scripts/uitest/colour_table.py --print   the JSON on screen instead
 
 One row per theme / scene / glass style. Ratios are the lowest over the background's base colour and
 its brightest glow, and (Glass) over all four highlight styles. Uses check_contrast.py's maths.
@@ -58,7 +59,18 @@ def main():
             focus = [("Focus.Daylight" if daylight else "Focus.") + f for f in ("Ring", "White", "Solid", "Lift")]
             add("Glass", f"{scene[6:]} · {glass[6:]}",
                 [["Accent.Blue", "Palette.Glass", "Look.Glass", scene, glass, f] for f in focus])
-    json.dump({"min": cc.MIN_RATIO, "checks": [c[0] for c in cc.CHECKS], "rows": rows}, sys.stdout, indent=1)
+    table = {"min": cc.MIN_RATIO, "checks": [c[0] for c in cc.CHECKS], "rows": rows}
+    if "--print" in sys.argv:
+        json.dump(table, sys.stdout, indent=1)
+        return
+    out = os.path.join(os.path.dirname(__file__), "..", "..", ".uitest", "colour_table.json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(table, open(out, "w", encoding="utf-8"), indent=1)
+    low = [r for r in rows if r["lowest"] < cc.MIN_RATIO]
+    for r in low:
+        print(f"FAIL {r['theme']} {r['variant']}: lowest {r['lowest']}:1")
+    print(f"saved {os.path.normpath(out)}: {len(rows)} theme combinations, lowest {min(r['lowest'] for r in rows)}:1")
+    sys.exit(1 if low else 0)
 
 
 if __name__ == "__main__":

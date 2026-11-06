@@ -77,13 +77,26 @@ def seed_continue_watching():
     r.settle()
     press(OK)
     r.wait_activity("PlayerActivity")
-    time.sleep(12)
+    # Continue watching only counts 30 s of real playback (1.2A); the test video is 45 s long.
+    time.sleep(34)
     press("BACK")
     time.sleep(1)
 
 
+def until(view_id, key, tries=8):
+    """Presses [key] until [view_id] has the highlight (the top bar gained a More button in 1.3.0)."""
+    for _ in range(tries):
+        if any(i.startswith(view_id) for i in focus()[0]):
+            return True
+        press(key)
+    return any(i.startswith(view_id) for i in focus()[0])
+
+
 def settings_open():
-    press(U, RT, OK)
+    """Home's top bar: up to the playlist button, right to Settings, OK."""
+    until("playlist_chip", U, tries=4)
+    until("settings_button", RT, tries=4)
+    press(OK)
     r.wait_activity("SettingsActivity")
     r.settle()
 
@@ -188,7 +201,9 @@ def avatar(c):
         return
     home(home_style=2)
     settings_open()
-    press(D, D, D, D, RT, D, OK)  # Past "Open at start" (the test adds a second playlist) to a playlist.
+    # Settings > Playlists, then the test playlist's avatar row (only the test playlist is listed).
+    until("menu_avatars", D)
+    press(RT, OK)
     time.sleep(1)
     expect("1.1Z avatar picker opens on a group", "avatar_groups")
     press(RT)
@@ -202,7 +217,8 @@ def avatar(c):
     press("BACK")
     home(home_style=2, ui_size=2, text_size=3)
     settings_open()
-    press(D, D, D, D, RT, D, OK)
+    until("menu_avatars", D)
+    press(RT, OK)
     time.sleep(3)
     w, h, pic = r.settle()
     r.write_png(os.path.join(r.WORK, "avatar-large.png"), w, h, pic)
@@ -224,7 +240,10 @@ def main():
         r.adb("shell", "am", "force-stop", r.PKG)
         r.app_shell(f"if [ -f {r.BACKUP} ]; then cp {r.BACKUP} {r.PREFS}; rm {r.BACKUP}; fi\n")
         r.add_test_playlist()
-        r.app_shell(f"rm -f shared_prefs/playlist_{r.TEST_ID}.xml\n")
+        r.only_test_playlist()
+        # The short video file: the movie played for the Home banner must really play.
+        import player_checks
+        player_checks.use_stream("file")
         for c, prefs in (("default", r.DEFAULT), ("glass", {**r.GLASS, "focus_style": 0})):
             r.adb("shell", "am", "force-stop", r.PKG)
             r.set_prefs(prefs)

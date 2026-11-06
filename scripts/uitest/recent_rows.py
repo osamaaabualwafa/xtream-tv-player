@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Review item 1.1T(a): Home's "Recently added" switches (Settings > Home layout).
 
-  python scripts/uitest/recent_rows.py
+  python scripts/uitest/recent_rows.py            all 33 cases
+  python scripts/uitest/recent_rows.py --short    one case per layout and the Settings switch (for test.py push)
 
 Every combination (both, movies only, series only, none) in Home layouts H1-H4, after opening the
 app and again after restarting it; then one switch flipped in Settings and Home checked straight away.
@@ -18,7 +19,8 @@ import player_checks as c
 
 MOVIES, SERIES = "Recently added movies", "Recently added series"
 LAYOUTS = ["H1 Hero", "H2 Side menu", "H3 Big tiles", "H4 Top tabs"]
-COMBOS = [(1, 1), (1, 0), (0, 1), (0, 0)]
+SHORT = "--short" in sys.argv
+COMBOS = [(0, 1)] if SHORT else [(1, 1), (1, 0), (0, 1), (0, 0)]
 results = []
 
 
@@ -73,6 +75,8 @@ def main():
                 c.start(**prefs)
                 time.sleep(3)
                 check(f"{layout}, movies {'on' if m else 'off'}, series {'on' if s else 'off'}", (bool(m), bool(s)), rows_on_home())
+                if SHORT:
+                    continue
                 c.start(**prefs)      # Restart: the choice is remembered.
                 time.sleep(3)
                 check(f"{layout}, same after restarting", (bool(m), bool(s)), rows_on_home())

@@ -46,7 +46,8 @@ MASKS = [(0.88, 0.0, 1.0, 0.14), (0.20, 0.05, 0.27, 0.12)]
 # name: (settings, steps). Steps: keys, "shot name", "wait Activity", "text abc". All start on Home.
 L, R, U, D, OK, MENU, BACK = "DPAD_LEFT", "DPAD_RIGHT", "DPAD_UP", "DPAD_DOWN", "DPAD_CENTER", "MENU", "BACK"
 HOME_WALK = [R, R, L, "shot 1", D, D, R, "shot 2", D, L, "shot 3", U, U, U, U, "shot 4"]
-SETTINGS = [U, R, OK, "wait SettingsActivity"]
+# Up to the playlist button, past ☰ More (since 1.3.0) to Settings.
+SETTINGS = [U, R, R, OK, "wait SettingsActivity"]
 def movies(style):
     return {"browse_style": style}, [R, OK, "wait BrowseActivity", D, D, R, "shot 1", D, R, R, D, "shot 2", U, U, U, "shot 3"]
 SCREENS = {
@@ -188,7 +189,8 @@ grep -q 'name="playlists">\\[{{' {PREFS} && sed -i 's/name="playlists">\\[/&{ent
 sed -i 's/<string name="active">[^<]*<\\/string>//; s/<string name="default_playlist">[^<]*<\\/string>//' {PREFS}
 sed -i 's/<map>/<map><string name="active">{TEST_ID}<\\/string><string name="default_playlist">{TEST_ID}<\\/string>/' {PREFS}
 """)
-
+    # Always only the test playlist while checks run: the owner's server names never reach a picture.
+    only_test_playlist()
 
 def only_test_playlist():
     """After add_test_playlist: hide the owner's real playlists for screenshots (restore() brings them back).

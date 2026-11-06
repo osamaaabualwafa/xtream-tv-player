@@ -1437,6 +1437,7 @@ class PlayerActivity : AppCompatActivity() {
 
     /** Key code of the last seek key (diagnostics: some remotes send other codes for Left/Right). */
     private var diagSeekKey = 0
+    private var diagSeekSeq = 0
 
     /**
      * Diagnostics (review 1.1I and the bubble with the toolbar hidden): every seek with the key that
@@ -1449,7 +1450,9 @@ class PlayerActivity : AppCompatActivity() {
         val where = if (toolbar) "toolbar open" else "toolbar hidden"
         Diag.log("seek", "$key ${if (deltaMs > 0) "+" else "−"}${kotlin.math.abs(deltaMs) / 1000} s, $where: " +
             "${formatDuration(before)} → ${formatDuration(target)}${if (toolbar) "" else if (bubble) ", bubble shown" else ", bubble NOT shown"}")
+        val seq = ++diagSeekSeq
         playerView.postDelayed({
+            if (seq != diagSeekSeq) return@postDelayed   // Pressed again since: that seek moved it, not this one.
             val now = player?.currentPosition ?: return@postDelayed
             val off = now - target
             // Playing on for 2.5 s moves it about that much; more than 4 s off means it went elsewhere.
@@ -1862,15 +1865,35 @@ class PlayerActivity : AppCompatActivity() {
     // ---- Quick seek: arrows / mouse side buttons, with a small pill instead of the full controls ----
 
     private val hidePlayFlash = Runnable {
-        playFlash.animate().alpha(0f).setDuration(200).withEndAction { playFlash.visibility = View.GONE }.start()
+        playFlash.animate().alpha(0f).setDuration(200).withLayer().withEndAction {
+            playFlash.visibility = View.GONE
+            redrawWholeScreen()
+        }.start()
+    }
+
+    /**
+     * Some TV chips (seen on a Skyworth with an MStar video decoder) skip a small redraw on top of
+     * playing video: the seek bubble and the ▶/❚❚ sign were "shown" but never appeared, while the
+     * toolbar (which fades over the whole screen) did. Showing or hiding one redraws everything.
+     */
+    private fun redrawWholeScreen() {
+        window.decorView.invalidate()
+        window.decorView.postOnAnimation { window.decorView.invalidate() }
+    }
+
+    /** A small sign over the video: a quick fade in on its own layer, with the whole screen redrawn. */
+    private fun showOverVideo(v: View) {
+        v.animate().cancel()
+        if (v.visibility != View.VISIBLE) v.alpha = 0f
+        v.visibility = View.VISIBLE
+        v.animate().alpha(1f).setDuration(80).withLayer().start()
+        redrawWholeScreen()
     }
 
     /** Brief ▶ / ❚❚ in the middle of the screen; fades out either way so nothing stays on the picture. */
     private fun showPlayPauseFlash(playing: Boolean) {
         playFlash.text = if (playing) "▶" else "❚❚"
-        playFlash.animate().cancel()
-        playFlash.alpha = 1f
-        playFlash.visibility = View.VISIBLE
+        showOverVideo(playFlash)
         playFlash.removeCallbacks(hidePlayFlash)
         playFlash.postDelayed(hidePlayFlash, 800)
     }
@@ -1878,7 +1901,10 @@ class PlayerActivity : AppCompatActivity() {
     private var seekTotal = 0L
     private val hideSeekRipple = Runnable {
         for (v in listOf(seekForward, seekBack)) {
-            if (v.visibility == View.VISIBLE) v.animate().alpha(0f).setDuration(200).withEndAction { v.visibility = View.GONE }.start()
+            if (v.visibility == View.VISIBLE) v.animate().alpha(0f).setDuration(200).withLayer().withEndAction {
+                v.visibility = View.GONE
+                redrawWholeScreen()
+            }.start()
         }
         seekTotal = 0
     }
@@ -1894,6 +1920,7 @@ class PlayerActivity : AppCompatActivity() {
     /**
      * The seek bubble's colours follow the look: Default a navy bubble edged with its colour, Cinema a deep
      * red one, and Glass a dark bubble tinted from the chosen background (Midnight is the reference).
+     * The ▶ / ❚❚ sign (the remote's play/pause button) uses the same colours.
      */
     private fun styleSeekBubbles() {
         fun mix(a: Int, b: Int, t: Float) = android.graphics.Color.rgb(
@@ -1928,6 +1955,11 @@ class PlayerActivity : AppCompatActivity() {
             val group = bubble as android.view.ViewGroup
             for (i in 0 until group.childCount) (group.getChildAt(i) as? TextView)?.setTextColor(if (i == group.childCount - 1) colors[3] else colors[2])
         }
+        (playFlash.background.mutate() as? android.graphics.drawable.GradientDrawable)?.apply {
+            setColor(colors[0])
+            setStroke(if (colors[1] == 0) 0 else (resources.displayMetrics.density).toInt().coerceAtLeast(1), colors[1])
+        }
+        playFlash.setTextColor(colors[2])
     }
 
     // ---- Diagnostics (Settings > About): what playback really did, for the report ----
@@ -2063,10 +2095,8 @@ class PlayerActivity : AppCompatActivity() {
         (if (forward) seekForwardText else seekBackText).text = "${kotlin.math.abs(seekTotal) / 1000} seconds"
         other.animate().cancel()
         other.visibility = View.GONE
-        // At once, with no fade in: the seek itself can keep the screen busy for a moment.
-        shown.animate().cancel()
-        shown.alpha = 1f
-        shown.visibility = View.VISIBLE
+        // A very short fade on its own layer, with the whole screen redrawn (see redrawWholeScreen).
+        showOverVideo(shown)
         seekForward.removeCallbacks(hideSeekRipple)
         seekForward.postDelayed(hideSeekRipple, 1_500)
         diagSeek(deltaMs, before, target, toolbar = false, bubble = shown.isShown)

@@ -64,4 +64,8 @@ All items must be focusable with a visible focus highlight (D-pad only, no touch
 - Anything holding text grows with it: use `minHeight`, not a fixed height, when a label can wrap to two lines.
 - Short labels (names, buttons, tabs) always show in full: give them room or let the row scroll. "…" (the theme default) is only for long content titles.
 - A row of choices fits on screen (use `FlowRow`: one row when it fits, a second only when needed): nothing is left half cut at the edge. A word never breaks in two.
-- Debug builds log `SizeClip` for cut text. `python scripts/uitest/size_check.py` walks the screens at the biggest sizes, and `run.py push` runs it too.
+- Debug builds log `SizeClip` for cut text. `python scripts/uitest/size_check.py` walks the screens at the biggest sizes, and `python scripts/test.py push` runs it too.
+
+## Tests
+- All tests and when they run: `TESTS.md`. On this computer, one command with four levels: `python scripts/test.py quick|push|player|look`.
+- A new feature's check joins a level in `scripts/test.py` and the list in `TESTS.md`, never a separate one-off script.
