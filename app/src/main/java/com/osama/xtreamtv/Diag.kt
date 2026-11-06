@@ -39,7 +39,12 @@ import java.util.concurrent.Executors
 /** A message on screen, also kept in the diagnostics report (what the user was told). */
 fun showToast(context: Context, text: CharSequence, length: Int) {
     Diag.log("message", text.toString())
-    Toast.makeText(context, text, length).show()
+    // On a screen: the themed pill (MessagePill). Without one (rare): Android's own message.
+    var c: Context? = context
+    while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
+    val activity = c as? android.app.Activity
+    if (activity != null && !activity.isFinishing && activity.window != null) MessagePill.show(activity, text, length)
+    else Toast.makeText(context, text, length).show()
 }
 
 /**
@@ -612,6 +617,7 @@ object Diag {
 
         override fun onActivityStarted(activity: Activity) {
             if (started == 0 && !firstStart) log("app", "came back from the background to ${activity.javaClass.simpleName.removeSuffix("Activity")}")
+            if (started == 0 && !firstStart) Updates.noteReturn()
             firstStart = false
             started++
         }

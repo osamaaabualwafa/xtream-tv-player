@@ -99,6 +99,11 @@ class FocusMap(private val focused: () -> View?) {
             if (from.selectionStart != edge) return false
         }
         var next = from.focusSearch(dir)
+        // Left or Right in an up-and-down list (the categories) never moves within that list: the
+        // section's exit decides. Android's nearest-view guess could return the list itself, which
+        // then handed the highlight to its first entry (Movies, Preview layout: Right jumped to
+        // "Continue watching" instead of the posters).
+        if (sideways && next != null && verticalList(from)?.let { list -> next === list || isInside(next, list) } == true) next = null
         // Android's nearest-view guess can pick something beside the section (Settings: Down from
         // "Check for updates" chose the menu on the left) while there is more of this section
         // below. Look inside the section first.
@@ -116,6 +121,24 @@ class FocusMap(private val focused: () -> View?) {
         here.last = from
         here.exits[dir]?.invoke()?.requestFocus(dir)
         return true // R1: no exit, stay.
+    }
+
+    /** The up-and-down list (vertical RecyclerView) [v] is in, or null. */
+    private fun verticalList(v: View): RecyclerView? {
+        var p = v.parent as? View
+        while (p != null && p !is RecyclerView) p = p.parent as? View
+        val rv = p as? RecyclerView ?: return null
+        val lm = rv.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager ?: return null
+        return if (lm !is GridLayoutManager && lm.orientation == RecyclerView.VERTICAL) rv else null
+    }
+
+    private fun isInside(v: View, parent: View): Boolean {
+        var p = v.parent as? View
+        while (p != null) {
+            if (p === parent) return true
+            p = p.parent as? View
+        }
+        return false
     }
 
     /** On the last item of a list in this direction: the list keeps the highlight, but an exit may apply. */

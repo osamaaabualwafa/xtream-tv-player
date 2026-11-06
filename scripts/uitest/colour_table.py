@@ -52,7 +52,6 @@ def main():
         add("Default", f"{accent[7:]} accent", [[accent]])
     for palette in ("Coastal", "Coconut"):
         add("Default", f"{palette} colours", [["Accent.Blue", f"Palette.{palette}"]])
-    add("Cinema", "", [["Accent.Blue", "Palette.Cinema", "Look.Cinema"]])
     for scene in [n for n in styles if n.startswith("Scene.")]:
         daylight = scene == "Scene.Daylight"
         for glass in ["Glass.Daylight"] if daylight else ["Glass.Clear", "Glass.Frosted", "Glass.Smoked"]:

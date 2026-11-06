@@ -38,6 +38,18 @@ class Prefs(context: Context) {
     private val global = app.getSharedPreferences("xtream", Context.MODE_PRIVATE)
 
     companion object {
+        /** Home rows that can be shown, hidden and moved, in their first order. */
+        val HOME_ROWS = listOf("new", "continue", "favorites", "top_movies", "top_series", "channels", "recent_movies", "recent_series")
+        val HOME_ROW_NAMES = mapOf(
+            "new" to "New episodes",
+            "continue" to "Continue watching",
+            "favorites" to "Favorites",
+            "top_movies" to "Top rated movies",
+            "top_series" to "Top rated series",
+            "channels" to "Favorite channels",
+            "recent_movies" to "Recently added movies",
+            "recent_series" to "Recently added series",
+        )
         // The single login from before playlists existed keeps its data in the original file.
         private const val LEGACY_ID = "legacy"
         private val DATA_PREFIXES = listOf("favorites_", "continue", "pos_", "vod_hls", "formats")
@@ -308,9 +320,13 @@ class Prefs(context: Context) {
         get() = global.getInt("home_menu_button", 0)
         set(value) = global.edit().putInt("home_menu_button", value).apply()
 
-    /** The Coastal and Coconut themes are now colours of the Default theme (also for old backups). */
+    /**
+     * The Coastal and Coconut themes are now colours of the Default theme (also for old backups);
+     * the Cinema theme (1) was removed on 2026-11-07 and becomes Default with its saved colour.
+     */
     fun moveRemovedThemes() {
         val old = themeIndex
+        if (old == 1) themeIndex = 0
         if (old == 2 || old == 3) {
             themeIndex = 0
             paletteIndex = old - 1
@@ -321,6 +337,35 @@ class Prefs(context: Context) {
     var paletteIndex: Int
         get() = global.getInt("palette", 0)
         set(value) = global.edit().putInt("palette", value).apply()
+
+    /** Movies / Series grid order (Menu on the grid): 0 provider, 1 IMDb score, 2 A to Z, 3 recently added. */
+    fun browseSort(type: ContentType): Int = global.getInt("browse_sort_${type.name}", 0)
+
+    fun setBrowseSort(type: ContentType, value: Int) = global.edit().putInt("browse_sort_${type.name}", value).apply()
+
+    /** Home rows (Settings > Home layout > Arrange rows), top to bottom. Rows added later join at the end. */
+    var homeRowOrder: List<String>
+        get() {
+            // Saved before the split: one "top" row became Top rated movies and Top rated series.
+            val raw = global.getString("home_rows", null)?.split(',') ?: emptyList()
+            val saved = raw.flatMap { if (it == "top") listOf("top_movies", "top_series") else listOf(it) }.filter { it in HOME_ROWS }.distinct().toMutableList()
+            for (k in HOME_ROWS) if (k !in saved) saved.add(k)
+            return saved
+        }
+        set(value) = global.edit().putString("home_rows", value.joinToString(",")).apply()
+
+    /** Home rows switched off; until first arranged, the old "Most recent" switches decide. */
+    var homeRowHidden: Set<String>
+        get() = global.getStringSet("home_rows_hidden", null)?.flatMap { if (it == "top") listOf("top_movies", "top_series") else listOf(it) }?.toSet() ?: buildSet {
+            if (homeRecentMovies == 0) add("recent_movies")
+            if (homeRecentSeries == 0) add("recent_series")
+        }
+        set(value) = global.edit().putStringSet("home_rows_hidden", value).apply()
+
+    /** Home's Favorites row: "MOVIE" or "SERIES" (1.1A, the switch in the row's title). */
+    var homeFavoritesKind: String
+        get() = global.getString("home_fav_kind", "MOVIE") ?: "MOVIE"
+        set(value) = global.edit().putString("home_fav_kind", value).apply()
 
     /** Home's "Recently added" rows (Settings > Home layout): 1 shown, 0 hidden. Both off: no section. */
     var homeRecentMovies: Int
@@ -887,6 +932,8 @@ class ItemAdapter(
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         recycler = recyclerView
         if (grid) prepareSpareCards(recyclerView)
+        // 1.1E: posters on screen fill in their real scores.
+        if (grid) Ratings.attachPosters(recyclerView, this)
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
@@ -958,13 +1005,31 @@ class ItemAdapter(
         holder.title.text = item.name
         val badge = holder.ratingBadge
         if (badge != null) {
-            val rating = displayRating(item.rating)
-            badge.text = rating?.let { "★ $it" }
-            badge.visibility = if (rating == null) View.GONE else View.VISIBLE
+            // The provider's own ★ rating is no longer shown (1.1E: only real IMDb / Rotten Tomatoes scores).
+            badge.visibility = View.GONE
             holder.subtitle.text = item.note ?: ""
             holder.subtitle.visibility = if (item.note == null) View.GONE else View.VISIBLE
         } else {
-            holder.subtitle.text = item.note ?: if (grid) displayRating(item.rating)?.let { "★ $it" } ?: "" else item.num ?: ""
+            holder.subtitle.text = item.note ?: if (grid) "" else item.num ?: ""
+        }
+        // 1.1E: real scores (known ones only, never fetched for a list) replace the provider's ★.
+        if (item.type != ContentType.LIVE && item.note == null) {
+            val scores = Ratings.forPoster(holder.itemView.context, item)
+            if (scores != null && !scores.isEmpty) {
+                holder.ratingBadge?.visibility = View.GONE
+                // Small cards (More like this) have room for IMDb only. Never "…": cutting the line
+                // inside the drawn IMDb label turned it into boxes (2026-11-07).
+                val narrow = (holder.itemView.layoutParams?.width ?: 0) in 1..(130 * holder.itemView.resources.displayMetrics.density).toInt()
+                val shown = if (narrow && scores.imdb != null) RatingBadges.Scores(scores.imdb, null) else scores
+                holder.subtitle.ellipsize = null
+                holder.subtitle.text = RatingBadges.line(holder.itemView.context, shown, holder.itemView.context.themeColor(R.attr.appTextSecondary))
+                holder.subtitle.visibility = View.VISIBLE
+            }
+        }
+        holder.itemView.findViewById<TextView?>(R.id.score_chip)?.let { chip ->
+            val scores = if (item.note != null && item.ratingId != null && item.type != ContentType.LIVE) Ratings.forPoster(chip.context, item) else null
+            chip.text = scores?.let { RatingBadges.line(chip.context, it, 0xFFFFFFFF.toInt()) }
+            chip.visibility = if (scores == null) View.GONE else View.VISIBLE
         }
         holder.watchProgress?.apply {
             visibility = if (item.progress >= 0f) View.VISIBLE else View.GONE

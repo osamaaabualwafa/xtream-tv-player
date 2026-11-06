@@ -29,9 +29,10 @@ It does not change any code without approval.
 | T05 Series | Seasons, episodes, next-episode countdown and auto-play, episode list in player, both episode formats, 12-episode season, empty series |
 | T06 Search and Home | Search (English, Arabic, no result, filters, open results), Home rows, counts, featured banner, refresh, guide from list |
 | T07 Settings | Every option in every section, every value, then restored; layouts; connection check |
-| T08 Themes | Default, Cinema and Glass × every screen × 5 Home layouts × 4 Movies/Series layouts; Glass: 9 backgrounds, 3 glass styles, 4 highlight styles (dark and Daylight), moving background; old Coastal/Coconut themes move to Default; 8 colours; palettes; backgrounds; text and interface sizes; effects |
+| T08 Themes | Default and Glass × every screen × 5 Home layouts × 4 Movies/Series layouts; Glass: 9 backgrounds, 3 glass styles, 4 highlight styles (dark and Daylight), moving background; old Coastal/Coconut/Cinema themes move to Default; 8 colours; palettes; backgrounds; text and interface sizes; effects |
 | T09 Stress | 10,000 channels / 50,000 movies / 5,000 series: open times, fast scrolling, memory, search; 800 random keys |
 | T11 New in the Glass version | Dock Home (every tile), quick drawer on the Menu key (every Home layout, its buttons, the "does nothing" setting), Cards player menu (live and movie, Default and Glass) |
+| T12 New in 2.0.0 | Sort button in Movies (Up to Search, Left to Sort, the themed list, A to Z), Arrange Home rows (hide, show, move), the themed message pill, Ratings Get started (no key), the HD banner and adaptive icon |
 | T10 Bad network | Slow server, broken server, internet cut while watching live / a movie / browsing / starting, state kept after reopening |
 
 Automatic screen checks on every screenshot: nothing highlighted, highlight off screen, text cut

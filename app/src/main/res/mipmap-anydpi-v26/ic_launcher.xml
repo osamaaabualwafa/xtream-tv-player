@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon (Android 8+): the Midnight background and the ice-to-teal X as separate layers, so
+     each TV can shape it (round, rounded square) and it stays sharp. Logo chosen 2026-11-07 (1.1Q). -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

@@ -50,6 +50,8 @@
 
                 <TextView android:id="@+id/menu_browse" style="@style/SettingsMenuItem" android:text="Movies and series" />
 
+                <TextView android:id="@+id/menu_ratings" style="@style/SettingsMenuItem" android:text="Ratings" />
+
                 <TextView android:id="@+id/menu_player" style="@style/SettingsMenuItem" android:text="Player" />
 
                 <TextView android:id="@+id/menu_color" style="@style/SettingsMenuItem" android:text="Look and colours" />

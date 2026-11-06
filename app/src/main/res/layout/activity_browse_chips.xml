@@ -43,6 +43,13 @@
                 android:text="TV guide"
                 android:visibility="gone" />
 
+            <TextView
+                android:id="@+id/sort_button"
+                style="@style/GlassPill"
+                android:layout_height="46dp"
+                android:text="Sort"
+                android:visibility="gone" />
+
             <EditText
                 android:id="@+id/search"
                 style="@style/GlassInput"

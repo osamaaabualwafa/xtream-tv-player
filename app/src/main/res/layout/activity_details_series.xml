@@ -71,6 +71,21 @@
                 android:layout_marginTop="10dp"
                 android:orientation="horizontal" />
 
+            <!-- 1.1E: the next episode (series), from MDBList. -->
+            <TextView
+                android:id="@+id/next_episode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_meta_chip"
+                android:paddingLeft="12dp"
+                android:paddingTop="4dp"
+                android:paddingRight="12dp"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/appText"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/plot"
                 android:layout_width="match_parent"
@@ -126,6 +141,12 @@
                 <Button
                     android:id="@+id/favorite"
                     style="@style/GlassButton" />
+
+                <Button
+                    android:id="@+id/wrong_scores"
+                    style="@style/GlassButton"
+                    android:text="Wrong scores"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <ProgressBar
@@ -173,6 +194,32 @@
                 android:paddingRight="44dp"
                 android:paddingBottom="6dp"
                 android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- 1.1E: More like this, under the episodes; Down from the episodes slides the top part away. -->
+        <LinearLayout
+            android:id="@+id/recos_box"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/recos_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="More like this"
+                android:textColor="?attr/appText"
+                android:textSize="15sp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recos"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:clipToPadding="false"
+                android:paddingRight="44dp" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

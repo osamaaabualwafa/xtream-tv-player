@@ -287,7 +287,7 @@
         <item name="appShade99">#99F1EFE8</item>
         <item name="appShade1A">#1AF1EFE8</item>
         <item name="appLiveText">#FFFFFFFF</item>
-        <item name="appSelectedRing">#00000000</item>
+        <item name="appSelectedRing">#993264DA</item>
         <item name="appAccent0D">#0D3264DA</item>
         <item name="appAccent26">#263264DA</item>
         <item name="appAccent4D">#4D3264DA</item>

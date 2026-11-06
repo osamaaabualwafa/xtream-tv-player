@@ -360,6 +360,20 @@ def login():
         press(BACK)
         time.sleep(1)
         check(f"1.1P {field}: closing the keyboard puts the card back", bounds(field) == rest[field], str(bounds(field)))
+    # A tap instead of the remote (touch screens, a mouse on the emulator): Android skips the "click"
+    # on a field that wasn't selected, and the keyboard covered Username (2026-11-06).
+    for field in ("username", "password"):
+        press(BACK)
+        time.sleep(0.8)
+        box = bounds(field)
+        if not box:
+            check(f"1.1P {field}: tapped, above the keyboard", False, "field not found")
+            continue
+        r.adb("shell", "input", "tap", str((box[0] + box[2]) // 2), str((box[1] + box[3]) // 2))
+        time.sleep(2)
+        box = bounds(field)
+        check(f"1.1P {field}: tapped, above the keyboard", ime_shown() and bool(box) and box[3] <= h * 0.53,
+              f"keyboard={ime_shown()}, bottom edge {box[3] if box else None} of {h}")
     r.adb("shell", "am", "force-stop", r.PKG)
 
 

@@ -23,8 +23,13 @@ class LayoutThumbView @JvmOverloads constructor(
             invalidate()
         }
 
-    private val plain = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x38FFFFFF }
-    private val faint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1FFFFFFF }
+    // The theme's text colour, faint: light blocks on dark looks, dark ones on Daylight (white
+    // blocks vanished on its light cards).
+    private val ink = context.obtainStyledAttributes(intArrayOf(R.attr.appText)).let { a ->
+        a.getColor(0, 0xFFFFFFFF.toInt()).also { a.recycle() }
+    } and 0x00FFFFFF
+    private val plain = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink or 0x38000000 }
+    private val faint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink or 0x1F000000 }
     private val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         val a = context.obtainStyledAttributes(intArrayOf(R.attr.appAccent))
         color = a.getColor(0, 0xFF3D8BFD.toInt())

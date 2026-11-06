@@ -81,45 +81,6 @@
         <item name="appBackground">@drawable/bg_palette</item>
     </style>
 
-    <!-- Cinema: near-black with velvet red; used by the Cinema theme. -->
-    <style name="Palette.Cinema">
-        <!-- Its own red under highlighted buttons (not the Blue colour's deeper shade, review 1.1R). -->
-        <item name="appButtonFocus">?attr/appAccent</item>
-        <item name="appBg">#FF0B0707</item>
-        <item name="appSurface">#FF1A1212</item>
-        <item name="appSurfaceFocus">#FF2A1A1A</item>
-        <item name="appSurfaceActive">#FF221616</item>
-        <item name="appOverlay">#E60B0707</item>
-        <item name="appGlassFill">#FF181010</item>
-        <item name="appGlassStroke">#FF3A2626</item>
-        <item name="appFocusStroke">#FFE5303C</item>
-        <item name="appText">#FFF5EDE8</item>
-        <item name="appTextSecondary">#FFB9A9A2</item>
-        <item name="appTileCount">#FFD6C8C1</item>
-        <item name="appGold">#FFE8B04A</item>
-        <item name="appError">#FFFF6B6B</item>
-        <item name="appOnAccent">#FFFFFFFF</item>
-        <item name="appAccent0D">#0DC42530</item>
-        <item name="appAccent26">#26C42530</item>
-        <item name="appAccent4D">#4DC42530</item>
-        <item name="appAccent59">#59C42530</item>
-        <item name="appAccent66">#66C42530</item>
-        <item name="appAccent73">#73C42530</item>
-        <item name="appAccent80">#73C42530</item>
-        <item name="appAccent99">#99C42530</item>
-        <item name="appAccentCC">#CCC42530</item>
-        <item name="appAccent">#FFC42530</item>
-        <item name="colorAccent">#FFC42530</item>
-        <item name="appGlow">#FF3A0E12</item>
-        <item name="appTile2_1A">#1AC46A3A</item>
-        <item name="appTile2_38">#38C46A3A</item>
-        <item name="appTile2_66">#66C46A3A</item>
-        <item name="appTile3_1A">#1A8B4A6A</item>
-        <item name="appTile3_40">#408B4A6A</item>
-        <item name="appTile3_6B">#6B8B4A6A</item>
-        <item name="appBackground">@drawable/bg_palette</item>
-    </style>
-
     <!-- Glass: text and quiet surfaces; the scene and glass style bring the rest (THEME.md 4 and 5). -->
     <style name="Palette.Glass">
         <item name="appText">#FFF0F6F6</item>

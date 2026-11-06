@@ -1,6 +1,7 @@
 package com.osama.xtreamtv
 
 import android.app.Application
+import kotlinx.coroutines.launch
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -10,10 +11,94 @@ class XtreamApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         Diag.init(this)
+        Ratings.init(this)
+        // A message left by a screen that closed (the player's "Next episode airs …") shows on the next one.
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) = MessagePill.showPending(activity)
+            override fun onActivityCreated(activity: android.app.Activity, state: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: android.app.Activity) {}
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivityStopped(activity: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, state: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
         if (BuildConfig.DEBUG) {
             RemoteHold.enabled = getSharedPreferences("xtream", MODE_PRIVATE).getBoolean("dbg_hold_mode", true)
             frameStats()
             holdKeyForTests()
+            idCoverageForTests()
+            ratingsSampleForTests()
+            fieldsProbeForTests()
+            // Test builds: open a title's page by its exact name (active playlist), no key route needed.
+            //   adb shell am broadcast -a com.osama.xtreamtv.debug.OPEN --es name "I'm Game" --es type MOVIE
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val name = intent.getStringExtra("name") ?: return
+                    val type = runCatching { ContentType.valueOf(intent.getStringExtra("type") ?: "MOVIE") }.getOrDefault(ContentType.MOVIE)
+                    val api = Session.api(context) ?: return
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                        val all = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { api.streams(type, null) }.getOrElse { emptyList() } }
+                        val item = all.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return@launch android.util.Log.d("Recos", "no title named $name").let { }
+                        startActivity(DetailsActivity.intent(context, item).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.OPEN"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: what the provider really has for a series' last season. Logs episode numbers,
+            // lengths, dates and the server's answer (code, size) for each file; never the address.
+            //   adb shell am broadcast -a com.osama.xtreamtv.debug.EPCHECK --es name "Dexter Resurrection"
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val name = intent.getStringExtra("name") ?: return
+                    val api = Session.api(context) ?: return
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val tag = "EpCheck"
+                        val all = runCatching { api.streams(ContentType.SERIES, null) }.getOrElse { emptyList() }
+                        val hits = all.filter { it.name.contains(name, ignoreCase = true) }
+                        android.util.Log.d(tag, "series named like \"$name\": ${hits.map { it.name }}")
+                        for (s in hits) {
+                            val info = runCatching { api.seriesInfo(s.id) }.getOrNull() ?: continue
+                            val last = info.seasons.keys.maxOrNull() ?: continue
+                            android.util.Log.d(tag, "== ${s.name}: seasons ${info.seasons.keys}, last season $last")
+                            for (ep in info.seasons[last].orEmpty()) {
+                                val (code, size) = runCatching {
+                                    val conn = java.net.URL(api.episodeUrl(ep.id, ep.ext)).openConnection() as java.net.HttpURLConnection
+                                    conn.connectTimeout = 8000
+                                    conn.readTimeout = 8000
+                                    conn.instanceFollowRedirects = true
+                                    conn.setRequestProperty("Range", "bytes=0-1023")
+                                    try { conn.responseCode to conn.getHeaderField("Content-Range")?.substringAfter('/')?.takeIf { it != "*" } } finally { conn.disconnect() }
+                                }.getOrElse { -1 to it.javaClass.simpleName }
+                                android.util.Log.d(tag, "  S${ep.season} E${ep.number} \"${ep.title}\" · length ${ep.duration ?: "-"} · file answer $code · size ${size ?: "-"} bytes")
+                            }
+                        }
+                        android.util.Log.d(tag, "done")
+                    }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.EPCHECK"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: adb shell am broadcast -a com.osama.xtreamtv.debug.ARRANGE (opens Arrange Home rows).
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    startActivity(android.content.Intent(context, HomeRowsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.ARRANGE"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: adb shell am broadcast -a com.osama.xtreamtv.debug.MDBL --es path /tmdb/show/1396
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    intent.getStringExtra("path")?.let { Ratings.probeForTests(it) }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.MDBL"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: how names are cleaned for the name search (files/debug_names.txt, one per line).
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val f = java.io.File(filesDir, "debug_names.txt")
+                    if (!f.exists()) return
+                    for (n in f.readLines().filter { it.isNotBlank() }) {
+                        val a = Ratings.cleanName(n)
+                        val b = Ratings.cleanFurther(n)
+                        android.util.Log.d("NameClean", "$n  =>  1st \"${a.first}\" ${a.second ?: "-"}  |  2nd \"${b.first}\" ${b.second ?: "-"}")
+                    }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.NAMES").also { }, if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
         }
         // Settings stay exactly as the user left them, whatever a new version's defaults are.
         Prefs(this).pinSettings(BuildConfig.VERSION_CODE)
@@ -25,6 +110,165 @@ class XtreamApp : Application(), ImageLoaderFactory {
      * repeat every 50 ms, then the release. From the computer:
      *   adb shell am broadcast -a com.osama.xtreamtv.debug.HOLD --ei key 20 --ei ms 10000
      */
+    /**
+     * Test builds (review 1.1E, step 1): how many movies and series carry a TMDB or IMDb ID in their
+     * detail page. Samples a few dozen titles of the active playlist and logs only counts and field
+     * names ("IdCoverage"), never titles, ids or addresses. From the computer:
+     *   adb shell am broadcast -a com.osama.xtreamtv.debug.IDS --ei sample 60
+     */
+    private fun idCoverageForTests() {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val sample = intent.getIntExtra("sample", 60)
+                val api = Session.api(context) ?: return android.util.Log.d("IdCoverage", "no playlist").let { }
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    fun present(v: Any?): Boolean {
+                        val s = v?.toString()?.trim() ?: return false
+                        return s.isNotEmpty() && s != "0" && s != "null" && s != "tt" && s != "[]"
+                    }
+                    for (type in listOf(ContentType.MOVIE, ContentType.SERIES)) {
+                        val all = runCatching { api.streams(type, null) }.getOrElse { emptyList() }
+                        val picked = all.shuffled().take(sample)
+                        var withAny = 0
+                        var answered = 0
+                        val perField = java.util.TreeMap<String, Int>()
+                        for (item in picked) {
+                            val root = runCatching {
+                                if (type == ContentType.MOVIE) api.debugRaw("action" to "get_vod_info", "vod_id" to item.id)
+                                else api.debugRaw("action" to "get_series_info", "series_id" to item.id)
+                            }.getOrNull() as? org.json.JSONObject ?: continue
+                            answered++
+                            var any = false
+                            for (part in listOf("info", "movie_data")) {
+                                val o = root.optJSONObject(part) ?: continue
+                                for (k in o.keys()) {
+                                    val lk = k.lowercase()
+                                    if (("tmdb" in lk || "imdb" in lk) && present(o.opt(k))) {
+                                        perField["$part.$k"] = (perField["$part.$k"] ?: 0) + 1
+                                        any = true
+                                    }
+                                }
+                            }
+                            if (any) withAny++
+                        }
+                        android.util.Log.d("IdCoverage", "${type.name}: list ${all.size}, sampled ${picked.size}, answered $answered, with an id $withAny (${if (answered > 0) withAny * 100 / answered else 0}%), by field $perField")
+                    }
+                    android.util.Log.d("IdCoverage", "done")
+                }
+            }
+        }
+        val filter = android.content.IntentFilter("com.osama.xtreamtv.debug.IDS")
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        else registerReceiver(receiver, filter)
+    }
+
+    /**
+     * Test builds (1.1E): looks up a sample of the active playlist's titles with the saved key, so the
+     * matching can be read in the "RatingsMatch" log. Uses real lookups (about 1-2 per title).
+     *   adb shell am broadcast -a com.osama.xtreamtv.debug.RATINGS --ei sample 20 --es type SERIES
+     */
+    private fun ratingsSampleForTests() {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val sample = intent.getIntExtra("sample", 20)
+                val types = intent.getStringExtra("type")?.let { listOf(ContentType.valueOf(it)) } ?: listOf(ContentType.MOVIE, ContentType.SERIES)
+                val api = Session.api(context) ?: return android.util.Log.d("RatingsMatch", "no playlist").let { }
+                if (!Ratings.hasKey) return android.util.Log.d("RatingsMatch", "no key").let { }
+                // --ez retry true: the titles that found nothing before, again (after a matching change).
+                val retry = intent.getBooleanExtra("retry", false)
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    val before = if (retry) Ratings.notFoundIdsForTests() else emptySet()
+                    if (retry) android.util.Log.d("RatingsMatch", "retrying ${before.size}, forgot ${Ratings.forgetNotFoundForTests()}")
+                    for (type in types) {
+                        val all = runCatching { api.streams(type, null) }.getOrElse { emptyList() }
+                        val picked = if (retry) all.filter { "${it.type.name}:${it.id}" in before }
+                            else all.filter { Ratings.needsLookup(it.type, it.id) }.shuffled().take(sample)
+                        android.util.Log.d("RatingsMatch", "== ${type.name}: ${all.size} in the list (${all.count { it.tmdb != null }} with a TMDB id in the list), looking up ${picked.size}")
+                        for (item in picked) runCatching { Ratings.lookupItem(api, item, onScreen = true) }
+                    }
+                    val m = Ratings.matching()
+                    android.util.Log.d("RatingsMatch", "done · totals: ${m.byId} by id · ${m.byName} by name · ${m.notFound} not found · usage ${Ratings.usage()?.let { "${it.used} of ${it.limit}" }}")
+                }
+            }
+        }
+        val filter = android.content.IntentFilter("com.osama.xtreamtv.debug.RATINGS")
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        else registerReceiver(receiver, filter)
+    }
+
+    /**
+     * Test builds (1.1E): what a series carries besides its name, year and poster, to find something
+     * that matches it exactly. Logs field names and short values to "FieldsProbe"; links only as
+     * "tmdb:" or "provider:" plus the file name, never an address.
+     *   adb shell am broadcast -a com.osama.xtreamtv.debug.FIELDS --ei sample 12
+     */
+    private fun fieldsProbeForTests() {
+        fun show(v: Any?): String {
+            val s = v?.toString()?.trim() ?: return "null"
+            if (s.startsWith("http")) {
+                val host = s.substringAfter("://").substringBefore('/')
+                val file = s.substringBefore('?').substringAfterLast('/')
+                return (if ("tmdb.org" in host) "tmdb:" else if ("youtube" in host || "youtu.be" in host) "youtube:" else "provider:") + file.take(50)
+            }
+            if (s.startsWith("[") && s.contains("http")) return "[list of ${s.count { it == ',' } + 1} links, first " + show(Regex("https?://[^\"]+").find(s.replace("\\/", "/"))?.value) + "]"
+            return s.replace("\n", " ").take(70)
+        }
+        fun dump(tag: String, o: org.json.JSONObject?) {
+            o ?: return
+            val parts = o.keys().asSequence().toList().map { k -> "$k=" + (o.optJSONObject(k)?.let { "{${it.keys().asSequence().toList().joinToString(",")}}" } ?: show(o.opt(k))) }
+            android.util.Log.d("FieldsProbe", "  $tag: " + parts.joinToString(" | "))
+        }
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                val sample = intent.getIntExtra("sample", 12)
+                val api = Session.api(context) ?: return
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    if (intent.getStringExtra("type") == "MOVIE") {
+                        val movies = runCatching { api.debugRaw("action" to "get_vod_streams") }.getOrNull() as? org.json.JSONArray ?: return@launch
+                        val all = (0 until movies.length()).mapNotNull { movies.optJSONObject(it) }
+                        val counts = java.util.TreeMap<String, Int>()
+                        for (o in all) for (k in o.keys()) if (o.optString(k).let { it.isNotBlank() && it != "0" && it != "null" && it != "[]" }) counts[k] = (counts[k] ?: 0) + 1
+                        android.util.Log.d("FieldsProbe", "MOVIE list ${all.size}, filled fields: $counts")
+                        for (o in all.shuffled().take(sample)) {
+                            android.util.Log.d("FieldsProbe", "== ${o.optString("name")}")
+                            dump("list", o)
+                            val info = runCatching { api.debugRaw("action" to "get_vod_info", "vod_id" to o.optString("stream_id")) }.getOrNull() as? org.json.JSONObject ?: continue
+                            dump("info", info.optJSONObject("info"))
+                            dump("movie_data", info.optJSONObject("movie_data"))
+                        }
+                        android.util.Log.d("FieldsProbe", "done")
+                        return@launch
+                    }
+                    val raw = runCatching { api.debugRaw("action" to "get_series") }.getOrNull() as? org.json.JSONArray ?: return@launch
+                    val list = (0 until raw.length()).mapNotNull { raw.optJSONObject(it) }
+                    val arabic = list.filter { o -> o.optString("name").any { it in '\u0600'..'\u06FF' } }.shuffled().take(sample / 2)
+                    val latin = list.filter { o -> o.optString("name").none { it in '\u0600'..'\u06FF' } }.shuffled().take(sample - sample / 2)
+                    for (o in latin + arabic) {
+                        android.util.Log.d("FieldsProbe", "== ${o.optString("name")}")
+                        dump("list", o)
+                        val info = runCatching { api.debugRaw("action" to "get_series_info", "series_id" to o.optString("series_id")) }.getOrNull() as? org.json.JSONObject ?: continue
+                        android.util.Log.d("FieldsProbe", "  parts: ${info.keys().asSequence().toList()}")
+                        dump("info", info.optJSONObject("info"))
+                        // The first episode, and its own info.
+                        val eps = info.opt("episodes")
+                        val first = when (eps) {
+                            is org.json.JSONObject -> eps.keys().asSequence().firstOrNull()?.let { eps.optJSONArray(it)?.optJSONObject(0) }
+                            is org.json.JSONArray -> eps.optJSONArray(0)?.optJSONObject(0)
+                            else -> null
+                        }
+                        dump("episode", first)
+                        dump("episode.info", first?.optJSONObject("info"))
+                        info.optJSONArray("seasons")?.optJSONObject(0)?.let { dump("season", it) }
+                    }
+                    android.util.Log.d("FieldsProbe", "done")
+                }
+            }
+        }
+        val filter = android.content.IntentFilter("com.osama.xtreamtv.debug.FIELDS")
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+        else registerReceiver(receiver, filter)
+    }
+
     private fun holdKeyForTests() {
         var resumed: java.lang.ref.WeakReference<android.app.Activity>? = null
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

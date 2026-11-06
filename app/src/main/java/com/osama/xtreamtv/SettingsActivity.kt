@@ -23,7 +23,7 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
 
-    private enum class Section { HOME, BROWSE, PLAYER, COLOR, AVATARS, CONNECTION, ABOUT }
+    private enum class Section { HOME, BROWSE, RATINGS, PLAYER, COLOR, AVATARS, CONNECTION, ABOUT }
 
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
@@ -61,14 +61,29 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        builtSizes = sizesKey()
         Appearance.apply(this)
-        val start = savedInstanceState?.getString("section")?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
-        build(start, rebuilt = savedInstanceState != null)
+        val name = savedInstanceState?.getString("section") ?: intent.getStringExtra(EXTRA_SECTION)
+        val start = name?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
+        val rebuilt = savedInstanceState != null || intent.getBooleanExtra(EXTRA_REBUILT, false)
+        build(start, rebuilt)
+        // Opened over the old screen by a look change: close that one once this one is on screen.
+        if (intent.getBooleanExtra(EXTRA_REBUILT, false)) {
+            val decor = window.decorView
+            decor.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
+                override fun onDraw() {
+                    decor.post {
+                        decor.viewTreeObserver.removeOnDrawListener(this)
+                        val old = previous?.get()
+                        previous = null
+                        if (old != null && old !== this@SettingsActivity && !old.isFinishing) {
+                            old.finish()
+                            old.overridePendingTransition(0, 0)
+                        }
+                    }
+                }
+            })
+        }
     }
-
-    private var builtSizes = ""
-    private fun sizesKey() = "${prefs.uiSize}/${prefs.textSize}"
 
     /** The whole screen, opened on [start]; [rebuilt]: after a look change, back on the option that changed. */
     private fun build(start: Section, rebuilt: Boolean) {
@@ -81,6 +96,7 @@ class SettingsActivity : AppCompatActivity() {
         menu = listOf(
             R.id.menu_home to Section.HOME,
             R.id.menu_browse to Section.BROWSE,
+            R.id.menu_ratings to Section.RATINGS,
             R.id.menu_player to Section.PLAYER,
             R.id.menu_color to Section.COLOR,
             R.id.menu_avatars to Section.AVATARS,
@@ -109,24 +125,27 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * A look change (theme, background, colours, sizes…): the new look is applied to this same
-     * screen, which is then rebuilt in place. Closing and reopening it (Android's usual way) left
-     * the TV black for about half a second between the two windows.
+     * A look change (theme, background, colours, sizes…): a new Settings screen opens over this one,
+     * with no animation, and this one closes once the new one is drawn. Android's usual reopen
+     * left the TV black for about half a second between the two windows, and rebuilding in place
+     * (1.3.4) kept the old text colours on Android 10.
      */
     override fun recreate() {
-        // Interface and text size are applied when a screen opens: those still need a reopen.
-        if (sizesKey() != builtSizes) return super.recreate()
-        val keep = section ?: Section.HOME
-        val fresh = resources.newTheme()
-        fresh.applyStyle(R.style.AppTheme, true)
-        theme.setTo(fresh)
-        Appearance.apply(this)
-        val attrs = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
-        window.setBackgroundDrawable(attrs.getDrawable(0))
-        attrs.recycle()
-        // A moving background put its colour and glows here; the new look brings its own.
-        findViewById<android.view.ViewGroup>(android.R.id.content).background = null
-        build(keep, rebuilt = true)
+        previous = java.lang.ref.WeakReference(this)
+        startActivity(
+            android.content.Intent(this, SettingsActivity::class.java)
+                .putExtra(EXTRA_SECTION, (section ?: Section.HOME).name)
+                .putExtra(EXTRA_REBUILT, true)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION),
+        )
+        overridePendingTransition(0, 0)
+    }
+
+    companion object {
+        private const val EXTRA_SECTION = "section"
+        private const val EXTRA_REBUILT = "rebuilt"
+        /** The screen being replaced by a look change (closed by the new one once it is drawn). */
+        private var previous: java.lang.ref.WeakReference<SettingsActivity>? = null
     }
 
     /** Glass: slimmer menu column, smaller titles, more room for the options. */
@@ -191,14 +210,21 @@ class SettingsActivity : AppCompatActivity() {
                 hint.text = "How the first screen after choosing a playlist looks"
                 choiceCards("H", Appearance.HOME_NAMES, prefs.homeStyle) { prefs.homeStyle = it }
                 if (glass) plainCard()
-                option("Most recent movies", listOf(1 to "On", 0 to "Off"), { prefs.homeRecentMovies }, { prefs.homeRecentMovies = it })
-                option("Most recent series", listOf(1 to "On", 0 to "Off"), { prefs.homeRecentSeries }, { prefs.homeRecentSeries = it })
+                // 1.1A: which rows Home shows, and their order (its own screen, concept C).
+                startAction("Arrange Home rows", R.drawable.ic_glass_list, "home_rows") {
+                    startActivity(android.content.Intent(this, HomeRowsActivity::class.java))
+                }
                 option("Menu button on Home", listOf(0 to "Opens the quick drawer", 1 to "Does nothing"), { prefs.homeMenuButton }, { prefs.homeMenuButton = it })
             }
             Section.BROWSE -> {
                 title.text = "Movies and series"
                 hint.text = "How the screen after opening Movies or Series looks"
                 choiceCards("B", Appearance.BROWSE_NAMES, prefs.browseStyle) { prefs.browseStyle = it }
+            }
+            Section.RATINGS -> {
+                title.text = "Ratings"
+                hint.text = "IMDb and Rotten Tomatoes scores on posters and details"
+                ratingsOptions()
             }
             Section.PLAYER -> {
                 title.text = "Player"
@@ -350,7 +376,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         fun action(label: String, icon: Int, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
             b.setOnClickListener { onClick() }
-            b.background = DiagUi.buttonBackground(this, 999)
+            b.background = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_settings_action)
             b.minHeight = dp(46)
             // Icon then words, from the left, like the rows in the card beside it.
             b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
@@ -396,6 +422,204 @@ class SettingsActivity : AppCompatActivity() {
         }
         cardHost = null
         target = null
+    }
+
+    /** Show the open section again (after the key window or an action changes what it shows). */
+    private fun reshow(focusTag: String? = null) {
+        val s = section ?: return
+        // The highlight waits on this section's menu entry while the options are rebuilt: removing the
+        // highlighted button would hand it to the menu's first entry, which opens Home layout.
+        menu.firstOrNull { it.second == s }?.let { findViewById<View>(it.first).requestFocus() }
+        section = null
+        show(s)
+        val v = focusTag?.let { body.findViewWithTag<View>(it) } ?: firstFocusable(body)
+        v?.requestFocus()
+    }
+
+    /**
+     * Settings > Ratings (1.1E). Before a key: Get started (what it is, Add key, How it works). With a key,
+     * two cards as approved (visual 3): the key and its actions on the left; the switches, Check matching
+     * and today's usage on the right. Other themes: the same cards one under the other.
+     */
+    private fun ratingsOptions() {
+        if (!Ratings.hasKey) {
+            // Get started: one card (unchanged from the first build).
+            fun note(text: String) = (target ?: body).addView(TextView(this).apply {
+                this.text = text
+                textSize = 13f
+                setTextColor(themeColor(R.attr.appTextSecondary))
+                setPadding(dp(10), dp(4), dp(10), dp(8))
+            })
+            heading("Get started", R.drawable.ic_glass_key)
+            note("Show real scores from IMDb and Rotten Tomatoes on posters and details, like this:")
+            (target ?: body).addView(TextView(this).apply {
+                text = RatingBadges.line(context, RatingBadges.Scores("7.8", 92), themeColor(R.attr.appText))
+                textSize = 17f
+                setPadding(dp(10), 0, dp(10), dp(10))
+            })
+            note("It needs a free key from MDBList (about 2 minutes). Add it once with your phone, or type it with the remote.")
+            startAction("Add key", R.drawable.ic_glass_key, "r_add") { RatingsUi.keyWindow(this) { reshow("r_add") } }
+            startAction("How it works", R.drawable.ic_glass_file, "r_help") { RatingsUi.help(this) { RatingsUi.keyWindow(this) { reshow("r_add") } } }
+            note("Your key stays on this TV. MDBList only gets a title's ID, or its name and year.")
+            target = null
+            return
+        }
+        var right: LinearLayout? = null
+        if (glass) {
+            val columns = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            fun column(rightMargin: Int) = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { this.rightMargin = rightMargin }
+            }
+            val left = column(dp(12))
+            right = column(0)
+            columns.addView(left)
+            columns.addView(right)
+            body.addView(columns)
+            cardHost = left
+        }
+        fun small(text: CharSequence, tint: Int? = null, top: Int = 4) = (target ?: body).addView(TextView(this).apply {
+            this.text = text
+            textSize = 12.5f
+            setTextColor(tint ?: themeColor(R.attr.appTextSecondary))
+            setPadding(dp(10), dp(top), dp(10), dp(8))
+        })
+        run {
+            heading("Your MDBList key", R.drawable.ic_glass_key)
+            small("Scores show like this:", top = 6)
+            (target ?: body).addView(TextView(this).apply {
+                text = RatingBadges.line(context, RatingBadges.Scores("7.8", 92), themeColor(R.attr.appText))
+                textSize = 17f
+                setPadding(dp(10), 0, dp(10), dp(8))
+            })
+            linkRow("Key", null, if (Ratings.keyWorks) "●  Valid · ••••${Ratings.keyEnd}" else "●  Not accepted · ••••${Ratings.keyEnd}", "r_key",
+                tint = if (Ratings.keyWorks) DiagUi.GREEN else DiagUi.RED, onClick = null)
+            addDivider(target ?: body)
+            (target ?: body).addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) })
+            // The same round buttons as the Report card in About: icon, then words.
+            startAction("Add or change key", R.drawable.ic_glass_key, "r_add") { RatingsUi.keyWindow(this) { reshow("r_add") } }
+            startAction("Refresh saved scores", R.drawable.ic_glass_refresh, "r_refresh") {
+                Ratings.refreshAll()
+                showToast(this, "Scores will be asked again as titles are shown", android.widget.Toast.LENGTH_SHORT)
+            }
+            startAction("How it works", R.drawable.ic_glass_file, "r_help") { RatingsUi.help(this, null) }
+            startAction("Remove key", R.drawable.ic_glass_trash, "r_remove", danger = true) {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Remove the key?")
+                    .setMessage("Ratings switch off, and the key and every saved score are deleted from this TV.")
+                    .setPositiveButton("Remove") { _, _ ->
+                        Ratings.removeKey()
+                        Diag.log("ratings", "key removed")
+                        reshow("r_add")
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        small("Your key stays on this TV. MDBList only gets a title's ID, or its name and year.", top = 8)
+
+        // The right card: what is shown, matching, today's usage.
+        if (right != null) cardHost = right
+        heading("Ratings", R.drawable.ic_glass_star)
+        option("Show ratings", listOf(true to "On", false to "Off"), { Ratings.enabled }, { Ratings.enabled = it })
+        option("Show on posters", listOf(true to "On", false to "Off"), { Ratings.showOnPosters }, { Ratings.showOnPosters = it })
+        option("Find by name", listOf(true to "On", false to "Off"), { Ratings.findByName }, { Ratings.findByName = it })
+        small("No ID: the same name and year, and the same poster.", top = 0)
+        run {
+            val m = Ratings.matching()
+            val tried = m.byId + m.byName + m.notFound
+            val u = Ratings.usage()
+            val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(u?.resetsAt ?: System.currentTimeMillis()))
+            linkRow("Today", "Resets at $at · scores kept 7 to 30 days", u?.let { "${"%,d".format(it.used)} of ${"%,d".format(it.limit)}" } ?: "–", "r_today",
+                tint = if (u != null && u.used * 10 >= u.limit * 8) DiagUi.YELLOW else null, onClick = null)
+            linkRow("Matching so far", if (tried == 0) "Nothing looked up yet" else "${m.byId} by ID · ${m.byName} by name · ${m.notFound} not found", null, "r_tried", onClick = null)
+            addDivider(target ?: body)
+            (target ?: body).addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) })
+            startAction("Check matching", R.drawable.ic_glass_check, "r_check") { RatingsUi.matching(this) }
+        }
+
+        // Glass: both cards end at the same height.
+        right?.let { r ->
+            val left = (r.parent as android.view.ViewGroup).getChildAt(0) as android.view.ViewGroup
+            for (column in listOf(left, r)) {
+                column.layoutParams = (column.layoutParams as LinearLayout.LayoutParams).apply { height = LinearLayout.LayoutParams.MATCH_PARENT }
+                column.getChildAt(0)?.let { c -> c.layoutParams = c.layoutParams.apply { height = LinearLayout.LayoutParams.MATCH_PARENT } }
+            }
+        }
+        cardHost = null
+        target = null
+    }
+
+    /** Get started's round buttons: icon then words, the card's full width. */
+    private fun startAction(label: String, icon: Int, tag: String, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
+        b.tag = tag
+        b.setOnClickListener { onClick() }
+        b.background = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_settings_action)
+        b.minHeight = dp(46)
+        b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        b.setPadding(dp(16), 0, dp(16), 0)
+        val drawable = androidx.core.content.ContextCompat.getDrawable(this, icon)!!.mutate()
+        drawable.setBounds(0, 0, dp(20), dp(20))
+        if (danger) androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, 0xFFF2A7A7.toInt())
+        b.setCompoundDrawablesRelative(drawable, null, null, null)
+        b.compoundDrawablePadding = dp(12)
+        b.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = dp(10)
+            rightMargin = dp(10)
+            bottomMargin = dp(10)
+        }
+        if (danger) b.setTextColor(0xFFF2A7A7.toInt())
+        (target ?: body).addView(b)
+    }
+
+    /**
+     * A row like the option rows: a name (and a small line under it) on the left. With [onClick] it is an
+     * action: OK does it, and there is nothing on the right (no "▾": there is nothing to choose). Without,
+     * it shows a [value] on the right (the key's state, today's usage) and can't be selected.
+     */
+    private fun linkRow(name: String, sub: String?, value: String?, tag: String, tint: Int? = null, onClick: (() -> Unit)?) {
+        val host = target ?: body
+        val row = LayoutInflater.from(this).inflate(R.layout.item_settings_option, host, false)
+        row.tag = tag
+        val title = row.findViewById<TextView>(R.id.title)
+        val valueView = row.findViewById<TextView>(R.id.subtitle)
+        title.isSingleLine = false
+        title.text = if (sub == null) name else android.text.SpannableStringBuilder(name).append("\n").also { b ->
+            val start = b.length
+            b.append(sub)
+            b.setSpan(android.text.style.RelativeSizeSpan(0.8f), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            b.setSpan(android.text.style.ForegroundColorSpan(themeColor(R.attr.appTextSecondary)), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        if (tint != null && onClick != null) title.setTextColor(tint)
+        valueView.text = value
+        valueView.visibility = if (value == null) View.GONE else View.VISIBLE
+        if (glass) {
+            row.layoutParams = (row.layoutParams as android.view.ViewGroup.MarginLayoutParams).apply {
+                height = LinearLayout.LayoutParams.WRAP_CONTENT
+                bottomMargin = 0
+            }
+            row.minimumHeight = dp(48)
+            row.setPadding(dp(10), dp(6), dp(10), dp(6))
+            addDivider(host)
+            title.textSize = 14f
+            valueView.textSize = 13f
+        } else {
+            row.layoutParams = row.layoutParams.apply { height = LinearLayout.LayoutParams.WRAP_CONTENT }
+            row.minimumHeight = dp(58)
+            row.setPadding(row.paddingLeft, dp(8), row.paddingRight, dp(8))
+        }
+        if (tint != null && onClick == null) valueView.setTextColor(tint)
+        if (onClick == null) {
+            row.isFocusable = false
+            row.isClickable = false
+        } else {
+            row.setOnClickListener { onClick() }
+        }
+        host.addView(row)
     }
 
     private fun pill(text: String): TextView =

@@ -151,9 +151,6 @@ class T08_ThemesTest : QaTest() {
     @Test fun themeDefaultHome() = themeHome(0, "Default")
     @Test fun themeDefaultBrowse() = themeBrowse(0, "Default")
     @Test fun themeDefaultScreens() = themeScreens(0, "Default")
-    @Test fun themeCinemaHome() = themeHome(Appearance.THEME_CINEMA, "Cinema")
-    @Test fun themeCinemaBrowse() = themeBrowse(Appearance.THEME_CINEMA, "Cinema")
-    @Test fun themeCinemaScreens() = themeScreens(Appearance.THEME_CINEMA, "Cinema")
     @Test fun themeGlassHome() = themeHome(Appearance.THEME_GLASS, "Glass")
     @Test fun themeGlassBrowse() = themeBrowse(Appearance.THEME_GLASS, "Glass")
     @Test fun themeGlassScreens() = themeScreens(Appearance.THEME_GLASS, "Glass")
@@ -243,6 +240,12 @@ class T08_ThemesTest : QaTest() {
             org.junit.Assert.assertEquals("Old theme $old should become Default", 0, theme)
             org.junit.Assert.assertEquals("Old theme $old should keep its colours as palette $palette", palette, pal)
         }
+        // Cinema (1) was removed on 2026-11-07: it becomes Default and keeps the saved colour dot.
+        tag = "old_theme_1"
+        Qa.reset(settings = mapOf("theme" to 1, "accent" to 4))
+        home()
+        org.junit.Assert.assertEquals("Old Cinema theme should become Default", 0, Qa.prefs().getInt("theme", -1))
+        org.junit.Assert.assertEquals("Old Cinema theme keeps its colour", 4, Qa.prefs().getInt("accent", -1))
     }
 
     @Test

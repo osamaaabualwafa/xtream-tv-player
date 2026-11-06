@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Action buttons in Settings cards (Arrange Home rows, Ratings, About's report): rounded like the
+     card around them (not a round pill), and highlighted like every other Settings row. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <layer-list>
+            <item>
+                <shape>
+                    <solid android:color="?attr/appFocusFill" />
+                    <stroke android:width="?attr/appFocusStrokeThin" android:color="?attr/appFocusStroke" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+            <item android:bottom="1dp" android:left="1dp" android:right="1dp" android:top="1dp">
+                <shape>
+                    <stroke android:width="?attr/appFocusGlowWidth" android:color="?attr/appFocusGlow" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#00000000" />
+            <stroke android:width="1dp" android:color="?attr/appGlassStroke" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</selector>

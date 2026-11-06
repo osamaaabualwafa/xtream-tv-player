@@ -203,12 +203,12 @@ class T07_SettingsTest : QaTest() {
         pickTagged("glass_style0", "glass style Clear")
         pickTagged("focus_style0", "highlight Accent ring")
         crawl("Look (Glass)", skip = setOf("Theme"))
-        Qa.step("Theme row: Default, Cinema, Glass")
+        Qa.step("Theme row: Default, Glass")
         openOption("Theme")
         val themes = dialogChoices()
         Qa.shot("theme_choices", "Theme choices")
         Qa.back()
-        assertEquals("Themes offered", listOf("Default", "Cinema", "Glass"), themes)
+        assertEquals("Themes offered", listOf("Default", "Glass"), themes)
     }
 
     @Test

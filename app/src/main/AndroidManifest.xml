@@ -59,6 +59,7 @@
             android:screenOrientation="landscape"
             android:windowSoftInputMode="adjustNothing|stateAlwaysHidden" />
         <activity android:name=".HomeActivity" android:screenOrientation="landscape" />
+        <activity android:name=".HomeRowsActivity" android:screenOrientation="landscape" />
         <activity
             android:name=".BrowseActivity"
             android:screenOrientation="landscape"

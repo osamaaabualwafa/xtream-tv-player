@@ -61,8 +61,8 @@ object Look {
     }
 
     /**
-     * Screen titles (tagged "screen_title") in the theme's title style: Cinema bold spaced
-     * capitals, Glass slightly tight medium. True once done.
+     * Screen titles (tagged "screen_title") in the theme's title style: Glass slightly
+     * tight medium. True once done.
      */
     private fun styleTitles(activity: Activity): Boolean {
         val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return false
@@ -72,7 +72,6 @@ object Look {
         fun walk(v: View) {
             if (v.tag == "screen_title" && v is android.widget.TextView) {
                 when (theme) {
-                    Appearance.THEME_CINEMA -> { v.isAllCaps = true; v.letterSpacing = 0.12f; v.typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD) }
                     Appearance.THEME_GLASS -> { v.letterSpacing = -0.02f; v.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) }
                 }
             }
@@ -242,9 +241,7 @@ class FocusBackdrop private constructor(private val image: ImageView, private va
     companion object {
         /** Puts the backdrop behind the screen's content (null when turned off). */
         fun attach(activity: Activity): FocusBackdrop? {
-            // Cinema: the highlighted item's artwork always fills the screen.
-            val cinema = Prefs(activity).themeIndex == Appearance.THEME_CINEMA
-            if (!Prefs(activity).backdropFollows && !cinema) return null
+            if (!Prefs(activity).backdropFollows) return null
             val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return null
             val root = content.getChildAt(0) ?: return null
             // The app background moves behind the picture; the screen itself becomes see-through.
@@ -268,7 +265,7 @@ class FocusBackdrop private constructor(private val image: ImageView, private va
                 image.layoutParams = FrameLayout.LayoutParams((activity.resources.displayMetrics.widthPixels * 0.62f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.END)
                 return FocusBackdrop(image, 0.38f, blurred = true)
             }
-            return FocusBackdrop(image, if (cinema) 0.62f else 0.42f)
+            return FocusBackdrop(image, 0.42f)
         }
     }
 }
@@ -356,7 +353,7 @@ object GlassDrift {
 }
 
 /** Glass theme: WinDock's on/off switch for settings rows. */
-/** An on/off switch. [solid]: Default and Cinema themes, filled with the theme colour when on. */
+/** An on/off switch. [solid]: the Default theme, filled with the theme colour when on. */
 class GlassSwitch(context: android.content.Context, private val daylight: Boolean, private val solid: Boolean = false) : View(context) {
     var on = false
         set(value) {

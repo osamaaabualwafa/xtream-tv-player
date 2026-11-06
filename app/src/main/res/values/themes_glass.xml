@@ -46,8 +46,9 @@
         <item name="appTileIdleEnd">#8CFFFFFF</item>
         <item name="appTile2_38">#8CFFFFFF</item>
         <item name="appTile3_40">#8CFFFFFF</item>
-        <item name="appSelectedFill">#CCFFFFFF</item>
-        <item name="appSelectedChip">#CCFFFFFF</item>
+        <!-- The chosen card or chip: a light tint of Daylight's blue (white vanished on its white cards). -->
+        <item name="appSelectedFill">#263264DA</item>
+        <item name="appSelectedChip">#263264DA</item>
         <item name="appButtonFill">#8CFFFFFF</item>
         <item name="appButtonStroke">#141E2822</item>
         <item name="appDialogFill">#F5FFFFFF</item>

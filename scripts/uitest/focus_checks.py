@@ -150,7 +150,7 @@ def h3_h4(c):
 def settings_edges(c):
     home(home_style=2)
     settings_open()
-    press(D, D, RT)
+    press(D, D, D, RT)                # Player (Ratings sits above it since 1.1E)
     first = focus()
     press(U)
     now = focus()

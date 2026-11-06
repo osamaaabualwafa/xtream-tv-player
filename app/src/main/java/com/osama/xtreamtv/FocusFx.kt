@@ -238,7 +238,7 @@ class FocusScrollView @JvmOverloads constructor(context: Context, attrs: Attribu
         room.inset(0, -(FocusFx.ROOM_DP * resources.displayMetrics.density).toInt())
         val delta = super.computeScrollDeltaToGetChildRectOnScreen(room)
         // On the last item the remote can reach: scroll to the very end, so plain text after it
-        // (Settings > About's "Last shared" line in Default and Cinema) comes into view too.
+        // (Settings > About's "Last shared" line in Default) comes into view too.
         val focused = findFocus() ?: return delta
         val content = getChildAt(0) ?: return delta
         if (android.view.FocusFinder.getInstance().findNextFocus(this, focused, View.FOCUS_DOWN) != null) return delta

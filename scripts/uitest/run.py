@@ -58,8 +58,8 @@ SCREENS = {
     "home-dock": ({"home_style": 4}, HOME_WALK),
     "drawer": ({"home_style": 2}, [MENU, "shot 1", R, R, "shot 2", BACK]),
     "settings-home": ({"home_style": 2}, SETTINGS + [R, "shot h1", R, "shot h2", D, L, "shot h3", D, "shot bottom"]),
-    "settings-player": ({"home_style": 2}, SETTINGS + [D, D, R, "shot 1"] + [D] * 12 + ["shot 2", L, "shot 3"]),
-    "settings-look": ({"home_style": 2}, SETTINGS + [D, D, D, R, "shot 1", D, R, "shot 2", D, D, "shot 3"]),
+    "settings-player": ({"home_style": 2}, SETTINGS + [D, D, D, R, "shot 1"] + [D] * 12 + ["shot 2", L, "shot 3"]),
+    "settings-look": ({"home_style": 2}, SETTINGS + [D, D, D, D, R, "shot 1", D, R, "shot 2", D, D, "shot 3"]),
     "movies-sidebar": movies(0),
     "movies-folding": movies(1),
     "movies-chips": movies(2),
@@ -80,7 +80,7 @@ COMBOS = {
     "ring": [("glass-ring", {**GLASS, "focus_style": 0})],
     "large": [("default-large", {**DEFAULT, "ui_size": 2, "text_size": 3}), ("glass-large", {**GLASS, "ui_size": 2, "text_size": 3})],
     "push": [("glass-lift", GLASS), ("default", DEFAULT)],
-    "full": [("default", DEFAULT), ("cinema", {**DEFAULT, "theme": 1}),
+    "full": [("default", DEFAULT),
              ("glass-ring", {**GLASS, "focus_style": 0}), ("glass-white", {**GLASS, "focus_style": 1}),
              ("glass-solid", {**GLASS, "focus_style": 2}), ("glass-lift", GLASS),
              ("daylight", {**GLASS, "focus_style": 0, "glass_scene": 8}),
@@ -183,7 +183,11 @@ def add_test_playlist():
     entry = ("{&quot;id&quot;:&quot;%s&quot;,&quot;name&quot;:&quot;Test&quot;,&quot;base&quot;:&quot;%s&quot;,"
              "&quot;user&quot;:&quot;%s&quot;,&quot;pass&quot;:&quot;%s&quot;}" % (TEST_ID, mock_server.BASE, mock_server.USER, mock_server.PASS))
     entry = entry.replace("&", r"\&").replace("/", r"\/")
+    # A copy left by a run that was cut off (the emulator closed) holds the owner's settings: put it
+    # back first and never copy over it (2026-11-06: a second run overwrote it and the owner's
+    # playlists were lost on the emulator).
     app_shell(f"""mkdir -p files
+if [ -f {BACKUP} ]; then cp {BACKUP} {PREFS}; fi
 cp {PREFS} {BACKUP}
 grep -q 'name="playlists">\\[{{' {PREFS} && sed -i 's/name="playlists">\\[/&{entry},/' {PREFS} || sed -i 's/<map>/<map><string name="playlists">[{entry}]<\\/string>/' {PREFS}
 sed -i 's/<string name="active">[^<]*<\\/string>//; s/<string name="default_playlist">[^<]*<\\/string>//' {PREFS}

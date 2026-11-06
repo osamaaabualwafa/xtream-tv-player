@@ -276,7 +276,25 @@ class PlayerActivity : AppCompatActivity() {
     private var seriesId: String? = null
     private var seriesName = ""
     private var seriesCover: String? = null
-    private val hasNextEpisode get() = episodes.isNotEmpty() && episodeIndex < episodes.size - 1
+    private val hasNextEpisode get() = episodes.isNotEmpty() && episodeIndex < episodes.size - 1 && nextNotAired == null
+
+    /**
+     * "Mon 9 Nov" when the next episode in the list hasn't aired yet (MDBList's date): an empty
+     * placeholder the provider lists early. The player doesn't move on to it (it only retried
+     * "reconnect 1/5", 2026-11-07); null otherwise.
+     */
+    private val nextNotAired: String?
+        get() = episodes.getOrNull(episodeIndex + 1)?.let { airsOn(it) }
+
+    /** "Mon 9 Nov" when this listed episode hasn't aired yet (MDBList's date); null otherwise. */
+    private fun airsOn(ep: Episode): String? {
+        val sid = seriesId ?: return null
+        val n = RatingsExtras.saved(ContentType.SERIES, sid)?.next ?: return null
+        if (n.season != ep.season || n.number != ep.number || n.airAt <= System.currentTimeMillis()) return null
+        return java.text.SimpleDateFormat(if (n.airAt - System.currentTimeMillis() <= 30L * 86_400_000) "EEE d MMM" else "MMMM yyyy", java.util.Locale.getDefault())
+            .format(java.util.Date(n.airAt))
+    }
+
     private val hasPreviousEpisode get() = episodes.isNotEmpty() && episodeIndex > 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -718,6 +736,8 @@ class PlayerActivity : AppCompatActivity() {
                     autoEpisodes++
                     if (autoEpisodes >= STILL_WATCHING_AFTER) askStillWatching() else playEpisodeAt(episodeIndex + 1)
                 } else {
+                    // The next episode is listed but not out yet: say when, then leave as usual.
+                    nextNotAired?.let { MessagePill.showOnNextScreen("Next episode airs $it", Toast.LENGTH_LONG) }
                     finish()
                 }
             }
@@ -1595,6 +1615,15 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun bindEpisodeRow(vh: TextAdapter.VH, ep: Episode) {
         vh.title.text = ep.label()
+        val airs = airsOn(ep)
+        vh.itemView.alpha = if (airs != null) 0.55f else 1f
+        if (airs != null) {
+            // Listed before it airs (an empty placeholder): faded, with its date, like on the details page.
+            vh.subtitle?.text = "Coming $airs"
+            vh.itemView.findViewById<android.widget.ImageView?>(R.id.image)?.loadEpisodeImage(ep, seriesCover)
+            vh.itemView.findViewById<android.widget.ProgressBar?>(R.id.watch_progress)?.visibility = View.GONE
+            return
+        }
         val playing = episodes.getOrNull(episodeIndex)?.id == ep.id
         val key = "ep_${ep.id}"
         val pos = if (playing) player?.currentPosition ?: prefs.position(key) else prefs.position(key)
@@ -1652,6 +1681,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun playEpisodeAt(index: Int) {
         val ep = episodes.getOrNull(index) ?: return
+        airsOn(ep)?.let { showToast(this, "Airs $it · not available yet", Toast.LENGTH_SHORT); return }
         player?.let { saveVodPosition(it) }
         playedMs = 0
         if (playingSince > 0) playingSince = android.os.SystemClock.elapsedRealtime()
@@ -1917,8 +1947,7 @@ class PlayerActivity : AppCompatActivity() {
      * key is really being held, at a steady pace; a press some remotes deliver twice counts once.
      */
     /**
-     * The seek bubble's colours follow the look: Default a navy bubble edged with its colour, Cinema a deep
-     * red one, and Glass a dark bubble tinted from the chosen background (Midnight is the reference).
+     * The seek bubble's colours follow the look: Default a navy bubble edged with its colour, and Glass a dark bubble tinted from the chosen background (Midnight is the reference).
      * The ▶ / ❚❚ sign (the remote's play/pause button) uses the same colours.
      */
     private fun styleSeekBubbles() {
@@ -1932,7 +1961,6 @@ class PlayerActivity : AppCompatActivity() {
         val white = android.graphics.Color.WHITE
         // Fill, border (0 = none), main text, time text.
         val colors: IntArray = when (prefs.themeIndex) {
-            Appearance.THEME_CINEMA -> intArrayOf(0xE61C0608.toInt(), 0x99E50914.toInt(), white, 0xFFF0C8CC.toInt())
             Appearance.THEME_GLASS -> {
                 val scene = prefs.glassScene.coerceIn(0, Appearance.SCENE_SWATCHES.size - 1)
                 val swatch = Appearance.SCENE_SWATCHES[scene]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """All the emulator tests on this computer, in four levels. Pick the one that matches the change:
 
-  python scripts/test.py quick home-tabs settings-look   only the screens a change touched (2-3 min)
+  python scripts/test.py quick home-tabs settings-look   only the screens a change touched, plus ratings (3-4 min)
   python scripts/test.py push                            before a push: every screen, focus, sizes,
                                                          contrast, Home switches (about 15 min)
   python scripts/test.py player                          seeking, the bubble, OK, resume, tracks (about 8 min)
@@ -40,6 +40,8 @@ CHECKS = {
     "focus":       ("Where the highlight lands on Home, Settings, Movies and the avatar picker", ["focus_checks.py"], "1.1C, 1.1S-1.1Z"),
     "home-rows":   ("Recently added switches: one case per Home layout and the Settings switch", ["recent_rows.py", "--short"], "1.1T(a)"),
     "home-rows-all": ("Recently added switches: every combination in H1-H4, also after a restart", ["recent_rows.py"], "1.1T(a)"),
+    "ratings":     ("Ratings: Settings before and after a key, the key window and phone page, a made-up key refused, scores on posters, no provider ★",
+                    ["ratings_checks.py"], "1.1E"),
     "contrast":    ("Text against what it sits on, every theme, at least 4.5:1 (no emulator)", ["check_contrast.py"], "1.1R"),
     "player":      ("Seeking and the bubble, OK, resume, screensaver, tracks, picture, login keyboard", ["player_checks.py"], "1.1I, 1.1J, 1.1M, 1.1P, 1.2A, 1.2B"),
     "themes":      ("Pictures: playlists, Home, Settings and the player in 7 themes", ["theme_matrix.py"], "1.1R"),
@@ -50,12 +52,12 @@ CHECKS = {
 }
 
 LEVELS = {
-    "quick":  ["screens-few", "contrast"],
+    "quick":  ["screens-few", "contrast", "ratings"],
     "push":   ["screens", "focus", "home-rows"],          # "screens" at this level also runs contrast and sizes
     "player": ["player"],
     "look":   ["contrast", "colours", "themes", "backgrounds", "home-rows-all", "scrolling", "episodes"],
 }
-MINUTES = {"quick": "2-3", "push": "about 15", "player": "about 8", "look": "about 15"}
+MINUTES = {"quick": "3-4", "push": "about 15", "player": "about 8", "look": "about 15"}
 
 
 def version():

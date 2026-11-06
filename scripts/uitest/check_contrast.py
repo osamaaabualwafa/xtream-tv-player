@@ -104,7 +104,6 @@ def report():
         run(f"Default {accent[7:]}", accent)
     for palette in ("Coastal", "Coconut"):
         run(f"Default {palette} colours", "Accent.Blue", f"Palette.{palette}")
-    run("Cinema", "Accent.Blue", "Palette.Cinema", "Look.Cinema")
     scenes = [n for n in styles if n.startswith("Scene.")]
     for scene in scenes:
         daylight = scene == "Scene.Daylight"

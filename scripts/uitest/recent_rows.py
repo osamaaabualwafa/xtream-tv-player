@@ -80,7 +80,8 @@ def main():
                 c.start(**prefs)      # Restart: the choice is remembered.
                 time.sleep(3)
                 check(f"{layout}, same after restarting", (bool(m), bool(s)), rows_on_home())
-        # Straight away: Home open, Settings > Home layout, switch series off, back to Home.
+        # Straight away: Home open, Settings > Home layout > Arrange Home rows, hide the series row,
+        # back to Home (since 1.1A the rows are shown, hidden and ordered on that screen).
         c.start(theme=0, home_style=2, home_recent_movies=1, home_recent_series=1, diag_on="false")
         time.sleep(3)
         c.until_focus("playlist_chip", c.U, tries=4)
@@ -91,10 +92,19 @@ def main():
         c.press(c.RT)     # Into the Home layout section (first).
         time.sleep(1)
         for _ in range(12):
-            if "Most recent series" in focused_text():
+            if "Arrange Home rows" in focused_text():
                 break
             c.press(c.D, gap=0.5)
         c.press(c.OK)
+        r.wait_activity("HomeRowsActivity", 8)
+        time.sleep(1)
+        for _ in range(8):
+            if "Recently added series" in focused_text():
+                break
+            c.press(c.D, gap=0.5)
+        c.press(c.RT)      # Right: show or hide.
+        time.sleep(1)
+        c.press(c.BACK)
         time.sleep(1)
         c.press(c.BACK)
         r.wait_activity("HomeActivity", 10)

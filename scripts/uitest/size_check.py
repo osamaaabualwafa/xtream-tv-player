@@ -67,7 +67,7 @@ def settings(name):
     press(U, RT, OK)
     reach("SettingsActivity")
     press(RT, D, D, L)                # Home layout
-    for _ in range(4):                # Movies, Player, Look, Playlists
+    for _ in range(5):                # Movies, Ratings, Player, Look, Playlists
         press(D, RT, D, D, L)
     press(D, D)
     collect(f"{name} Settings")
@@ -135,7 +135,7 @@ def main():
         if len(sys.argv) < 2 or "settings" in sys.argv[1:]:
             r.set_prefs({**r.GLASS, **tightest})
             settings("Glass tightest")
-            for name, theme in (("Default", r.DEFAULT), ("Cinema", {**r.DEFAULT, "theme": 1})):
+            for name, theme in (("Default", r.DEFAULT),):
                 r.set_prefs({**theme, **biggest})
                 settings(name)
                 r.set_prefs({**theme, **tightest})

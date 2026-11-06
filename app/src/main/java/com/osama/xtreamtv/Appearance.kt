@@ -49,8 +49,7 @@ object Appearance {
     val PALETTE_DOTS = intArrayOf(0, 0xFF8FB0C4.toInt(), 0xFFC9A88A.toInt())
 
     /** Settings > Look > Theme: whole looks (colours, shapes, highlight, font, background art). */
-    val THEMES = listOf(0 to "Default", 1 to "Cinema", 4 to "Glass")
-    const val THEME_CINEMA = 1
+    val THEMES = listOf(0 to "Default", 4 to "Glass")
     const val THEME_GLASS = 4
 
     /** Glass theme: Settings > Look > Background. */
@@ -106,10 +105,6 @@ object Appearance {
         prefs.moveRemovedThemes()
         when (prefs.themeIndex) {
             // A theme brings everything: its colours win over the colour dots and background.
-            THEME_CINEMA -> {
-                activity.theme.applyStyle(R.style.Palette_Cinema, true)
-                activity.theme.applyStyle(R.style.Look_Cinema, true)
-            }
             THEME_GLASS -> {
                 activity.theme.applyStyle(R.style.Palette_Glass, true)
                 activity.theme.applyStyle(R.style.Look_Glass, true)

@@ -20,7 +20,6 @@ THEMES = {
     "default_pink": {"theme": 0, "palette": 0, "accent": 4},
     "default_coastal": {"theme": 0, "palette": 1, "accent": 0},
     "default_coconut": {"theme": 0, "palette": 2, "accent": 0},
-    "cinema": {"theme": 1},
     "glass_midnight": {**r.GLASS, "glass_scene": 3},
     "glass_aurora_frosted_lift": {**r.GLASS, "glass_scene": 0, "glass_style": 1, "focus_style": 3},
 }

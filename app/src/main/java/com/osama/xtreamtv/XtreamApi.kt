@@ -44,6 +44,10 @@ data class StreamItem(
     val plot: String? = null,
     /** Continue watching: how far in (0..1), shown as a bar on the poster; -1 = no bar. */
     val progress: Float = -1f,
+    /** The title's TMDB id, when the list gives it (ratings, 1.1E). */
+    val tmdb: String? = null,
+    /** Continue watching: the id whose scores the card shows (the movie, or the episode's series). */
+    val ratingId: String? = null,
 )
 
 data class UserInfo(
@@ -87,6 +91,10 @@ data class VodInfo(
     val ext: String?,
     /** YouTube video id, when the provider has one. */
     val trailer: String? = null,
+    val tmdb: String? = null,
+    val imdb: String? = null,
+    /** The original title ("o_name"), when the panel gives it. */
+    val originalName: String? = null,
 )
 
 data class Episode(
@@ -110,6 +118,8 @@ data class SeriesInfo(
     val seasons: Map<Int, List<Episode>>,
     val cast: String? = null,
     val trailer: String? = null,
+    val tmdb: String? = null,
+    val imdb: String? = null,
 )
 
 data class ServerInput(val base: String, val username: String?, val password: String?)
@@ -134,6 +144,23 @@ internal fun JSONObject.categoryIds(): List<String> {
     }
     return ids.toList()
 }
+
+/** A TMDB id ("12345"), or null for the "0" and "" panels send when they have none. */
+internal fun JSONObject.tmdbId(vararg keys: String): String? =
+    keys.firstNotNullOfOrNull { k -> str(k)?.takeIf { v -> v.all(Char::isDigit) && v.trimStart('0').isNotEmpty() } }
+
+/**
+ * The TMDB id hidden in a backdrop picture's file name: panels name TMDB backdrops "95171_tv_backdrop_0.jpg"
+ * (checked on the owner's playlist 2026-11-06: the number is the series' TMDB id, Arabic ones too).
+ */
+internal fun JSONObject.backdropTmdb(kind: String): String? {
+    val text = listOf("backdrop_path", "backdrop").joinToString(" ") { opt(it)?.toString() ?: "" }
+    return Regex("(\\d{2,9})_${kind}_backdrop").find(text)?.groupValues?.get(1)
+}
+
+/** An IMDb id ("tt1234567"), or null. */
+internal fun JSONObject.imdbId(vararg keys: String): String? =
+    keys.firstNotNullOfOrNull { k -> str(k)?.let { Regex("tt\\d{5,10}").find(it)?.value } }
 
 /** Panels send "0" for unrated items (treated as no rating) and values like "7.491" (shown as "7.5"). */
 internal fun JSONObject.rating(key: String): String? {
@@ -305,6 +332,7 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 genre = o.str("genre")?.takeIf { it.isNotBlank() },
                 year = (o.str("year") ?: o.str("releasedate") ?: o.str("release_date"))?.let { Regex("(19|20)\\d{2}").find(it)?.value },
                 plot = o.str("plot")?.takeIf { it.isNotBlank() },
+                tmdb = o.tmdbId("tmdb", "tmdb_id"),
             )
         }
         ContentType.SERIES -> o.str("series_id")?.let { id ->
@@ -315,6 +343,7 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
                 genre = o.str("genre")?.takeIf { it.isNotBlank() },
                 year = (o.str("releaseDate") ?: o.str("release_date") ?: o.str("year"))?.let { Regex("(19|20)\\d{2}").find(it)?.value },
                 plot = o.str("plot")?.takeIf { it.isNotBlank() },
+                tmdb = o.tmdbId("tmdb", "tmdb_id") ?: o.backdropTmdb("tv"),
             )
         }
     }
@@ -336,6 +365,9 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             cover = info.str("movie_image") ?: info.str("cover_big"),
             ext = data.str("container_extension"),
             trailer = info.str("youtube_trailer"),
+            tmdb = info.tmdbId("tmdb_id", "tmdb") ?: data.tmdbId("tmdb_id", "tmdb") ?: info.backdropTmdb("movie"),
+            imdb = info.imdbId("imdb_id", "imdb") ?: data.imdbId("imdb_id", "imdb"),
+            originalName = info.str("o_name"),
         )
     }
 
@@ -391,6 +423,8 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             seasons = seasons,
             cast = info.str("cast"),
             trailer = info.str("youtube_trailer"),
+            tmdb = info.tmdbId("tmdb", "tmdb_id") ?: info.backdropTmdb("tv"),
+            imdb = info.imdbId("imdb_id", "imdb"),
         )
     }
 
@@ -430,6 +464,9 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
     }
 
     /** Every request, timed for the diagnostics report (the action only: never the address). */
+    /** Test builds only (review 1.1E coverage check): a raw answer, never shown or logged as is. */
+    internal suspend fun debugRaw(vararg params: Pair<String, String>): Any? = if (BuildConfig.DEBUG) call(*params) else null
+
     private suspend fun call(vararg params: Pair<String, String>): Any? {
         val action = params.firstOrNull { it.first == "action" }?.second ?: "account info"
         val started = android.os.SystemClock.elapsedRealtime()

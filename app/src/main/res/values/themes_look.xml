@@ -4,34 +4,6 @@
 <resources>
     <style name="Look" />
 
-    <!-- Cinema: crisp corners, red frame highlight, condensed type, dark stage glow. -->
-    <style name="Look.Cinema">
-        <item name="appCorner8">3dp</item>
-        <item name="appCorner10">4dp</item>
-        <item name="appCorner12">4dp</item>
-        <item name="appCorner16">4dp</item>
-        <item name="appCorner20">4dp</item>
-        <item name="appCorner22">6dp</item>
-        <item name="appCorner23">4dp</item>
-        <item name="appCorner24">4dp</item>
-        <item name="appCorner26">4dp</item>
-        <item name="appCorner28">6dp</item>
-        <item name="appFocusFill">#4DC42530</item>
-        <item name="appFocusText">#FFFFFFFF</item>
-        <item name="appFocusStrokeThin">2dp</item>
-        <item name="appFocusStrokeThick">3dp</item>
-        <item name="android:fontFamily">sans-serif-condensed</item>
-        <item name="appBackground">@drawable/bg_theme_cinema</item>
-            <item name="appTileFocusLiveStart">#4DC42530</item>
-        <item name="appTileFocusLiveEnd">#4DC42530</item>
-        <item name="appTileFocusMoviesStart">#4DC42530</item>
-        <item name="appTileFocusMoviesEnd">#4DC42530</item>
-        <item name="appTileFocusSeriesStart">#4DC42530</item>
-        <item name="appTileFocusSeriesEnd">#4DC42530</item>
-        <item name="appTileFocusSearchStart">#4DC42530</item>
-        <item name="appTileFocusSearchEnd">#4DC42530</item>
-    </style>
-
     <!-- Glass: radii from THEME.md section 6; fill, ring and text come from Focus.*. -->
     <style name="Look.Glass">
         <item name="appCorner8">11dp</item>

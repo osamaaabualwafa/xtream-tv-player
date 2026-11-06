@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -43,6 +44,22 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var favoritesAdapter: ItemAdapter
     private lateinit var recentAdapter: ItemAdapter
     private lateinit var recentSeriesAdapter: ItemAdapter
+    private lateinit var topRatedAdapter: ItemAdapter
+    private lateinit var topSeriesAdapter: ItemAdapter
+    /** The Favorites row's title with its Movies / Series switch (1.1A, concept F). */
+    private var favSwitch: LinearLayout? = null
+
+    /** Home rows: key -> (title view id, row view id). */
+    private val homeRows = mapOf(
+        "new" to (R.id.row_new_title to R.id.row_new),
+        "continue" to (R.id.row_continue_title to R.id.row_continue),
+        "favorites" to (R.id.row_favorites_title to R.id.row_favorites),
+        "top_movies" to (R.id.row_top_rated_title to R.id.row_top_rated),
+        "top_series" to (R.id.row_top_series_title to R.id.row_top_series),
+        "channels" to (R.id.row_channels_title to R.id.row_channels),
+        "recent_movies" to (R.id.row_recent_title to R.id.row_recent),
+        "recent_series" to (R.id.row_recent_series_title to R.id.row_recent_series),
+    )
     private lateinit var newAdapter: ItemAdapter
     /** V1: background follows the highlighted poster (null when off). */
     private var backdrop: FocusBackdrop? = null
@@ -105,7 +122,7 @@ class HomeActivity : AppCompatActivity() {
         setupDock()
         setupTabBar()
         findViewById<View>(R.id.logout).setOnClickListener(openPlaylists)
-        findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        findViewById<View>(R.id.settings_button).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         // The TV keeps the remote's Menu button for itself: this opens the quick drawer instead.
         findViewById<View?>(R.id.more_button)?.setOnClickListener { openDrawer() }
         findViewById<View?>(R.id.tile_more)?.setOnClickListener { openDrawer() }
@@ -114,24 +131,37 @@ class HomeActivity : AppCompatActivity() {
         findViewById<View>(R.id.check_updates).setOnClickListener { Updates.checkNow(this, lifecycleScope) }
         hideBottomOfHome()
         pinPageEdges()
+        setupFavoritesSwitch()
+        applyRowOrder()
         setupFocusMap()
         // Rebuilt in another layout: the restored highlight may sit on a view this layout hides.
         findViewById<View>(android.R.id.content).post {
             if (currentFocus?.isShown != true) findViewById<View>(R.id.tile_live).requestFocus()
         }
 
-        continueAdapter = row(R.id.row_continue, R.layout.item_poster_row, { _, item -> resume(item.id) }) { _, item ->
-            confirmRemoveProgress(this, prefs, item) { loadLocalRows() }
-        }
+        // Named: as a trailing lambda it became the new onBindExtra and asked "Remove…?" on every
+        // draw of the row (2026-11-07).
+        continueAdapter = row(R.id.row_continue, R.layout.item_poster_row, { _, item -> resume(item.id) },
+            onLongClick = { _, item -> confirmRemoveProgress(this, prefs, item) { loadLocalRows() } })
         channelsAdapter = row(R.id.row_channels, R.layout.item_channel_card, { index, _ ->
             Session.zapList = channelsAdapter.items
             Session.zapTitle = "Favorites"
             startActivity(PlayerActivity.liveIntent(this, index))
         })
-        favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) },
+            onBindExtra = { vh, item ->
+                // 1.1E: a followed series with an episode due within two weeks says when.
+                if (item.type == ContentType.SERIES) RatingsExtras.cardLine(RatingsExtras.saved(item.type, item.id))?.let { line ->
+                    vh.subtitle.text = line
+                    vh.subtitle.setTextColor(0xFF9FD8B8.toInt())
+                    vh.subtitle.visibility = View.VISIBLE
+                }
+            })
         recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         recentSeriesAdapter = row(R.id.row_recent_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        topRatedAdapter = row(R.id.row_top_rated, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        topSeriesAdapter = row(R.id.row_top_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         backdrop = FocusBackdrop.attach(this)
         setupFeatured()
 
@@ -156,7 +186,7 @@ class HomeActivity : AppCompatActivity() {
         MiniPlayerBar.attach(this)
         // Diagnostics: the reminder dot on Settings, and once after a crash the message to share.
         val dot = Diag.dotColor()
-        DiagUi.applyDot(findViewById(R.id.settings_button), dot)
+        DiagUi.applyDot(findViewById(R.id.settings_button), dot, sideRow = prefs.homeStyle == Appearance.HOME_SIDE_MENU)
         DiagUi.applyDot(findViewById(R.id.tile_settings), dot)
         window.decorView.post { if (!isFinishing) DiagUi.crashPrompt(this) }
         if (!::continueAdapter.isInitialized) return
@@ -173,6 +203,12 @@ class HomeActivity : AppCompatActivity() {
         loadLocalRows()
         loadNewEpisodes()
         prepareSections()
+        // Scores found while away (a title's page, pre-fill) show on the cards already there.
+        for (a in listOf(newAdapter, recentAdapter, recentSeriesAdapter, topRatedAdapter, topSeriesAdapter)) a.notifyItemRangeChanged(0, a.itemCount, "scores")
+        // Pre-fill: once 20 s after opening (if nothing is pressed), then each idle minute.
+        lastKeyAt = android.os.SystemClock.uptimeMillis() - 40_000
+        window.decorView.removeCallbacks(prefillCheck)
+        window.decorView.postDelayed(prefillCheck, 20_000)
         lifecycleScope.launch {
             try {
                 Session.userInfo = api.userInfo()
@@ -185,10 +221,12 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.homeRecentMovies}${prefs.homeRecentSeries}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.homeRowOrder.joinToString(",")}|${prefs.homeRowHidden.sorted().joinToString(",")}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
+        prefillJob?.cancel()
+        window.decorView.removeCallbacks(prefillCheck)
         MiniPlayerBar.detach(this)
         findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
@@ -349,7 +387,31 @@ class HomeActivity : AppCompatActivity() {
         for (id in topBar) findViewById<View?>(id)?.setOnFocusChangeListener { _, has -> if (has) scroll.post { scroll.smoothScrollTo(0, 0) } }
     }
 
+    /** Pre-fill (1.1E): after a minute without a key press on Home, the rows' scores are asked for. */
+    private var lastKeyAt = 0L
+    private var prefillJob: kotlinx.coroutines.Job? = null
+    private val prefillCheck = object : Runnable {
+        override fun run() {
+            val idle = android.os.SystemClock.uptimeMillis() - lastKeyAt >= 60_000
+            if (idle && prefillJob?.isActive != true && Ratings.isOn) {
+                val items = buildList {
+                    for (a in listOf(continueAdapter, favoritesAdapter, newAdapter, recentAdapter, recentSeriesAdapter)) addAll(a.items)
+                    addAll(prefs.favorites(ContentType.MOVIE))
+                    addAll(prefs.favorites(ContentType.SERIES))
+                }
+                prefillJob = lifecycleScope.launch {
+                    Ratings.prefill(api, items)
+                    loadTopRated()
+                }
+            }
+            window.decorView.postDelayed(this, 60_000)
+        }
+    }
+
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Any key: pre-fill waits (it never slows the remote down).
+        lastKeyAt = android.os.SystemClock.uptimeMillis()
+        prefillJob?.cancel()
         if (handleDrawerKey(event)) return true
         return focusMap.handle(event) || super.dispatchKeyEvent(event)
     }
@@ -365,8 +427,9 @@ class HomeActivity : AppCompatActivity() {
             val list = ids.toList().mapNotNull { findViewById<View?>(it) }
             return { list }
         }
-        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_recent, R.id.row_recent_series)
+        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_top_rated, R.id.row_top_series, R.id.row_recent, R.id.row_recent_series)
             .map { focusMap.section(roots = views(it)) }
+            .plus(listOfNotNull(favSwitch?.let { s -> focusMap.section(roots = { listOf(s) }) }))
         val featured = focusMap.section(ownsSideKeys = true, roots = views(R.id.featured))
         val stack = ArrayList(rows + featured)
         if (prefs.homeStyle == Appearance.HOME_SIDE_MENU) {
@@ -400,10 +463,12 @@ class HomeActivity : AppCompatActivity() {
         layout: Int,
         onClick: (Int, StreamItem) -> Unit,
         onLongClick: ((Int, StreamItem) -> Unit)? = null,
+        onBindExtra: ((ItemAdapter.VH, StreamItem) -> Unit)? = null,
     ): ItemAdapter {
         val adapter = ItemAdapter(
             grid = layout == R.layout.item_poster_row, onClick = onClick, onLongClick = onLongClick, layout = layout,
             onFocusItem = { item -> if (item.type != ContentType.LIVE) backdrop?.show(item.image) },
+            onBindExtra = onBindExtra,
         )
         findViewById<RecyclerView>(viewId).apply {
             layoutManager = RowLayoutManager(this@HomeActivity)
@@ -414,9 +479,76 @@ class HomeActivity : AppCompatActivity() {
 
     private fun showRow(viewId: Int, titleId: Int, adapter: ItemAdapter, items: List<StreamItem>) {
         adapter.submit(items)
-        val visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        // Switched off in Settings > Home layout > Arrange rows: never shown.
+        val key = homeRows.entries.firstOrNull { it.value.second == viewId }?.key
+        val hidden = key != null && key in prefs.homeRowHidden
+        val visibility = if (items.isEmpty() || hidden) View.GONE else View.VISIBLE
         findViewById<View>(viewId).visibility = visibility
-        findViewById<View>(titleId).visibility = visibility
+        titleHolder(titleId).visibility = visibility
+    }
+
+    /** A row's title, or the box holding it (Favorites: the title with its switch). */
+    private fun titleHolder(titleId: Int): View {
+        val t = findViewById<View>(titleId)
+        return (t.parent as? View)?.takeIf { it === favSwitch } ?: t
+    }
+
+    /**
+     * Rows in the order chosen in Settings > Home layout > Arrange rows. They all sit in one column:
+     * each title and row pair is taken out and put back in that order where the first one was.
+     */
+    private fun applyRowOrder() {
+        val parent = findViewById<View>(R.id.row_continue).parent as? android.view.ViewGroup ?: return
+        // The tiles (and Hero's panel, the side menu, the tab bar) stay where the layout puts them.
+        val groups = prefs.homeRowOrder.mapNotNull { key -> homeRows[key]?.let { (t, r) -> listOf(titleHolder(t), findViewById<View>(r)) } }
+        if (groups.flatten().any { it.parent !== parent }) return
+        val start = groups.flatten().minOf { parent.indexOfChild(it) }
+        for (v in groups.flatten()) parent.removeView(v)
+        var at = start
+        for (v in groups.flatten()) parent.addView(v, at++)
+    }
+
+    /** Favorites (1.1A, concept F): one row, a Movies / Series switch in its title. */
+    private fun setupFavoritesSwitch() {
+        val title = findViewById<TextView?>(R.id.row_favorites_title) ?: return
+        val parent = title.parent as? android.view.ViewGroup ?: return
+        if (prefs.homeStyle == Appearance.HOME_DOCK) return
+        val index = parent.indexOfChild(title)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = title.layoutParams
+            visibility = title.visibility
+        }
+        parent.removeView(title)
+        title.text = "Favorites"
+        title.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        title.visibility = View.VISIBLE
+        box.addView(title)
+        val d = resources.displayMetrics.density
+        for ((kind, label) in listOf("MOVIE" to "Movies", "SERIES" to "Series")) {
+            box.addView(TextView(this).apply {
+                tag = kind
+                text = label
+                textSize = 14f
+                isFocusable = true
+                isClickable = true
+                setBackgroundResource(R.drawable.bg_glass_chip_cat)
+                setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
+                setPadding((14 * d).toInt(), (5 * d).toInt(), (14 * d).toInt(), (5 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (12 * d).toInt() }
+                // Highlighting a choice switches the row straight away.
+                setOnFocusChangeListener { _, has -> if (has && prefs.homeFavoritesKind != kind) { prefs.homeFavoritesKind = kind; loadLocalRows() } }
+                // OK: down to the posters. (The Activity's findViewById: inside this TextView's apply,
+                // a bare findViewById searched the button itself and crashed, 2026-11-07.)
+                setOnClickListener {
+                    val row = this@HomeActivity.findViewById<RecyclerView>(R.id.row_favorites)
+                    (row.layoutManager?.findViewByPosition(0) ?: row.getChildAt(0))?.requestFocus()
+                }
+            })
+        }
+        parent.addView(box, index)
+        favSwitch = box
     }
 
     /** Rows stored on the device: Continue watching and favorites. */
@@ -426,14 +558,32 @@ class HomeActivity : AppCompatActivity() {
         showHero(entries.firstOrNull())
         val watching = entries
             .map { e ->
-                StreamItem(e.type, e.key, listOfNotNull(e.title, e.subtitle).joinToString("  ·  "), e.image, null, e.ext, null, null, note = e.progressText(), progress = e.progressFraction())
+                StreamItem(e.type, e.key, listOfNotNull(e.title, e.subtitle).joinToString("  ·  "), e.image, null, e.ext, null, null, note = e.progressText(), progress = e.progressFraction(), ratingId = e.seriesId ?: e.id)
             }
         showRow(R.id.row_continue, R.id.row_continue_title, continueAdapter, watching)
         val channels = prefs.favorites(ContentType.LIVE)
         channelsAdapter.favorites = emptySet()
         showRow(R.id.row_channels, R.id.row_channels_title, channelsAdapter, channels)
-        val favorites = prefs.favorites(ContentType.MOVIE) + prefs.favorites(ContentType.SERIES)
+        val movies = prefs.favorites(ContentType.MOVIE)
+        val series = prefs.favorites(ContentType.SERIES)
+        val favorites = if (favSwitch == null) movies + series else {
+            // The chosen kind; the other one when the chosen has none.
+            val kind = when {
+                prefs.homeFavoritesKind == "SERIES" && series.isEmpty() && movies.isNotEmpty() -> "MOVIE"
+                prefs.homeFavoritesKind == "MOVIE" && movies.isEmpty() && series.isNotEmpty() -> "SERIES"
+                else -> prefs.homeFavoritesKind
+            }
+            favSwitch?.let { box ->
+                for (i in 1 until box.childCount) (box.getChildAt(i) as TextView).apply {
+                    isActivated = tag == kind
+                    text = if (tag == "MOVIE") "Movies ${movies.size}" else "Series ${series.size}"
+                    visibility = if ((tag == "MOVIE" && movies.isEmpty()) || (tag == "SERIES" && series.isEmpty())) View.GONE else View.VISIBLE
+                }
+            }
+            if (kind == "SERIES") series else movies
+        }
         showRow(R.id.row_favorites, R.id.row_favorites_title, favoritesAdapter, favorites)
+        loadTopRated()
     }
 
     /**
@@ -561,12 +711,12 @@ class HomeActivity : AppCompatActivity() {
         val (kind, item) = featuredItems[featuredIndex]
         findViewById<TextView>(R.id.featured_kind).text = kind
         findViewById<TextView>(R.id.featured_title).text = item.name
-        findViewById<TextView>(R.id.featured_meta).text = listOfNotNull(
-            displayRating(item.rating)?.let { "★ $it" },
-            item.year,
-            item.genre,
-            if (item.type == ContentType.SERIES) "Series" else "Movie",
-        ).joinToString("   ·   ")
+        showFeaturedMeta(item)
+        // 1.1E: the banner's title is on screen, so its real scores may be asked for now.
+        if (Ratings.needsLookup(item.type, item.id)) lifecycleScope.launch {
+            Ratings.lookupItem(api, item, onScreen = true) ?: return@launch
+            if (featuredItems.getOrNull(featuredIndex)?.second?.id == item.id) showFeaturedMeta(item)
+        }
         val image = findViewById<android.widget.ImageView>(R.id.featured_image)
         image.animate().cancel()
         image.alpha = 0f
@@ -582,6 +732,19 @@ class HomeActivity : AppCompatActivity() {
                 alpha = if (i == featuredIndex) 1f else 0.45f
             }
         }
+    }
+
+    /** Year, genre, kind; real IMDb / Rotten Tomatoes scores first when known, else the provider's ★. */
+    private fun showFeaturedMeta(item: StreamItem) {
+        val scores = Ratings.known(item.type, item.id)
+        val rest = listOfNotNull(
+            item.year,
+            item.genre,
+            if (item.type == ContentType.SERIES) "Series" else "Movie",
+        ).joinToString("   ·   ")
+        val view = findViewById<TextView>(R.id.featured_meta)
+        view.text = if (scores == null) rest else android.text.SpannableStringBuilder()
+            .append(RatingBadges.line(this, scores, view.currentTextColor)).append("   ·   ").append(rest)
     }
 
     /** "New episodes": followed series the provider updated since they were last opened. */
@@ -627,8 +790,32 @@ class HomeActivity : AppCompatActivity() {
 
     /** "Recently added" movies and series rows, each only when switched on (Settings > Home layout). */
     private fun loadRecentlyAdded() {
-        recentRow(ContentType.MOVIE, prefs.homeRecentMovies == 1, R.id.row_recent, R.id.row_recent_title, recentAdapter)
-        recentRow(ContentType.SERIES, prefs.homeRecentSeries == 1, R.id.row_recent_series, R.id.row_recent_series_title, recentSeriesAdapter)
+        recentRow(ContentType.MOVIE, "recent_movies" !in prefs.homeRowHidden, R.id.row_recent, R.id.row_recent_title, recentAdapter)
+        recentRow(ContentType.SERIES, "recent_series" !in prefs.homeRowHidden, R.id.row_recent_series, R.id.row_recent_series_title, recentSeriesAdapter)
+    }
+
+    /** Top rated movies and Top rated series (1.1E): IMDb 7.5 and up from saved scores; 6 titles at least. */
+    private fun loadTopRated() {
+        if (!::topSeriesAdapter.isInitialized) return
+        topRow(ContentType.MOVIE, "top_movies", R.id.row_top_rated, R.id.row_top_rated_title, topRatedAdapter)
+        topRow(ContentType.SERIES, "top_series", R.id.row_top_series, R.id.row_top_series_title, topSeriesAdapter)
+    }
+
+    private fun topRow(type: ContentType, key: String, rowId: Int, titleId: Int, adapter: ItemAdapter) {
+        if (key in prefs.homeRowHidden || !Ratings.isOn) {
+            showRow(rowId, titleId, adapter, emptyList())
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val top = Ratings.topRated(allStreams(type).await(), 20)
+                showRow(rowId, titleId, adapter, if (top.size >= 6) top else emptyList())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The row just stays hidden.
+            }
+        }
     }
 
     private fun recentRow(type: ContentType, shown: Boolean, rowId: Int, titleId: Int, adapter: ItemAdapter) {

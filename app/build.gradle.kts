@@ -17,7 +17,7 @@ android {
         minSdk = 21
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "1.3.4"
+        versionName = "2.0.0"
         multiDexEnabled = true
         // Weekly QA (qa/README.md): UI tests on an Android TV emulator against a fake Xtream server.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -83,6 +83,8 @@ dependencies {
     // "Now playing" for the TV (the mini player's title, remote media keys).
     implementation("androidx.media3:media3-session:$media3")
     implementation("io.coil-kt:coil:2.7.0")
+    // QR code for sending the ratings key from a phone (1.1E).
+    implementation("com.google.zxing:core:3.5.3")
     // Installs the startup profile (src/main/baseline-prof.txt) on sideloaded installs too.
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     implementation("androidx.tvprovider:tvprovider:1.0.0")

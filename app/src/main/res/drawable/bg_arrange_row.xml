@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Arrange Home: a row inside the TV frame. Highlighted like Settings rows; no outline at rest
+     (the frame already holds the rows). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="?attr/appFocusFill" />
+            <stroke android:width="?attr/appFocusStrokeThin" android:color="?attr/appFocusStroke" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#00000000" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+</selector>

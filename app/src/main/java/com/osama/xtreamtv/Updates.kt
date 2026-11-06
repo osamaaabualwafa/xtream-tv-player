@@ -123,7 +123,7 @@ object Updates {
         val dialog = AlertDialog.Builder(activity).setTitle("Downloading update").setView(view).setCancelable(false).show()
         scope.launch {
             try {
-                val file = fetch(activity, release.apkUrl) { percent ->
+                val file = fetch(activity, release.apkUrl, release.build) { percent ->
                     bar.isIndeterminate = percent < 0
                     if (percent >= 0) bar.progress = percent
                     label.text = if (percent >= 0) "$percent%" else "Starting…"
@@ -141,10 +141,22 @@ object Updates {
         }
     }
 
-    private suspend fun fetch(activity: Activity, url: String, onProgress: (Int) -> Unit): File {
+    /**
+     * Downloads the APK of [build], kept under its build number: pressing Install again for the same
+     * build reuses it (a TV whose installer didn't open the first time downloaded it all twice).
+     */
+    private suspend fun fetch(activity: Activity, url: String, build: Int, onProgress: (Int) -> Unit): File {
         val dir = if (Build.VERSION.SDK_INT >= 24) File(activity.cacheDir, "updates") else activity.getExternalFilesDir(null)!!
         dir.mkdirs()
-        val target = File(dir, "xtream-tv-player.apk")
+        val target = File(dir, "xtream-tv-player-$build.apk")
+        // Older builds' files (and the old single name) are no longer needed.
+        dir.listFiles()?.filter { it.name.endsWith(".apk") && it.name != target.name }?.forEach { it.delete() }
+        if (target.length() > 0) {
+            Diag.log("update", "build $build already downloaded, opening the installer again")
+            withContext(Dispatchers.Main) { onProgress(100) }
+            return target
+        }
+        val partial = File(dir, target.name + ".part")
         withContext(Dispatchers.Main) { onProgress(-1) }
         withContext(Dispatchers.IO) {
             val conn = URL(url).openConnection() as HttpURLConnection
@@ -158,7 +170,7 @@ object Updates {
                 var done = 0L
                 var lastPercent = -1
                 conn.inputStream.use { input ->
-                    target.outputStream().use { out ->
+                    partial.outputStream().use { out ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
                             val n = input.read(buffer)
@@ -178,6 +190,8 @@ object Updates {
             } finally {
                 conn.disconnect()
             }
+            // Only a complete download takes the build's name (a cut one is never reused).
+            if (!partial.renameTo(target)) throw IOException("couldn't save the update")
         }
         return target
     }
@@ -202,6 +216,24 @@ object Updates {
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        activity.startActivity(intent)
+        try {
+            activity.startActivity(intent)
+            Diag.log("update", "installer opened (${apk.length() / 1024 / 1024} MB)")
+            installerOpenedAt = System.currentTimeMillis()
+        } catch (e: Exception) {
+            Diag.log("update", "installer didn't open: ${e.javaClass.simpleName}")
+            showToast(activity, "The TV's installer didn't open. Press Install again.", Toast.LENGTH_LONG)
+        }
+    }
+
+    /** When the installer was last opened (diagnostics: back in the app still on the old build). */
+    @Volatile private var installerOpenedAt = 0L
+
+    /** Called when the app comes back to the front: an installer that closed without installing. */
+    fun noteReturn() {
+        val at = installerOpenedAt
+        if (at == 0L) return
+        installerOpenedAt = 0L
+        Diag.log("update", "back in the app ${(System.currentTimeMillis() - at) / 1000} s after opening the installer, still build $currentBuild (not installed)")
     }
 }

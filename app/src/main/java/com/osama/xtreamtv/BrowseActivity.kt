@@ -33,6 +33,8 @@ class BrowseActivity : AppCompatActivity() {
         private const val CAT_FAV = "__fav__"
         private const val CAT_CONTINUE = "__continue__"
         private const val CAT_HIDDEN = "__hidden__"
+        /** 1.1E: titles with IMDb 7.5 and up (saved scores), best first. */
+        private const val CAT_TOP = "__top__"
     }
 
     private lateinit var type: ContentType
@@ -197,7 +199,7 @@ class BrowseActivity : AppCompatActivity() {
         }
 
         // B2 / B4: the rail opens the category list; Back from the posters opens it too.
-        rail?.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) openPanel() }
+        rail?.setOnFocusChangeListener { _, hasFocus -> if (hasFocus && !closingPanel) openPanel() }
         if (panel != null) {
             onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
@@ -211,8 +213,26 @@ class BrowseActivity : AppCompatActivity() {
             })
         }
         itemsView.adapter = itemAdapter
+        // Scores filled in on the posters: Top rated's count follows (once a burst has settled).
+        val countTop = Runnable { Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> updateTopCount(Ratings.topRated(all).size) } }
+        itemAdapter.registerAdapterDataObserver(object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
+            override fun onItemRangeChanged(positionStart: Int, itemCount: Int, payload: Any?) {
+                if (payload != "scores") return
+                itemsView.removeCallbacks(countTop)
+                itemsView.postDelayed(countTop, 800)
+            }
+        })
 
         search.doAfterTextChanged { applyFilter() }
+        // Sort (Movies and Series): left of the search box; Up from the posters lands on the search
+        // box first, Left from there reaches Sort. Info on the posters opens the same list.
+        if (type != ContentType.LIVE) findViewById<TextView?>(R.id.sort_button)?.setOnClickListener { sortOptions() }
+        // Review 1.1B: the plate shows the highlighted item only; in the search box nothing is.
+        val before = search.onFocusChangeListener
+        search.setOnFocusChangeListener { v, hasFocus ->
+            before?.onFocusChange(v, hasFocus)
+            if (hasFocus) blankInfo()
+        }
         if (live) {
             val guide = findViewById<View>(R.id.tv_guide)
             guide.visibility = View.VISIBLE
@@ -244,6 +264,8 @@ class BrowseActivity : AppCompatActivity() {
         super.onResume()
         MiniPlayerBar.attach(this)
         if (!::itemAdapter.isInitialized) return
+        // Scores found while away (a title's page) show on the posters already there.
+        itemAdapter.notifyItemRangeChanged(0, itemAdapter.itemCount, "scores")
         // Back from the player: start the preview of the highlighted channel again.
         currentFocus?.let { itemsView.findContainingViewHolder(it) }?.bindingAdapterPosition
             ?.let { itemAdapter.items.getOrNull(it) }?.let { channelPreview?.focus(it) }
@@ -325,11 +347,15 @@ class BrowseActivity : AppCompatActivity() {
     private fun openPanel() {
         val p = panel ?: return
         p.visibility = View.VISIBLE
+        // The open category takes the highlight before the rail is hidden (hiding the rail while it
+        // held the highlight let Android drop it on the first category, which then opened).
+        val index = categoryAdapter.activeIndex.coerceAtLeast(0)
+        categoriesView.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus()
         rail?.visibility = View.GONE
         setGridColumns()
         categoriesView.post {
-            val index = categoryAdapter.activeIndex.coerceAtLeast(0)
-            (categoriesView.findViewHolderForAdapterPosition(index)?.itemView ?: categoriesView).requestFocus()
+            val open = categoriesView.findViewHolderForAdapterPosition(index)?.itemView
+            if (open != null && !open.hasFocus()) open.requestFocus() else if (open == null) categoriesView.requestFocus()
         }
     }
 
@@ -337,11 +363,21 @@ class BrowseActivity : AppCompatActivity() {
     private fun closePanel() {
         val p = panel ?: return
         if (p.visibility != View.VISIBLE) return
+        // The highlight goes to the posters before the list is hidden: hiding the list while it held
+        // the highlight let Android drop it on the rail, which reopened the list on its first
+        // category (B4 Preview: Right never reached the posters).
+        closingPanel = true
+        val lm = itemsView.layoutManager as? LinearLayoutManager
+        val first = lm?.findFirstVisibleItemPosition()?.takeIf { it >= 0 } ?: 0
+        (lm?.findViewByPosition(first) ?: itemsView).requestFocus()
         p.visibility = View.GONE
         rail?.visibility = View.VISIBLE
         setGridColumns()
         focusFirstItem()
+        itemsView.post { closingPanel = false }
     }
+
+    private var closingPanel = false
 
     /** B2: fewer columns while the list is open so the posters keep their size. */
     private fun setGridColumns() {
@@ -370,7 +406,7 @@ class BrowseActivity : AppCompatActivity() {
         val index = list.indexOf(category)
         if (index < 0) return
         val around = listOf(index + 1, index + 2, index - 1).mapNotNull { list.getOrNull(it) }
-            .filter { it.id != CAT_FAV && it.id != CAT_CONTINUE && it.id != CAT_HIDDEN }
+            .filter { it.id != CAT_FAV && it.id != CAT_CONTINUE && it.id != CAT_TOP && it.id != CAT_HIDDEN }
         if (around.isEmpty()) return
         val sample = (0 until itemsView.childCount).asSequence()
             .mapNotNull { itemsView.getChildAt(it).findViewById<android.widget.ImageView?>(R.id.image) }
@@ -448,7 +484,7 @@ class BrowseActivity : AppCompatActivity() {
      */
     private fun setupFocusMap() {
         val header = focusMap.section {
-            listOfNotNull(search, findViewById<View?>(R.id.tv_guide)).filter { it.isShown }
+            listOfNotNull(search, findViewById<View?>(R.id.sort_button), findViewById<View?>(R.id.tv_guide)).filter { it.isShown }
         }
         val categories = focusMap.section { listOf<View>(categoriesView) }
         itemsSection = focusMap.section { listOf<View>(itemsView) }
@@ -503,6 +539,13 @@ class BrowseActivity : AppCompatActivity() {
             }
             return true
         }
+        // Info key (a short press) on the posters: how they're sorted (1.1E: IMDb score). Holding
+        // Info stays the diagnostics Mark shortcut.
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_INFO && itemsView.hasFocus() && sortApplies()) {
+            if (event.action == android.view.KeyEvent.ACTION_UP && !event.isCanceled && event.eventTime - event.downTime < 600) sortOptions()
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0) return super.dispatchKeyEvent(event)
+            return true
+        }
         // Right from the sliding category list closes it.
         if (panel?.visibility == View.VISIBLE && categoriesView.hasFocus() &&
             event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
@@ -520,7 +563,7 @@ class BrowseActivity : AppCompatActivity() {
             try {
                 serverCategories = Session.categoryCache[type] ?: api.categories(type).also { Session.categoryCache[type] = it }
                 val list = buildCategoryList()
-                val cats = list.filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN) }
+                val cats = list.filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_TOP, CAT_ALL, CAT_HIDDEN) }
                 categoryAdapter.submit(list)
                 loadCounts()
                 // Open "Continue watching" when there is something to resume, otherwise the
@@ -557,6 +600,7 @@ class BrowseActivity : AppCompatActivity() {
         val list = ArrayList<Category>()
         if (type != ContentType.LIVE) list.add(Category(CAT_CONTINUE, "▶ Continue watching"))
         list.add(Category(CAT_FAV, "★ Favorites"))
+        if (type != ContentType.LIVE && Ratings.isOn) list.add(Category(CAT_TOP, "Top rated"))
         list.add(Category(CAT_ALL, "All"))
         list.addAll(sorted)
         if (hidden.any { id -> serverCategories.any { it.id == id } }) list.add(Category(CAT_HIDDEN, "⊘  Hidden categories"))
@@ -576,8 +620,8 @@ class BrowseActivity : AppCompatActivity() {
 
     /** Hold OK (or the menu key) on a category: move it or hide it. */
     private fun categoryOptions(cat: Category) {
-        if (cat.id in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN)) return
-        val ids = buildCategoryList().filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_ALL, CAT_HIDDEN) }.map { it.id }.toMutableList()
+        if (cat.id in setOf(CAT_CONTINUE, CAT_FAV, CAT_TOP, CAT_ALL, CAT_HIDDEN)) return
+        val ids = buildCategoryList().filter { it.id !in setOf(CAT_CONTINUE, CAT_FAV, CAT_TOP, CAT_ALL, CAT_HIDDEN) }.map { it.id }.toMutableList()
         val at = ids.indexOf(cat.id)
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle(cat.name)
@@ -633,6 +677,7 @@ class BrowseActivity : AppCompatActivity() {
                 rating = null,
                 note = e.progressText(),
                 progress = e.progressFraction(),
+                ratingId = e.seriesId ?: e.id,
             )
         }
         else -> emptyList()
@@ -654,6 +699,19 @@ class BrowseActivity : AppCompatActivity() {
             allItems = localItems(category.id)
             showCategoryTitle(category, allItems.size)
             applyFilter()
+            return
+        }
+        if (category.id == CAT_TOP) {
+            loadJob = lifecycleScope.launch {
+                val cached = cachedStreams(null)
+                if (cached == null) showLoading(true)
+                val all = cached ?: runCatching { loadStreams(null) }.getOrElse { if (it is CancellationException) throw it; emptyList() }
+                showLoading(false)
+                allItems = Ratings.topRated(all)
+                showCategoryTitle(category, allItems.size)
+                updateTopCount(allItems.size)
+                applyFilter()
+            }
             return
         }
         // Already on the device (most categories once the full list is in): show it at once,
@@ -743,9 +801,17 @@ class BrowseActivity : AppCompatActivity() {
     }
 
     /** Favorites / Continue watching change on other screens. */
+    /** Top rated's count in the category list, as new scores come in (it grows while browsing). */
+    private fun updateTopCount(size: Int) {
+        if (counts[CAT_TOP] == size) return
+        counts = HashMap(counts).apply { put(CAT_TOP, size) }
+        categoryAdapter.items.indexOfFirst { it.id == CAT_TOP }.takeIf { it >= 0 }?.let { categoryAdapter.notifyItemChanged(it, "count") }
+    }
+
     private fun refreshLocalCounts() {
         val map = HashMap(counts)
         map[CAT_FAV] = prefs.favorites(type).size
+        Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> map[CAT_TOP] = Ratings.topRated(all).size }
         map[CAT_HIDDEN] = prefs.hiddenCategories(type).count { id -> serverCategories.any { it.id == id } }
         if (type != ContentType.LIVE) map[CAT_CONTINUE] = prefs.continueWatching(type).size
         counts = map
@@ -776,8 +842,10 @@ class BrowseActivity : AppCompatActivity() {
     }
 
     private fun applyFilter(scrollToTop: Boolean = true) {
+        updateSortButton()
         val query = search.text.toString().trim()
-        val list = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
+        val found = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
+        val list = sorted(found)
         itemAdapter.favorites = prefs.favoriteIds(type)
         if (type == ContentType.SERIES) {
             Session.streamCache["SERIES:__all__"]?.let { itemAdapter.newIds = prefs.newEpisodeSeries(it) }
@@ -785,6 +853,8 @@ class BrowseActivity : AppCompatActivity() {
         itemAdapter.submit(list)
         if (scrollToTop) itemsView.scrollToPosition(0)
         if (list.isEmpty()) findViewById<View>(R.id.info_strip).visibility = if (style == Appearance.BROWSE_PREVIEW) View.INVISIBLE else View.GONE
+        // Typed or cleared while no poster is highlighted: the plate described an item that may be gone.
+        else if (!itemsView.hasFocus()) blankInfo()
         // The list closed before the items arrived: move to the first item once they are there.
         if (list.isNotEmpty() && panel?.visibility == View.GONE && (currentFocus == null || currentFocus == itemsView)) focusFirstItem()
         val catId = currentCategory?.id
@@ -792,6 +862,8 @@ class BrowseActivity : AppCompatActivity() {
             progress.visibility == View.VISIBLE -> message.visibility = View.GONE
             list.isEmpty() && catId == CAT_FAV && query.isEmpty() ->
                 showMessage("No favorites yet.\nLong-press OK on an item to add it.")
+            list.isEmpty() && catId == CAT_TOP && query.isEmpty() ->
+                showMessage("No top rated titles yet.\nScores are added as you browse.")
             list.isEmpty() && catId == CAT_CONTINUE && query.isEmpty() ->
                 showMessage("Nothing to continue yet.\nStart watching something and it will appear here.")
             list.isEmpty() -> showMessage(if (query.isEmpty()) "Nothing here." else "No results for \"$query\".")
@@ -799,18 +871,116 @@ class BrowseActivity : AppCompatActivity() {
         }
     }
 
+    /** The grid's order (Menu on the grid): the provider's, IMDb score, A to Z, or recently added. */
+    private fun sorted(list: List<StreamItem>): List<StreamItem> {
+        val cat = currentCategory?.id
+        if (cat == CAT_CONTINUE || cat == CAT_TOP || type == ContentType.LIVE) return list
+        return when (prefs.browseSort(type)) {
+            1 -> Ratings.sortByScore(list)
+            2 -> list.sortedBy { it.name.lowercase() }
+            3 -> list.sortedByDescending { it.added }
+            else -> list
+        }
+    }
+
+    /** "Sort · IMDb score": shown where sorting applies (not Live TV, Continue watching or Top rated). */
+    /** Sorting changes this list: not Live TV, nor Continue watching or Top rated (always in their own order). */
+    private fun sortApplies(): Boolean {
+        val cat = currentCategory?.id
+        return type != ContentType.LIVE && cat != CAT_CONTINUE && cat != CAT_TOP
+    }
+
+    private fun updateSortButton() {
+        val b = findViewById<TextView?>(R.id.sort_button) ?: return
+        val on = sortApplies()
+        if (!on && b.hasFocus()) search.requestFocus()
+        b.visibility = if (on) View.VISIBLE else View.GONE
+        b.text = when (prefs.browseSort(type)) {
+            1 -> "Sort · IMDb score"
+            2 -> "Sort · A to Z"
+            3 -> "Sort · Recently added"
+            else -> "Sort"
+        }
+    }
+
+    /**
+     * The Sort list: a small panel in the theme's colours under the Sort button (the Info key opens
+     * it too), the current order ticked. Up/Down choose, OK applies, Back closes.
+     */
+    private fun sortOptions() {
+        val names = arrayOf("As the provider lists them", "IMDb score", "A to Z", "Recently added")
+        val current = prefs.browseSort(type)
+        val button = findViewById<View?>(R.id.sort_button)
+        val anchor = button?.takeIf { it.isShown } ?: search
+        val back = currentFocus
+        fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+        val accent = themeColor(R.attr.appAccent)
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(themeColor(R.attr.appOverlay) or 0xF0000000.toInt())
+                setStroke(dp(1).coerceAtLeast(1), (accent and 0x00FFFFFF) or 0xB3000000.toInt())
+            }
+        }
+        box.addView(TextView(this).apply {
+            text = "Sort " + (currentCategory?.name ?: "")
+            setTextColor(themeColor(R.attr.appText))
+            textSize = 15f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(14), dp(6), dp(14), dp(10))
+        })
+        val popup = android.widget.PopupWindow(box, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        val rows = names.mapIndexed { i, name ->
+            TextView(this).apply {
+                text = if (i == current) "$name   ✓" else name
+                textSize = 16f
+                setTextColor(androidx.core.content.ContextCompat.getColorStateList(this@BrowseActivity, R.color.on_focus_text))
+                setBackgroundResource(R.drawable.bg_menu_row)
+                minWidth = dp(260)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                isFocusable = true
+                isClickable = true
+                setOnClickListener {
+                    popup.dismiss()
+                    if (i != prefs.browseSort(type)) {
+                        prefs.setBrowseSort(type, i)
+                        applyFilter()
+                    }
+                }
+            }.also { box.addView(it, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) }) }
+        }
+        popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+        popup.elevation = dp(12).toFloat()
+        popup.isOutsideTouchable = true
+        popup.setOnDismissListener { (if (anchor === button) button else back)?.requestFocus() }
+        popup.showAsDropDown(anchor, 0, dp(6), android.view.Gravity.END)
+        box.post { rows[current.coerceIn(0, rows.size - 1)].requestFocus() }
+    }
+
+    /** The plate keeps its space but shows nothing until a poster is highlighted. */
+    private fun blankInfo() {
+        findViewById<View?>(R.id.info_strip)?.visibility = View.INVISIBLE
+    }
+
+    /** 1.1E: asks for the highlighted poster's scores once it has stayed highlighted a moment. */
+    private var scoresJob: kotlinx.coroutines.Job? = null
+
     /** Info strip under the grid: name, then year · genre · rating, then the start of the plot. */
     private fun showInfo(item: StreamItem) {
         findViewById<View>(R.id.info_strip).visibility = View.VISIBLE
         findViewById<TextView>(R.id.info_name).text = item.name
-        val meta = listOfNotNull(
-            item.note,
-            item.year,
-            item.genre,
-            displayRating(item.rating)?.let { "★ $it" },
-            if (item.year == null && item.added > 0) "Added " + formatDate(item.added) else null,
-        ).joinToString("  ·  ")
-        findViewById<TextView>(R.id.info_meta).text = meta
+        showInfoMeta(item)
+        scoresJob?.cancel()
+        if (Ratings.needsLookup(item.type, item.id)) scoresJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(1200)
+            Ratings.lookupItem(api, item, onScreen = false) ?: return@launch
+            showInfoMeta(item)
+            val at = itemAdapter.items.indexOfFirst { it.id == item.id && it.type == item.type }
+            if (at >= 0) itemAdapter.notifyItemChanged(at, "scores")
+            Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> updateTopCount(Ratings.topRated(all).size) }
+        }
         findViewById<TextView>(R.id.info_plot).apply {
             text = item.plot
             visibility = if (item.plot == null) View.GONE else View.VISIBLE
@@ -819,6 +989,20 @@ class BrowseActivity : AppCompatActivity() {
             crossfade(false)
             error(R.drawable.placeholder)
         }
+    }
+
+    /** Real scores first when known (they replace the provider's ★), then year, genre. */
+    private fun showInfoMeta(item: StreamItem) {
+        val scores = if (item.note == null) Ratings.known(item.type, item.id) else null
+        val rest = listOfNotNull(
+            item.note,
+            item.year,
+            item.genre,
+            if (item.year == null && item.added > 0) "Added " + formatDate(item.added) else null,
+        ).joinToString("  ·  ")
+        val view = findViewById<TextView>(R.id.info_meta)
+        view.text = if (scores == null) rest else android.text.SpannableStringBuilder()
+            .append(RatingBadges.line(this, scores, view.currentTextColor)).append(if (rest.isEmpty()) "" else "  ·  ").append(rest)
     }
 
     private fun open(index: Int, item: StreamItem) {

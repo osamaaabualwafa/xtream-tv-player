@@ -50,7 +50,7 @@ object DiagUi {
         }
     }
 
-    private class Card(val activity: Activity, val dialog: Dialog, val body: LinearLayout) {
+    internal class Card(val activity: Activity, val dialog: Dialog, val body: LinearLayout) {
         private val density = activity.resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
         fun color(attr: Int) = activity.themeColor(attr)
@@ -206,7 +206,7 @@ object DiagUi {
         }
     }
 
-    private fun card(activity: Activity, build: (Card) -> Unit): Card {
+    internal fun card(activity: Activity, widthDp: Int = 620, build: (Card) -> Unit): Card {
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val density = activity.resources.displayMetrics.density
@@ -222,7 +222,7 @@ object DiagUi {
             val pad = (24 * density).toInt()
             setPadding(pad, pad, pad, pad)
         }
-        dialog.setContentView(body, ViewGroup.LayoutParams((620 * density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
+        dialog.setContentView(body, ViewGroup.LayoutParams((widthDp * density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         // The screen behind goes darker, so the card reads on its own.
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -393,7 +393,8 @@ object DiagUi {
     }
 
     /** The small coloured dot on a Settings button: red for a crash, yellow for full or old, blue for marks. */
-    fun applyDot(view: View?, color: Int?) {
+    /** [sideRow]: the side menu's Settings row, where the dot sits on its right side, centred on the line. */
+    fun applyDot(view: View?, color: Int?, sideRow: Boolean = false) {
         view ?: return
         if (android.os.Build.VERSION.SDK_INT < 23) return
         if (color == null) {
@@ -404,11 +405,21 @@ object DiagUi {
         val dot = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(color)
-            setStroke((2 * d).toInt(), 0xFF0B1120.toInt())
         }
-        view.foreground = android.graphics.drawable.LayerDrawable(arrayOf(dot)).apply {
+        val layers = android.graphics.drawable.LayerDrawable(arrayOf(dot)).apply {
             setLayerSize(0, (11 * d).toInt(), (11 * d).toInt())
             setLayerGravity(0, Gravity.TOP or Gravity.END)
+        }
+        view.foreground = layers
+        // The side menu's Settings row: the dot on the row's right side, centred on the same line as
+        // the word, not in the top corner (2026-11-07). Tiles and top-bar buttons keep the corner.
+        if (sideRow) view.post {
+            // A fresh drawable: changing the place of one already shown doesn't move it.
+            view.foreground = android.graphics.drawable.LayerDrawable(arrayOf(dot)).apply {
+                setLayerSize(0, (11 * d).toInt(), (11 * d).toInt())
+                setLayerGravity(0, Gravity.END or Gravity.CENTER_VERTICAL)
+                setLayerInsetEnd(0, (18 * d).toInt())
+            }
         }
     }
 }

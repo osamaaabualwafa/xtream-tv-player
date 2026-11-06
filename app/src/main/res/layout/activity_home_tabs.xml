@@ -245,6 +245,28 @@
             style="@style/HomeRow" />
 
         <TextView
+            android:id="@+id/row_top_rated_title"
+            style="@style/HomeRowTitle"
+            android:text="Top rated movies"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_top_rated"
+            style="@style/HomeRow"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/row_top_series_title"
+            style="@style/HomeRowTitle"
+            android:text="Top rated series"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_top_series"
+            style="@style/HomeRow"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/row_channels_title"
             style="@style/HomeRowTitle"
             android:text="Favorite channels" />

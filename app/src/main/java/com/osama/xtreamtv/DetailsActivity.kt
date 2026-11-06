@@ -24,6 +24,8 @@ class DetailsActivity : AppCompatActivity() {
     override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
 
     companion object {
+        /** The coming episode's card (1.1E next episode): shown, never played. */
+        private const val COMING_ID = "__coming__"
         private const val EXTRA_TYPE = "type"
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
@@ -104,7 +106,7 @@ class DetailsActivity : AppCompatActivity() {
         message = findViewById(R.id.message)
 
         title.text = item.name
-        setMeta(listOfNotNull(displayRating(item.rating)?.let { "★ $it" }))
+        setMeta(emptyList())
         loadPoster(item.image)
 
         buttons.visibility = View.VISIBLE
@@ -225,15 +227,42 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
-    /** Rating, year, length, genre as glass chips. */
+    /** The chips shown last, so real scores arriving later can take the provider's ★ place. */
+    private var metaValues: List<String> = emptyList()
+    /** The provider's own chips (year, length, genre), before anything MDBList fills in. */
+    private var baseMeta: List<String> = emptyList()
+    /** 1.1E extras: age rating, awards, next episode, recommendations, gaps. */
+    private var extras: RatingsExtras.Extras? = null
+    private var recosAdapter: ItemAdapter? = null
+    /** Series: More like this is ready under the episodes (shown with Down). */
+    private var recosReady = false
+    private var currentSeason: Int? = null
+    private var lastEpisodeFocus: View? = null
+
+    private fun validYear(text: String?) = text?.take(4)?.takeIf { Regex("(19|20)\\d{2}").matches(it) }
+    private var scores: RatingBadges.Scores? = null
+
+    /** Rating, year, length, genre as glass chips; real IMDb / Rotten Tomatoes scores first when known (1.1E). */
     private fun setMeta(values: List<String>) {
+        metaValues = values
         meta.removeAllViews()
         val density = resources.displayMetrics.density
+        scores?.let { s ->
+            meta.addView(TextView(this).apply {
+                text = RatingBadges.line(context, s, themeColor(R.attr.appText))
+                textSize = 14f
+                maxLines = 1
+                setBackgroundResource(R.drawable.bg_meta_chip)
+                setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { rightMargin = (8 * density).toInt() }
+            })
+        }
         for (v in values.filter { it.isNotBlank() }) {
             meta.addView(TextView(this).apply {
                 text = v
                 // Glass: the rating stands out in the live colour.
-                setTextColor(themeColor(if (v.startsWith("★") && Prefs(context).themeIndex == Appearance.THEME_GLASS) R.attr.appLive else R.attr.appText))
+                setTextColor(themeColor(R.attr.appText))
                 textSize = 14f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -244,6 +273,211 @@ class DetailsActivity : AppCompatActivity() {
                     .apply { rightMargin = (8 * density).toInt() }
             })
         }
+    }
+
+    /**
+     * 1.1E: the title's real scores (saved, or asked from MDBList now: it is on screen). "Wrong scores"
+     * shows for titles matched by name, the only ones that can be wrong.
+     */
+    private fun showScores(tmdb: String?, imdb: String?, releaseDate: String?, cover: String?, name: String, originalName: String? = null) {
+        if (!Ratings.hasKey) return
+        baseMeta = metaValues
+        Ratings.known(item.type, item.id)?.let { scores = it; setMeta(metaValues) }
+        val title = Ratings.Title(item.type, item.id, name, releaseDate?.let { Regex("(19|20)\\d{2}").find(it)?.value }, tmdb, imdb, item.image ?: cover,
+            originalName?.takeIf { it != name })
+        // More like this needs the whole list and its name index: get them ready meanwhile.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val all = Session.streamCache["${item.type.name}:__all__"] ?: runCatching { api.streams(item.type, null) }.getOrNull()
+                ?.also { Session.streamCache["${item.type.name}:__all__"] = it }
+            all?.let { Ratings.nameIndex(it) }
+        }
+        lifecycleScope.launch {
+            val found = Ratings.lookup(title, onScreen = true)
+            scores = found
+            setMeta(metaValues)
+            // No trailer from the provider: MDBList's, when it has one (asked once more for titles
+            // saved before trailers were kept).
+            if (findViewById<Button>(R.id.trailer).visibility != View.VISIBLE) {
+                if (Ratings.needsTrailer(item.type, item.id)) Ratings.lookup(title, onScreen = true, fresh = true)
+                Ratings.trailer(item.type, item.id)?.let { showTrailer(it); buttons.post { alignButtons() } }
+            }
+            val wrong = findViewById<Button?>(R.id.wrong_scores) ?: return@launch
+            wrong.visibility = if (found != null && Ratings.how(item.type, item.id) == Ratings.How.NAME) View.VISIBLE else View.GONE
+            wrong.setOnClickListener {
+                Ratings.markWrong(item.type, item.id)
+                scores = null
+                setMeta(metaValues)
+                if (wrong.hasFocus()) favoriteButton.requestFocus()
+                wrong.visibility = View.GONE
+                buttons.post { alignButtons() }
+                showToast(this@DetailsActivity, "Scores removed. This title won't be matched again.", Toast.LENGTH_SHORT)
+            }
+            buttons.post { alignButtons() }
+            if (found != null || Ratings.how(item.type, item.id) == Ratings.How.ID) showExtras()
+        }
+    }
+
+    /**
+     * 1.1E extras on this page: what the provider left empty (description, year, length, genre), the
+     * age rating and awards as chips, the next episode (series) and More like this.
+     */
+    private suspend fun showExtras() {
+        val e = RatingsExtras.forTitle(item.type, item.id) ?: return
+        extras = e
+        if (plot.text.isNullOrBlank() || plot.text.toString() == "Details unavailable.") e.description?.let { plot.text = it }
+        val year = Regex("^(19|20)\\d{2}$")
+        val fills = ArrayList<String>()
+        if (baseMeta.none { year.matches(it) } && e.year > 1900) fills += e.year.toString()
+        if (isMovie && baseMeta.none { it.contains(" min") } && e.runtime > 0) fills += if (e.runtime >= 60) "${e.runtime / 60} h ${e.runtime % 60} min" else "${e.runtime} min"
+        if (baseMeta.none { !year.matches(it) && !it.contains(" min") } && e.genres.isNotEmpty()) fills += e.genres.take(3).joinToString(" / ")
+        val badges = listOfNotNull(e.certification?.takeIf { it.length <= 8 }, RatingsExtras.awardBadge(e.awards))
+        setMeta(baseMeta + fills + badges)
+        if (!isMovie) {
+            val line = RatingsExtras.nextLine(e) { s, n -> seasons[s]?.any { it.number == n } == true }
+            findViewById<TextView?>(R.id.next_episode)?.apply {
+                text = line
+                visibility = if (line == null) View.GONE else View.VISIBLE
+            }
+            currentSeason?.let { s -> episodeAdapter.submit(withComing(s)) }
+        }
+        showRecos(e)
+    }
+
+    /** "Mon 9 Nov" when [ep] is the next episode and hasn't aired yet (MDBList's date), else null. */
+    private fun notAiredYet(ep: Episode): String? {
+        val n = extras?.next ?: return null
+        if (n.season != ep.season || n.number != ep.number || n.airAt <= System.currentTimeMillis()) return null
+        return java.text.SimpleDateFormat(if (n.airAt - System.currentTimeMillis() <= 30L * 86_400_000) "EEE d MMM" else "MMMM yyyy", java.util.Locale.getDefault())
+            .format(java.util.Date(n.airAt))
+    }
+
+    /** The coming episode as a card at the end of its season (not playable), when the provider lacks it. */
+    private fun comingEpisode(): Episode? {
+        val n = extras?.next ?: return null
+        if (n.airAt <= 0 || n.season <= 0 || n.number <= 0) return null
+        if (seasons[n.season]?.any { it.number == n.number } == true) return null
+        return Episode(COMING_ID, n.title ?: "Episode ${n.number}", n.season, n.number, "", null, null)
+    }
+
+    private fun withComing(season: Int): List<Episode> {
+        val list = seasons[season] ?: emptyList()
+        val coming = comingEpisode()?.takeIf { it.season == season } ?: return list
+        return list + coming
+    }
+
+    /**
+     * More like this: first MDBList's recommendations that this playlist has (3 at least). When
+     * MDBList has fewer (new titles have none yet), "Similar in your playlist": titles of the same
+     * provider category sharing the most genres, best rated first.
+     */
+    private fun showRecos(e: RatingsExtras.Extras) {
+        val recs = e.recs
+        lifecycleScope.launch {
+            val all = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                Session.streamCache["${item.type.name}:__all__"] ?: runCatching { api.streams(item.type, null) }.getOrNull() ?: emptyList()
+            }
+            val fromMdbList = if (recs.isEmpty()) emptyList() else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val byId = all.associateBy { it.id }
+                val viaList = all.filter { it.tmdb != null }.associateBy { it.tmdb!! }
+                val viaLookups = Ratings.idsByTmdb(item.type)
+                // Movie lists carry no ids: a recommended title is also found by its name (the
+                // index is made once per list and kept).
+                val byName by lazy { Ratings.nameIndex(all) }
+                recs.mapNotNull { r ->
+                    val id = r.substringBefore('\t')
+                    val title = r.substringAfter('\t', "")
+                    (if (id.isNotEmpty()) viaList[id] ?: viaLookups[id]?.let { byId[it] } else null)
+                        ?: title.takeIf { it.isNotEmpty() }?.let { byName[Ratings.nameKey(it)] }
+                }.filter { it.id != item.id }.distinctBy { it.id }.take(12)
+            }
+            val similar = fromMdbList.size < 3
+            val found = if (!similar) fromMdbList else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { similarTitles(all, e) }
+            if (BuildConfig.DEBUG) android.util.Log.d("Recos", "${item.name}: ${recs.size} recommended, ${fromMdbList.size} in the playlist" +
+                (if (similar) " · similar instead: ${found.size}" else "") + " · " + found.take(6).map { it.name })
+            if (found.size < 3) return@launch
+            findViewById<TextView>(R.id.recos_title).text = if (similar) "Similar in your playlist" else "More like this"
+            val view = findViewById<RecyclerView>(R.id.recos)
+            val adapter = recosAdapter ?: ItemAdapter(
+                grid = true,
+                onClick = { _, it -> startActivity(intent(this@DetailsActivity, it)) },
+                onLongClick = null,
+                layout = R.layout.item_poster_mini,
+            ).also { a ->
+                recosAdapter = a
+                view.layoutManager = RowLayoutManager(this@DetailsActivity)
+                view.adapter = a
+            }
+            adapter.submit(found)
+            if (isMovie) {
+                findViewById<View>(R.id.recos_title).visibility = View.VISIBLE
+                view.visibility = View.VISIBLE
+            } else {
+                recosReady = true
+            }
+        }
+    }
+
+    /** Titles like this one from the playlist: same category, most genres in common, best rated first. */
+    private fun similarTitles(all: List<StreamItem>, e: RatingsExtras.Extras): List<StreamItem> {
+        val me = all.firstOrNull { it.id == item.id } ?: item
+        val cats = me.categoryIds.toSet()
+        fun genresOf(s: StreamItem): Set<String> =
+            (RatingsExtras.saved(s.type, s.id)?.genres ?: s.genre?.split('/', ',', '&', '|')?.map { it.trim() } ?: emptyList())
+                .map { it.lowercase() }.filter { it.isNotEmpty() }.toSet()
+        val mine = e.genres.map { it.lowercase() }.toSet() + genresOf(me)
+        // No genres known: nothing to be similar by (the category's best titles alone looked random).
+        if (mine.isEmpty()) return emptyList()
+        return all.asSequence()
+            .filter { it.id != item.id && it.categoryIds.any { c -> c in cats } }
+            .map { s -> s to genresOf(s).intersect(mine).size }
+            .filter { it.second > 0 }
+            .map { (s, shared) -> s to (shared * 10 + Ratings.scoreOf(s)) }
+            .sortedWith(compareByDescending<Pair<StreamItem, Double>> { it.second }.thenByDescending { it.first.added })
+            .map { it.first }
+            .distinctBy { it.id }
+            .take(12)
+            .toList()
+    }
+
+    /** Series: Down from the episodes slides the top part away and shows More like this; Up brings it back. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Movies: Down from the buttons tucks the description and credits away so More like this
+        // fits in full; Up brings them back.
+        val recosRow = findViewById<RecyclerView?>(R.id.recos)
+        if (isMovie && recosRow?.visibility == View.VISIBLE && event.action == android.view.KeyEvent.ACTION_DOWN) {
+            val credits = findViewById<TextView>(R.id.credits)
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && buttons.hasFocus()) {
+                plot.visibility = View.GONE
+                credits.visibility = View.GONE
+                recosRow.post { recosRow.getChildAt(0)?.requestFocus() }
+                return true
+            }
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && recosRow.hasFocus()) {
+                plot.visibility = View.VISIBLE
+                credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
+                playButton.post { (if (playButton.isShown) playButton else favoriteButton).requestFocus() }
+                return true
+            }
+        }
+        if (!isMovie && recosReady && event.action == android.view.KeyEvent.ACTION_DOWN) {
+            val box = findViewById<View>(R.id.recos_box)
+            val top = findViewById<View>(R.id.info).parent as View
+            val recos = findViewById<RecyclerView>(R.id.recos)
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && episodesView.hasFocus() && box.visibility != View.VISIBLE) {
+                lastEpisodeFocus = episodesView.focusedChild
+                top.visibility = View.GONE
+                box.visibility = View.VISIBLE
+                recos.post { recos.getChildAt(0)?.requestFocus() }
+                return true
+            }
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && recos.hasFocus()) {
+                box.visibility = View.GONE
+                top.visibility = View.VISIBLE
+                episodesView.post { (lastEpisodeFocus?.takeIf { it.isAttachedToWindow } ?: episodesView.getChildAt(0))?.requestFocus() }
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun showCredits(text: String?) {
@@ -271,10 +505,9 @@ class DetailsActivity : AppCompatActivity() {
                 info.name?.let { title.text = it }
                 if (info.ext != null) ext = info.ext
                 setMeta(listOfNotNull(
-                    displayRating(info.rating)?.let { "★ $it" },
-                    info.releaseDate?.take(4),
-                    info.duration?.let { durationText(it) },
-                    info.genre,
+                    validYear(info.releaseDate),
+                    info.duration?.takeIf { parseLength(it)?.let { ms -> ms > 0 } ?: true }?.let { durationText(it) },
+                    info.genre?.takeIf { it.isNotBlank() },
                 ))
                 plot.text = info.plot
                 showCredits(listOfNotNull(
@@ -283,6 +516,7 @@ class DetailsActivity : AppCompatActivity() {
                 ).joinToString("\n").ifEmpty { null })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
+                showScores(info.tmdb, info.imdb, info.releaseDate, info.cover, info.name ?: item.name, info.originalName)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -340,8 +574,18 @@ class DetailsActivity : AppCompatActivity() {
         episodeAdapter = TextAdapter(
             R.layout.item_episode_card,
             bind = { vh, ep -> bindEpisode(vh, ep) },
-            onClick = { _, ep -> playEpisode(ep) },
+            onClick = { _, ep ->
+                val wait = notAiredYet(ep)
+                when {
+                    ep.id == COMING_ID -> showToast(this, "Not available yet", Toast.LENGTH_SHORT)
+                    // Listed by the provider before it airs (an empty placeholder): say when, don't
+                    // start the player (it only retried "reconnect 1/5", 2026-11-07).
+                    wait != null -> showToast(this, "Airs $wait · not available yet", Toast.LENGTH_SHORT)
+                    else -> playEpisode(ep)
+                }
+            },
             onLongClick = { index, ep ->
+                if (ep.id == COMING_ID) return@TextAdapter
                 // Long-press: mark as watched / not watched.
                 val key = episodeKey(ep)
                 val watched = !prefs.isWatched(key)
@@ -359,14 +603,14 @@ class DetailsActivity : AppCompatActivity() {
             try {
                 val info = api.seriesInfo(item.id)
                 setMeta(listOfNotNull(
-                    displayRating(info.rating)?.let { "★ $it" },
-                    info.releaseDate?.take(4),
-                    info.genre,
+                    validYear(info.releaseDate),
+                    info.genre?.takeIf { it.isNotBlank() },
                 ))
                 plot.text = info.plot
                 showCredits(info.cast?.let { "Cast: $it" })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
+                showScores(info.tmdb, info.imdb, info.releaseDate, info.cover, item.name)
                 seasons = info.seasons
                 if (seasons.isEmpty()) {
                     showMessage("No episodes available.")
@@ -415,13 +659,25 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun showSeason(index: Int, season: Int) {
         seasonAdapter.activeIndex = index
-        episodeAdapter.submit(seasons[season] ?: emptyList())
+        currentSeason = season
+        episodeAdapter.submit(withComing(season))
         episodesView.scrollToPosition(0)
     }
 
     private fun episodeKey(ep: Episode) = "ep_${ep.id}"
 
     private fun bindEpisode(vh: TextAdapter.VH, ep: Episode) {
+        vh.itemView.alpha = if (ep.id == COMING_ID) 0.55f else 1f
+        if (ep.id == COMING_ID) {
+            val air = extras?.next?.airAt ?: 0L
+            vh.title.text = "S%02d.E%02d  ·  %s".format(ep.season, ep.number ?: 0, ep.title)
+            vh.subtitle?.text = if (air > System.currentTimeMillis()) "Coming " + java.text.SimpleDateFormat(
+                if (air - System.currentTimeMillis() <= 30L * 86_400_000) "EEE d MMM" else "MMMM yyyy", java.util.Locale.getDefault(),
+            ).format(java.util.Date(air)) else "Not in your playlist yet"
+            vh.itemView.findViewById<ImageView?>(R.id.image)?.loadEpisodeImage(ep, posterUrl)
+            vh.itemView.findViewById<ProgressBar?>(R.id.watch_progress)?.visibility = View.GONE
+            return
+        }
         // Many panels already put "S01 E02" in the title; don't repeat the number.
         val prefix = if (ep.number != null && !ep.hasNumberInTitle()) "E${ep.number}  ·  " else ""
         vh.title.text = prefix + ep.title
@@ -429,6 +685,16 @@ class DetailsActivity : AppCompatActivity() {
         val pos = prefs.position(key)
         val watched = prefs.isWatched(key)
         val length = parseLength(ep.duration)
+        val next = extras?.next
+        if (next != null && next.season == ep.season && next.number == ep.number && next.airAt > System.currentTimeMillis()) {
+            vh.itemView.alpha = 0.55f  // faded like the other coming episodes
+            vh.subtitle?.text = "Coming " + java.text.SimpleDateFormat(
+                if (next.airAt - System.currentTimeMillis() <= 30L * 86_400_000) "EEE d MMM" else "MMMM yyyy", java.util.Locale.getDefault(),
+            ).format(java.util.Date(next.airAt))
+            vh.itemView.findViewById<ImageView?>(R.id.image)?.loadEpisodeImage(ep, posterUrl)
+            vh.itemView.findViewById<ProgressBar?>(R.id.watch_progress)?.visibility = View.GONE
+            return
+        }
         vh.subtitle?.text = listOfNotNull(
             when {
                 pos > 0 && length != null && length > pos -> "${(length - pos + 59_999) / 60_000} min left"
