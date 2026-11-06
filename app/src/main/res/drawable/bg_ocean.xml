@@ -1,5 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Ocean gradient background. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient android:angle="315" android:startColor="#FF0F2027" android:centerColor="#FF203A43" android:endColor="#FF2C5364" />
-</shape>
+<!-- Ocean: deep blue-green water, lighter near the surface, lit from above in the theme colour,
+     with small bubbles and a fine grain (pictures from scripts/make_textures.py). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FF06161E" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:angle="270"
+                android:startColor="#FF0E3644"
+                android:centerColor="#800A2530"
+                android:endColor="#0006161E" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.5"
+                android:centerY="-0.1"
+                android:endColor="#0006161E"
+                android:gradientRadius="760dp"
+                android:startColor="?attr/appAccent4D"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:gravity="fill" android:src="@drawable/tex_bubbles" />
+    </item>
+    <item>
+        <bitmap android:alpha="0.45" android:src="@drawable/tex_grain" android:tileMode="repeat" />
+    </item>
+</layer-list>

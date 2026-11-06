@@ -47,6 +47,10 @@ def gfx_read():
         "p99": num(r"99th percentile: (\d+)ms"),
         "slow_ui": num(r"Number Slow UI thread: (\d+)"),
         "slow_bitmap": num(r"Number Slow bitmap uploads: (\d+)"),
+        "missed_vsync": num(r"Number Missed Vsync: (\d+)"),
+        "input_latency": num(r"Number High input latency: (\d+)"),
+        "slow_draw": num(r"Number Slow issue draw commands: (\d+)"),
+        "over33": sum(int(n) for ms, n in re.findall(r"(\d+)ms=(\d+)", out.split("HISTOGRAM:")[1].splitlines()[0]) if int(ms) > 33) if "HISTOGRAM:" in out else "?",
         "images": len(times),
         "img_med": int(statistics.median(times)) if times else 0,
         "img_p90": int(sorted(times)[int(len(times) * 0.9)]) if times else 0,
@@ -80,7 +84,7 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     lists = "cache/lists/" + __import__("hashlib").md5(f"{mock_server.BASE}|{mock_server.USER}".encode()).hexdigest()
     try:
-        subprocess.run(r.ADB + ["install", "-r", r.APK], capture_output=True, timeout=180)
+        r.install()
         r.adb("reverse", f"tcp:{mock_server.PORT}", f"tcp:{mock_server.PORT}")
         r.adb("shell", "am", "force-stop", r.PKG)
         r.app_shell(f"if [ -f {r.BACKUP} ]; then cp {r.BACKUP} {r.PREFS}; rm {r.BACKUP}; fi\n")

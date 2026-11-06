@@ -23,6 +23,11 @@ class FocusMap(private val focused: () -> View?) {
         val roots: () -> List<View>,
         /** Left and Right belong to the view itself (the featured banner changes its item). */
         val ownsSideKeys: Boolean = false,
+        /**
+         * One long panel (Settings): Up and Down look for the next item inside it when Android's
+         * nearest-view guess picks something beside it.
+         */
+        val searchInside: Boolean = false,
     ) {
         val exits = HashMap<Int, () -> View?>()
         var last: View? = null
@@ -52,8 +57,8 @@ class FocusMap(private val focused: () -> View?) {
 
     private val sections = ArrayList<Section>()
 
-    fun section(ownsSideKeys: Boolean = false, roots: () -> List<View>): Section =
-        Section(roots, ownsSideKeys).also { sections.add(it) }
+    fun section(ownsSideKeys: Boolean = false, searchInside: Boolean = false, roots: () -> List<View>): Section =
+        Section(roots, ownsSideKeys, searchInside).also { sections.add(it) }
 
     /** Call when the highlight moves, so sections remember their last item (R4). */
     fun note(new: View?) {
@@ -93,7 +98,16 @@ class FocusMap(private val focused: () -> View?) {
             val edge = if (dir == View.FOCUS_LEFT) 0 else from.length()
             if (from.selectionStart != edge) return false
         }
-        val next = from.focusSearch(dir)
+        var next = from.focusSearch(dir)
+        // Android's nearest-view guess can pick something beside the section (Settings: Down from
+        // "Check for updates" chose the menu on the left) while there is more of this section
+        // below. Look inside the section first.
+        if ((next == null || !here.holds(next)) && !sideways && here.searchInside) {
+            // Only the root holding the highlight (the search needs it inside).
+            val root = here.roots().firstOrNull { r -> r is ViewGroup && generateSequence(from as View?) { it.parent as? View }.any { it === r } }
+            val inside = (root as? ViewGroup)?.let { android.view.FocusFinder.getInstance().findNextFocus(it, from, dir) }
+            if (inside != null) next = inside
+        }
         if (next != null && here.holds(next) && !(next === from && atListEnd(from, dir) && dir in here.exits)) {
             if (next !== from) (selectedOf(next, from) ?: next).requestFocus(dir)
             return true

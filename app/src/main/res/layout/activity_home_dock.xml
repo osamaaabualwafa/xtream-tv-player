@@ -411,6 +411,8 @@
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_channels" android:layout_width="match_parent" android:layout_height="wrap_content" />
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_favorites" android:layout_width="match_parent" android:layout_height="wrap_content" />
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_recent" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <TextView android:id="@+id/row_recent_series_title" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_recent_series" android:layout_width="match_parent" android:layout_height="wrap_content" />
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/row_new" android:layout_width="match_parent" android:layout_height="wrap_content" />
     </LinearLayout>
 </LinearLayout>

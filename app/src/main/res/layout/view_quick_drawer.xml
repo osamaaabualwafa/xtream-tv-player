@@ -112,7 +112,7 @@
                     android:duplicateParentState="true"
                     android:importantForAccessibility="no"
                     android:tint="@color/on_focus_icon"
-                    android:src="@drawable/ic_glass_list" />
+                    android:src="@drawable/ic_glass_users" />
 
                 <TextView
                     android:layout_width="wrap_content"

@@ -291,6 +291,17 @@
             android:id="@+id/row_recent"
             style="@style/HomeRow" />
 
+        <TextView
+            android:id="@+id/row_recent_series_title"
+            style="@style/HomeRowTitle"
+            android:text="Recently added series"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/row_recent_series"
+            style="@style/HomeRow"
+            android:visibility="gone" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

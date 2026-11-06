@@ -92,6 +92,13 @@ def adb(*args, stdin=None, binary=False):
     return r.stdout if binary else r.stdout.decode("utf-8", "replace")
 
 
+def install():
+    """Install the debug APK; -d allows an older build number (a silent refusal kept old builds on the emulator)."""
+    out = subprocess.run(ADB + ["install", "-r", "-d", APK], capture_output=True, text=True, timeout=180)
+    if "Success" not in out.stdout:
+        raise SystemExit(f"Install failed: {(out.stdout + out.stderr).strip()[-300:]}")
+
+
 def app_shell(script):
     """Commands inside the app's private folder (sent on stdin, so nothing needs quoting twice)."""
     return adb("shell", "run-as", PKG, "sh", stdin=script.encode())
@@ -180,6 +187,16 @@ cp {PREFS} {BACKUP}
 grep -q 'name="playlists">\\[{{' {PREFS} && sed -i 's/name="playlists">\\[/&{entry},/' {PREFS} || sed -i 's/<map>/<map><string name="playlists">[{entry}]<\\/string>/' {PREFS}
 sed -i 's/<string name="active">[^<]*<\\/string>//; s/<string name="default_playlist">[^<]*<\\/string>//' {PREFS}
 sed -i 's/<map>/<map><string name="active">{TEST_ID}<\\/string><string name="default_playlist">{TEST_ID}<\\/string>/' {PREFS}
+""")
+
+
+def only_test_playlist():
+    """After add_test_playlist: hide the owner's real playlists for screenshots (restore() brings them back).
+    Their server names must never end up in a screenshot that is shared."""
+    entry = ("{&quot;id&quot;:&quot;%s&quot;,&quot;name&quot;:&quot;Test&quot;,&quot;base&quot;:&quot;%s&quot;,"
+             "&quot;user&quot;:&quot;%s&quot;,&quot;pass&quot;:&quot;%s&quot;}" % (TEST_ID, mock_server.BASE, mock_server.USER, mock_server.PASS))
+    entry = entry.replace("&", r"\&").replace("/", r"\/")
+    app_shell(f"""sed -i 's/<string name="playlists">[^<]*<\\/string>/<string name="playlists">[{entry}]<\\/string>/' {PREFS}
 """)
 
 
@@ -292,7 +309,7 @@ def main():
         if unknown:
             sys.exit(f"Unknown screens: {unknown}. Screens: {', '.join(list(SCREENS) + list(AUDIT_ONLY))}")
         if "--no-install" not in sys.argv:
-            subprocess.run(ADB + ["install", "-r", APK], capture_output=True, timeout=180)
+            install()
         adb("reverse", f"tcp:{mock_server.PORT}", f"tcp:{mock_server.PORT}")
         adb("shell", "am", "force-stop", PKG)
         app_shell(f"if [ -f {BACKUP} ]; then cp {BACKUP} {PREFS}; rm {BACKUP}; fi\n")  # A run that was killed.

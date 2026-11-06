@@ -42,12 +42,25 @@ class XtreamApp : Application(), ImageLoaderFactory {
                 val ms = intent.getIntExtra("ms", 10_000).toLong()
                 val handler = android.os.Handler(android.os.Looper.getMainLooper())
                 val down = android.os.SystemClock.uptimeMillis()
+                val direction = when (code) {
+                    android.view.KeyEvent.KEYCODE_DPAD_UP -> android.view.View.FOCUS_UP
+                    android.view.KeyEvent.KEYCODE_DPAD_DOWN -> android.view.View.FOCUS_DOWN
+                    android.view.KeyEvent.KEYCODE_DPAD_LEFT -> android.view.View.FOCUS_LEFT
+                    android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> android.view.View.FOCUS_RIGHT
+                    else -> 0
+                }
                 var repeat = 0
                 fun send(action: Int, count: Int) {
                     val activity = resumed?.get() ?: return
                     val now = android.os.SystemClock.uptimeMillis()
                     val event = android.view.KeyEvent(down, now, action, code, count, 0, android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, android.view.InputDevice.SOURCE_DPAD)
-                    activity.window.callback?.dispatchKeyEvent(event)
+                    val used = activity.window.callback?.dispatchKeyEvent(event) == true
+                    // A real key goes on to Android's own step when the screen didn't use it: the
+                    // arrow moves the highlight. Handing keys to the screen skips that step, so do it
+                    // here (without it, rows that leave the moving to Android, like episodes, stayed put).
+                    if (!used && action == android.view.KeyEvent.ACTION_DOWN && direction != 0) {
+                        activity.currentFocus?.let { it.focusSearch(direction)?.requestFocus(direction) }
+                    }
                 }
                 send(android.view.KeyEvent.ACTION_DOWN, 0)
                 val step = object : Runnable {

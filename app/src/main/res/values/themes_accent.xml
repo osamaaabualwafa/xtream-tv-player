@@ -16,6 +16,8 @@
         <item name="appAccentCC">#CC3D8BFD</item>
         <item name="appGlow">#FF182D4A</item>
         <item name="colorAccent">#FF3D8BFD</item>
+        <!-- A deeper shade under white button text: 4.5:1 (review 1.1R). -->
+        <item name="appButtonFocus">#FF086BFC</item>
     </style>
 
     <style name="Accent.Purple">
@@ -31,6 +33,8 @@
         <item name="appAccentCC">#CC8A5CF6</item>
         <item name="appGlow">#FF292249</item>
         <item name="colorAccent">#FF8A5CF6</item>
+        <!-- A deeper shade under white button text: 4.5:1 (review 1.1R). -->
+        <item name="appButtonFocus">#FF8352F5</item>
     </style>
 
     <style name="Accent.Teal">
@@ -78,6 +82,8 @@
         <item name="appAccentCC">#CCEC4899</item>
         <item name="appGlow">#FF3F1E34</item>
         <item name="colorAccent">#FFEC4899</item>
+        <!-- A deeper shade under white button text: 4.5:1 (review 1.1R). -->
+        <item name="appButtonFocus">#FFDD1779</item>
     </style>
 
     <style name="Accent.Green">

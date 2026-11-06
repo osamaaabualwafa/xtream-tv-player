@@ -1,5 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sunset gradient background. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient android:angle="315" android:startColor="#FF1A1A2E" android:centerColor="#FF3A1C4A" android:endColor="#FF5A2A3A" />
-</shape>
+<!-- Sunset: a dark violet sky, a warm horizon glowing up from the bottom, a touch of the theme colour
+     top-right, and dark hills on the horizon with a fine grain (pictures from scripts/make_textures.py). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FF150F1F" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.5"
+                android:centerY="1.25"
+                android:startColor="#FFA2442C"
+                android:centerColor="#994A1F33"
+                android:endColor="#00150F1F"
+                android:gradientRadius="820dp"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:centerX="0.9"
+                android:centerY="0.0"
+                android:endColor="#00150F1F"
+                android:gradientRadius="520dp"
+                android:startColor="?attr/appAccent4D"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:gravity="fill" android:src="@drawable/tex_hills" />
+    </item>
+    <item>
+        <bitmap android:alpha="0.35" android:src="@drawable/tex_grain" android:tileMode="repeat" />
+    </item>
+</layer-list>

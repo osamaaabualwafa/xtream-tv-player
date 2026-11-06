@@ -42,6 +42,7 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var channelsAdapter: ItemAdapter
     private lateinit var favoritesAdapter: ItemAdapter
     private lateinit var recentAdapter: ItemAdapter
+    private lateinit var recentSeriesAdapter: ItemAdapter
     private lateinit var newAdapter: ItemAdapter
     /** V1: background follows the highlighted poster (null when off). */
     private var backdrop: FocusBackdrop? = null
@@ -129,6 +130,7 @@ class HomeActivity : AppCompatActivity() {
         })
         favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        recentSeriesAdapter = row(R.id.row_recent_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
         backdrop = FocusBackdrop.attach(this)
         setupFeatured()
@@ -183,7 +185,7 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.homeRecentMovies}${prefs.homeRecentSeries}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     override fun onPause() {
         super.onPause()
@@ -363,7 +365,7 @@ class HomeActivity : AppCompatActivity() {
             val list = ids.toList().mapNotNull { findViewById<View?>(it) }
             return { list }
         }
-        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_recent)
+        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_recent, R.id.row_recent_series)
             .map { focusMap.section(roots = views(it)) }
         val featured = focusMap.section(ownsSideKeys = true, roots = views(R.id.featured))
         val stack = ArrayList(rows + featured)
@@ -623,13 +625,24 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    /** "Recently added" movies and series rows, each only when switched on (Settings > Home layout). */
     private fun loadRecentlyAdded() {
+        recentRow(ContentType.MOVIE, prefs.homeRecentMovies == 1, R.id.row_recent, R.id.row_recent_title, recentAdapter)
+        recentRow(ContentType.SERIES, prefs.homeRecentSeries == 1, R.id.row_recent_series, R.id.row_recent_series_title, recentSeriesAdapter)
+    }
+
+    private fun recentRow(type: ContentType, shown: Boolean, rowId: Int, titleId: Int, adapter: ItemAdapter) {
+        if (!shown) {
+            showRow(rowId, titleId, adapter, emptyList())
+            return
+        }
         lifecycleScope.launch {
             try {
-                val all = allStreams(ContentType.MOVIE).await()
+                // Series: newest by when the provider last changed them (a new episode moves one up).
+                val all = allStreams(type).await()
                 val recent = all.filter { it.added > 0 }.sortedByDescending { it.added }.take(25)
-                recentAdapter.favorites = prefs.favoriteIds(ContentType.MOVIE)
-                showRow(R.id.row_recent, R.id.row_recent_title, recentAdapter, recent)
+                adapter.favorites = prefs.favoriteIds(type)
+                showRow(rowId, titleId, adapter, recent)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

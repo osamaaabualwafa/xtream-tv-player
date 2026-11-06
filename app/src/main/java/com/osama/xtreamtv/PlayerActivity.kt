@@ -1429,7 +1429,32 @@ class PlayerActivity : AppCompatActivity() {
         val p = player ?: return
         val duration = p.duration
         val max = if (duration != C.TIME_UNSET && duration > 0) duration - 1_000 else Long.MAX_VALUE
-        requestSeek((seekPosition() + deltaMs).coerceIn(0, max))
+        val before = seekPosition()
+        val target = (before + deltaMs).coerceIn(0, max)
+        requestSeek(target)
+        diagSeek(deltaMs, before, target, toolbar = true, bubble = false)
+    }
+
+    /** Key code of the last seek key (diagnostics: some remotes send other codes for Left/Right). */
+    private var diagSeekKey = 0
+
+    /**
+     * Diagnostics (review 1.1I and the bubble with the toolbar hidden): every seek with the key that
+     * asked for it, whether the toolbar was open, from where to where, whether the bubble showed,
+     * and where the video really was a moment later (a jump further than asked shows up here).
+     */
+    private fun diagSeek(deltaMs: Long, before: Long, target: Long, toolbar: Boolean, bubble: Boolean) {
+        if (!Diag.enabled) return
+        val key = KeyEvent.keyCodeToString(diagSeekKey).removePrefix("KEYCODE_")
+        val where = if (toolbar) "toolbar open" else "toolbar hidden"
+        Diag.log("seek", "$key ${if (deltaMs > 0) "+" else "−"}${kotlin.math.abs(deltaMs) / 1000} s, $where: " +
+            "${formatDuration(before)} → ${formatDuration(target)}${if (toolbar) "" else if (bubble) ", bubble shown" else ", bubble NOT shown"}")
+        playerView.postDelayed({
+            val now = player?.currentPosition ?: return@postDelayed
+            val off = now - target
+            // Playing on for 2.5 s moves it about that much; more than 4 s off means it went elsewhere.
+            if (off > 4_000 || off < -1_500) Diag.log("seek", "landed at ${formatDuration(now)}, asked for ${formatDuration(target)} (${if (off > 0) "+" else "−"}${kotlin.math.abs(off) / 1000} s off)")
+        }, 2_500)
     }
 
     /**
@@ -2004,6 +2029,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun acceptSeekKey(event: KeyEvent): Boolean {
+        diagSeekKey = event.keyCode
         val now = event.eventTime
         val sameKey = event.keyCode == lastSeekKey
         val accept = if (event.repeatCount == 0) {
@@ -2043,6 +2069,7 @@ class PlayerActivity : AppCompatActivity() {
         shown.visibility = View.VISIBLE
         seekForward.removeCallbacks(hideSeekRipple)
         seekForward.postDelayed(hideSeekRipple, 1_500)
+        diagSeek(deltaMs, before, target, toolbar = false, bubble = shown.isShown)
     }
 
     /**

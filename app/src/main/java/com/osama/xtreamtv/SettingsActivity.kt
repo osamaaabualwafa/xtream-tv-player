@@ -47,7 +47,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun setupFocusMap() {
         val entries = menu.map { findViewById<View>(it.first) }
         val menuSection = focusMap.section { entries }
-        val options = focusMap.section { listOf(body) }
+        val options = focusMap.section(searchInside = true) { listOf(body) }
         menuSection.exits[View.FOCUS_RIGHT] = {
             focusFirstOption()
             null
@@ -57,11 +57,66 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    /** A look change rebuilds the screen: take a picture of it first (see onCreate). */
+    override fun recreate() {
+        val decor = window.decorView
+        if (android.os.Build.VERSION.SDK_INT >= 26 && decor.width > 0 && decor.height > 0) {
+            try {
+                val picture = android.graphics.Bitmap.createBitmap(decor.width, decor.height, android.graphics.Bitmap.Config.ARGB_8888)
+                android.view.PixelCopy.request(window, picture, { result ->
+                    if (result == android.view.PixelCopy.SUCCESS) carriedScreen = picture
+                    rebuild()
+                }, android.os.Handler(android.os.Looper.getMainLooper()))
+                return
+            } catch (e: Throwable) {
+                // No picture (out of memory, no surface yet): rebuild as before.
+            }
+        }
+        rebuild()
+    }
+
+    private fun rebuild() = super.recreate()
+
+    /** The old screen's picture on top of the new one; it fades once the new one has been drawn. */
+    private fun coverWith(picture: android.graphics.Bitmap) {
+        val root = findViewById<android.view.ViewGroup>(android.R.id.content)
+        val cover = android.widget.ImageView(this).apply {
+            setImageBitmap(picture)
+            scaleType = android.widget.ImageView.ScaleType.FIT_XY
+            layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+            isFocusable = false
+        }
+        root.addView(cover)
+        // Two frames later the new screen (and its background) is on screen underneath.
+        root.post {
+            root.postOnAnimation {
+                cover.animate().alpha(0f).setDuration(220).withEndAction {
+                    root.removeView(cover)
+                    // Back to the theme's own base colour, unless the screen already set its own.
+                    if (window.decorView.background is android.graphics.drawable.BitmapDrawable) {
+                        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(themeColor(R.attr.appBg)))
+                    }
+                }.start()
+            }
+        }
+    }
+
+    companion object {
+        /** The picture taken by [recreate], handed to the rebuilt screen. */
+        private var carriedScreen: android.graphics.Bitmap? = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         Appearance.apply(this)
+        // The screen as it was before a look change rebuilt it: shown over the new one until that
+        // is drawn, then faded out (on a slower TV the rebuild showed a black screen for a second).
+        val before = carriedScreen
+        carriedScreen = null
+        if (before != null) window.setBackgroundDrawable(android.graphics.drawable.BitmapDrawable(resources, before))
         setContentView(R.layout.activity_settings)
+        if (before != null) coverWith(before)
         body = findViewById(R.id.section_body)
         if (glass) glassFrame()
 
@@ -154,6 +209,8 @@ class SettingsActivity : AppCompatActivity() {
                 hint.text = "How the first screen after choosing a playlist looks"
                 choiceCards("H", Appearance.HOME_NAMES, prefs.homeStyle) { prefs.homeStyle = it }
                 if (glass) plainCard()
+                option("Most recent movies", listOf(1 to "On", 0 to "Off"), { prefs.homeRecentMovies }, { prefs.homeRecentMovies = it })
+                option("Most recent series", listOf(1 to "On", 0 to "Off"), { prefs.homeRecentSeries }, { prefs.homeRecentSeries = it })
                 option("Menu button on Home", listOf(0 to "Opens the quick drawer", 1 to "Does nothing"), { prefs.homeMenuButton }, { prefs.homeMenuButton = it })
             }
             Section.BROWSE -> {
@@ -855,11 +912,12 @@ class SettingsActivity : AppCompatActivity() {
             row.findViewById<TextView>(R.id.title).textSize = 14f
             value.textSize = 13f
         }
-        val isSwitch = glass && choices.size == 2 && choices.map { it.second }.toSet() == setOf("On", "Off")
+        // On/off rows are switches in every theme (not "On"/"Off" words).
+        val isSwitch = choices.size == 2 && choices.map { it.second }.toSet() == setOf("On", "Off")
         if (isSwitch) {
             // On/off rows: a switch, flipped straight away.
             value.visibility = View.GONE
-            val toggle = GlassSwitch(this, prefs.glassScene == Appearance.SCENE_DAYLIGHT)
+            val toggle = GlassSwitch(this, glass && prefs.glassScene == Appearance.SCENE_DAYLIGHT, solid = !glass)
             fun onChoice() = choices.first { it.second == "On" }.first
             toggle.on = get() == onChoice()
             (row as android.view.ViewGroup).addView(toggle)

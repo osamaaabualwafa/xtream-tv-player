@@ -356,7 +356,8 @@ object GlassDrift {
 }
 
 /** Glass theme: WinDock's on/off switch for settings rows. */
-class GlassSwitch(context: android.content.Context, private val daylight: Boolean) : View(context) {
+/** An on/off switch. [solid]: Default and Cinema themes, filled with the theme colour when on. */
+class GlassSwitch(context: android.content.Context, private val daylight: Boolean, private val solid: Boolean = false) : View(context) {
     var on = false
         set(value) {
             field = value
@@ -373,7 +374,11 @@ class GlassSwitch(context: android.content.Context, private val daylight: Boolea
         val fill: Int
         val stroke: Int
         val knob: Int
-        if (daylight) {
+        if (solid) {
+            fill = if (on) context.themeColor(R.attr.appAccent) else 0x26FFFFFF
+            stroke = if (on) context.themeColor(R.attr.appAccent) else 0x40FFFFFF
+            knob = if (on) 0xFFFFFFFF.toInt() else 0xFFB4BAC0.toInt()
+        } else if (daylight) {
             fill = if (on) context.themeColor(R.attr.appAccent) else 0x141E2822
             stroke = if (on) context.themeColor(R.attr.appAccent) else 0x331E2822
             knob = if (on) 0xFFFFFFFF.toInt() else 0xFF8A948E.toInt()

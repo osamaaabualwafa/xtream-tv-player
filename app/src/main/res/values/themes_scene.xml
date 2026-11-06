@@ -8,7 +8,7 @@
         <item name="appBg">#FF0B1720</item>
         <item name="appBackground">@drawable/bg_scene_aurora</item>
         <item name="appGlow">#FF49876A</item>
-        <item name="appGlowA">#CC49876A</item>
+        <item name="appGlowA">#B449876A</item>
         <item name="appGlowB">#CC36577A</item>
         <item name="appGlowC">#6695AB87</item>
         <item name="appAccent">#FFB4EDCC</item>

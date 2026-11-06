@@ -416,11 +416,25 @@ object Diag {
     private var started = 0
     @Volatile private var lastKeyId = 0L
     @Volatile private var lastKey = ""
+    /** The last Up/Down press (repeats too): code, when, and how many repeats into a hold. */
+    @Volatile private var arrowCode = 0
+    @Volatile private var arrowAt = 0L
+    @Volatile private var arrowRepeat = 0
     @Volatile private var postersFailed = 0
 
     /** Coil reports pictures that didn't load; counted per screen. */
     fun posterFailed() {
         if (enabled) postersFailed++
+    }
+
+    /** The list (RecyclerView) a view is in, or null. */
+    private fun listAround(v: View): View? {
+        var p: android.view.ViewParent? = v.parent
+        while (p is View) {
+            if (p is androidx.recyclerview.widget.RecyclerView) return p
+            p = p.parent
+        }
+        return null
     }
 
     private fun keyName(code: Int) = KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_").removePrefix("DPAD_")
@@ -456,12 +470,35 @@ object Diag {
                 }
             }
             decor.viewTreeObserver.addOnDrawListener(draw)
+            // Up/Down that takes the highlight out of a list into a list beside it (the series grid
+            // into the categories, say): Android picked the nearest thing because the list didn't
+            // answer in time. Moving into a list above or below is normal and not logged.
+            decor.viewTreeObserver.addOnGlobalFocusChangeListener { old, new ->
+                if (!enabled || old == null || new == null) return@addOnGlobalFocusChangeListener
+                if (SystemClock.uptimeMillis() - arrowAt > 400) return@addOnGlobalFocusChangeListener
+                val from = listAround(old) ?: return@addOnGlobalFocusChangeListener
+                val to = listAround(new)
+                if (to === from) return@addOnGlobalFocusChangeListener
+                val a = IntArray(2).also { from.getLocationOnScreen(it) }
+                val b = IntArray(2).also { new.getLocationOnScreen(it) }
+                val sideways = b[0] + new.width <= a[0] || b[0] >= a[0] + from.width
+                if (!sideways) return@addOnGlobalFocusChangeListener
+                val held = if (arrowRepeat > 0) " while held (${arrowRepeat} repeats)" else ""
+                log("ui", "${keyName(arrowCode)}$held moved the highlight out of ${viewName(from)} to ${viewName(to ?: new)} on $name")
+            }
             val callback = activity.window.callback ?: return
             activity.window.callback = object : Window.Callback by callback {
                 override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                     RemoteHold.onKey(event)
                     // Test builds: every key with its repeat count, for the scrolling measurements.
                     if (BuildConfig.DEBUG && event.action == KeyEvent.ACTION_DOWN) Log.v("KeyTrace", "key ${event.keyCode} repeat ${event.repeatCount}")
+                    if (event.action == KeyEvent.ACTION_DOWN && (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN)) {
+                        arrowCode = event.keyCode
+                        arrowAt = SystemClock.uptimeMillis()
+                        arrowRepeat = event.repeatCount
+                    } else if (event.action == KeyEvent.ACTION_DOWN) {
+                        arrowAt = 0L   // Left, Right, OK… move the highlight on purpose.
+                    }
                     // A key can pass through here more than once (windows inside windows): count it once.
                     val id = event.downTime * 31 + event.eventTime * 7 + event.keyCode * 3 + event.repeatCount
                     if (enabled && event.action == KeyEvent.ACTION_DOWN && id != lastKeyId) {

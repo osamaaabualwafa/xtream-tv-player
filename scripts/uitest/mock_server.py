@@ -37,10 +37,17 @@ vod = [{"num": i, "name": LONG if i == 2 else f"Movie {i}", "stream_type": "movi
         "added": str(1800000000 - i), "container_extension": "mp4"} for i in range(21790 if BIG else 280)]
 series_cats = [{"category_id": str(i), "category_name": f"Series group {i}"} for i in range(40, 50)]
 series = [{"num": i, "name": LONG if i == 1 else f"Show {i}", "series_id": 900 + i, "cover": img(f"sr{i % 9}"),
-           "rating": "8", "category_id": str(40 + i % 10)} for i in range(6525 if BIG else 120)]
+           "rating": "8", "category_id": str(40 + i % 10), "last_modified": str(1800000000 - i * 7)}
+          for i in range(6525 if BIG else 120)]
 
 
 def episodes(sid):
+    if BIG:
+        # Like the longest real series (daily shows): one season of 300 episodes, each with its own still.
+        return {"1": [{"id": str(sid * 1000 + e), "episode_num": e, "title": f"Episode {e}",
+                       "container_extension": "mp4", "season": 1,
+                       "info": {"plot": "Something happens.", "duration": "00:42:00",
+                                "movie_image": img(f"ep{sid}_{e}")}} for e in range(1, 301)]}
     return {str(s): [{"id": str(sid * 100 + s * 10 + e), "episode_num": e, "title": f"Episode {e}",
                       "container_extension": "mp4", "season": s,
                       "info": {"plot": "Something happens.", "duration": "00:42:00"}} for e in range(1, 13)]

@@ -116,7 +116,7 @@ def main():
     server = mock_server.serve()
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        subprocess.run(r.ADB + ["install", "-r", r.APK], capture_output=True, timeout=180)
+        r.install()
         r.adb("reverse", f"tcp:{mock_server.PORT}", f"tcp:{mock_server.PORT}")
         r.adb("shell", "am", "force-stop", r.PKG)
         r.app_shell(f"if [ -f {r.BACKUP} ]; then cp {r.BACKUP} {r.PREFS}; rm {r.BACKUP}; fi\n")

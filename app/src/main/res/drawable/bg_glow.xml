@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Dark background with a soft blue glow top-left and a violet one bottom-right (glass screens). -->
+<!-- Glow: dark, with a soft glow of the theme colour top-left and a fainter one bottom-right. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape>
@@ -24,7 +24,7 @@
                 android:centerY="0.95"
                 android:endColor="#000E1218"
                 android:gradientRadius="520dp"
-                android:startColor="#B324193A"
+                android:startColor="?attr/appAccent26"
                 android:type="radial" />
         </shape>
     </item>

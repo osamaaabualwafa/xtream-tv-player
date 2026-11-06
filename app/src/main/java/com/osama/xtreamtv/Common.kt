@@ -322,6 +322,15 @@ class Prefs(context: Context) {
         get() = global.getInt("palette", 0)
         set(value) = global.edit().putInt("palette", value).apply()
 
+    /** Home's "Recently added" rows (Settings > Home layout): 1 shown, 0 hidden. Both off: no section. */
+    var homeRecentMovies: Int
+        get() = global.getInt("home_recent_movies", 1)
+        set(value) = global.edit().putInt("home_recent_movies", value).apply()
+
+    var homeRecentSeries: Int
+        get() = global.getInt("home_recent_series", 1)
+        set(value) = global.edit().putInt("home_recent_series", value).apply()
+
     var backgroundStyle: Int
         get() = global.getInt("background_style", 0)
         set(value) = global.edit().putInt("background_style", value).apply()
@@ -1015,14 +1024,37 @@ fun centerOnFocus(parent: RecyclerView, child: View, immediate: Boolean): Boolea
 }
 
 class CenterGridLayoutManager(context: Context, spanCount: Int) : androidx.recyclerview.widget.GridLayoutManager(context, spanCount) {
-    /** Down on the last row stays there (instead of jumping into the category list). */
+    /**
+     * Up and Down stay in the grid (instead of jumping into the category list): Down on the last
+     * row stays there; Down onto a shorter last row goes to its last poster; a row not drawn yet
+     * (a held button outruns the drawing) is brought in first. Up from the first row leaves normally.
+     */
     override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
-        if (direction != View.FOCUS_DOWN) return null
+        if (direction != View.FOCUS_DOWN && direction != View.FOCUS_UP) return null
         val item = findContainingItemView(focused) ?: return null
-        val pos = getPosition(item)
+        // Count from a move still waiting for its row to appear, so quick presses all add up.
+        val from = if (pending != RecyclerView.NO_POSITION) pending else getPosition(item)
         val lastRowStart = ((itemCount - 1) / spanCount) * spanCount
-        return if (pos >= lastRowStart) focused else null
+        val next = if (direction == View.FOCUS_DOWN) {
+            if (from >= lastRowStart) return focused
+            minOf(from + spanCount, itemCount - 1)
+        } else {
+            if (from < spanCount) return null
+            from - spanCount
+        }
+        findViewByPosition(next)?.let { pending = RecyclerView.NO_POSITION; return it }
+        pending = next
+        scrollToPosition(next)
+        focused.post {
+            if (pending == next) {
+                pending = RecyclerView.NO_POSITION
+                findViewByPosition(next)?.requestFocus()
+            }
+        }
+        return focused
     }
+
+    private var pending = RecyclerView.NO_POSITION
 
     override fun requestChildRectangleOnScreen(
         parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean,
@@ -1099,7 +1131,9 @@ class RowLayoutManager(context: android.content.Context, @RecyclerView.Orientati
         val room = (FocusFx.ROOM_DP * parent.resources.displayMetrics.density).toInt()
         val wide = android.graphics.Rect(rect)
         if (orientation == HORIZONTAL) wide.inset(-room, 0) else wide.inset(0, -room)
-        return super.requestChildRectangleOnScreen(parent, child, wide, immediate, focusedChildVisible)
+        // While a direction is held (review 1.1F, episode rows), straight to the next card: a glide
+        // started on every repeat piles up.
+        return super.requestChildRectangleOnScreen(parent, child, wide, immediate || RemoteHold.active, focusedChildVisible)
     }
 
     override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
