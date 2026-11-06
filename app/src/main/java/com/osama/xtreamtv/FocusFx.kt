@@ -38,16 +38,18 @@ object FocusFx {
 
     /** Set up each screen (in onCreate, with the theme). */
     fun install(activity: Activity) {
-        val observer = activity.window.decorView.viewTreeObserver
+        val decor = activity.window.decorView
+        // Once per screen (Settings applies a new look in place and calls this again).
+        if (decor.getTag(R.id.focus_fx) == true) return
+        decor.setTag(R.id.focus_fx, true)
         val value = TypedValue()
-        activity.theme.resolveAttribute(R.attr.appFocusScale, value, true)
-        val liftScale = if (value.type == TypedValue.TYPE_FLOAT) value.float else 1f
-        if (liftScale > 1.001f) {
-            // "Lift and glow": whatever the remote is on rises, not only posters and cards.
-            observer.addOnGlobalFocusChangeListener { old, new ->
-                old?.takeUnless(::growsItself)?.let { settle(it) }
-                new?.takeUnless(::growsItself)?.let { lift(it, liftScale) }
-            }
+        // "Lift and glow": whatever the remote is on rises, not only posters and cards. The style is
+        // read at each move, so a highlight style changed in Settings applies at once.
+        decor.viewTreeObserver.addOnGlobalFocusChangeListener { old, new ->
+            activity.theme.resolveAttribute(R.attr.appFocusScale, value, true)
+            val liftScale = if (value.type == TypedValue.TYPE_FLOAT) value.float else 1f
+            old?.takeUnless(::growsItself)?.let { if (it.elevation > 0f || it.scaleX != 1f) settle(it) }
+            if (liftScale > 1.001f) new?.takeUnless(::growsItself)?.let { lift(it, liftScale) }
         }
         if (BuildConfig.DEBUG || Diag.enabled) FocusAudit.install(activity)
     }

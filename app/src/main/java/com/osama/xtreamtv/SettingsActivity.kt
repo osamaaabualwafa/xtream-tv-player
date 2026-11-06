@@ -35,7 +35,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Left-hand menu: entry id and the section it opens. */
     private var menu: List<Pair<Int, Section>> = emptyList()
 
-    private val focusMap = FocusMap { currentFocus }
+    private var focusMap = FocusMap { currentFocus }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
         focusMap.handle(event) || super.dispatchKeyEvent(event)
@@ -57,67 +57,25 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** A look change rebuilds the screen: take a picture of it first (see onCreate). */
-    override fun recreate() {
-        val decor = window.decorView
-        if (android.os.Build.VERSION.SDK_INT >= 26 && decor.width > 0 && decor.height > 0) {
-            try {
-                val picture = android.graphics.Bitmap.createBitmap(decor.width, decor.height, android.graphics.Bitmap.Config.ARGB_8888)
-                android.view.PixelCopy.request(window, picture, { result ->
-                    if (result == android.view.PixelCopy.SUCCESS) carriedScreen = picture
-                    rebuild()
-                }, android.os.Handler(android.os.Looper.getMainLooper()))
-                return
-            } catch (e: Throwable) {
-                // No picture (out of memory, no surface yet): rebuild as before.
-            }
-        }
-        rebuild()
-    }
-
-    private fun rebuild() = super.recreate()
-
-    /** The old screen's picture on top of the new one; it fades once the new one has been drawn. */
-    private fun coverWith(picture: android.graphics.Bitmap) {
-        val root = findViewById<android.view.ViewGroup>(android.R.id.content)
-        val cover = android.widget.ImageView(this).apply {
-            setImageBitmap(picture)
-            scaleType = android.widget.ImageView.ScaleType.FIT_XY
-            layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-            isFocusable = false
-        }
-        root.addView(cover)
-        // Two frames later the new screen (and its background) is on screen underneath.
-        root.post {
-            root.postOnAnimation {
-                cover.animate().alpha(0f).setDuration(220).withEndAction {
-                    root.removeView(cover)
-                    // Back to the theme's own base colour, unless the screen already set its own.
-                    if (window.decorView.background is android.graphics.drawable.BitmapDrawable) {
-                        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(themeColor(R.attr.appBg)))
-                    }
-                }.start()
-            }
-        }
-    }
-
-    companion object {
-        /** The picture taken by [recreate], handed to the rebuilt screen. */
-        private var carriedScreen: android.graphics.Bitmap? = null
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        builtSizes = sizesKey()
         Appearance.apply(this)
-        // The screen as it was before a look change rebuilt it: shown over the new one until that
-        // is drawn, then faded out (on a slower TV the rebuild showed a black screen for a second).
-        val before = carriedScreen
-        carriedScreen = null
-        if (before != null) window.setBackgroundDrawable(android.graphics.drawable.BitmapDrawable(resources, before))
+        val start = savedInstanceState?.getString("section")?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
+        build(start, rebuilt = savedInstanceState != null)
+    }
+
+    private var builtSizes = ""
+    private fun sizesKey() = "${prefs.uiSize}/${prefs.textSize}"
+
+    /** The whole screen, opened on [start]; [rebuilt]: after a look change, back on the option that changed. */
+    private fun build(start: Section, rebuilt: Boolean) {
         setContentView(R.layout.activity_settings)
-        if (before != null) coverWith(before)
         body = findViewById(R.id.section_body)
+        target = null
+        cardHost = null
         if (glass) glassFrame()
 
         menu = listOf(
@@ -134,17 +92,41 @@ class SettingsActivity : AppCompatActivity() {
             item.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) show(s) }
             item.setOnClickListener { show(s); focusFirstOption() }
         }
+        focusMap = FocusMap { currentFocus }
         setupFocusMap()
-        // After changing the colour the screen is rebuilt: come back to the same section.
-        val start = savedInstanceState?.getString("section")?.let { runCatching { Section.valueOf(it) }.getOrNull() } ?: Section.HOME
+        section = null
+        chosenDot = null
         show(start)
-        // Rebuilt after a Look change: back on the section's first option (where the change was made).
-        if (savedInstanceState != null) body.post {
+        if (rebuilt) body.post {
+            // Back on the option that changed; else the chosen colour; else the first option.
             val picked = pendingFocus?.let { body.findViewWithTag<View>(it) }
             pendingFocus = null
-            picked?.requestFocus() ?: chosenDot?.takeIf { section == Section.COLOR }?.requestFocus() ?: focusFirstOption()
+            val landed = picked?.requestFocus() == true ||
+                (section == Section.COLOR && chosenDot?.takeIf { it.isAttachedToWindow }?.requestFocus() == true)
+            if (!landed) focusFirstOption()
         }
         else findViewById<View>(menu.first { it.second == start }.first).requestFocus()
+    }
+
+    /**
+     * A look change (theme, background, colours, sizes…): the new look is applied to this same
+     * screen, which is then rebuilt in place. Closing and reopening it (Android's usual way) left
+     * the TV black for about half a second between the two windows.
+     */
+    override fun recreate() {
+        // Interface and text size are applied when a screen opens: those still need a reopen.
+        if (sizesKey() != builtSizes) return super.recreate()
+        val keep = section ?: Section.HOME
+        val fresh = resources.newTheme()
+        fresh.applyStyle(R.style.AppTheme, true)
+        theme.setTo(fresh)
+        Appearance.apply(this)
+        val attrs = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+        window.setBackgroundDrawable(attrs.getDrawable(0))
+        attrs.recycle()
+        // A moving background put its colour and glows here; the new look brings its own.
+        findViewById<android.view.ViewGroup>(android.R.id.content).background = null
+        build(keep, rebuilt = true)
     }
 
     /** Glass: slimmer menu column, smaller titles, more room for the options. */
@@ -641,7 +623,7 @@ class SettingsActivity : AppCompatActivity() {
 
 
     private fun themeOption() =
-        option("Theme", Appearance.THEMES, { prefs.themeIndex }, { prefs.themeIndex = it; recreate() })
+        option("Theme", Appearance.THEMES, { prefs.themeIndex }, { prefs.themeIndex = it; pendingFocus = "theme"; recreate() }, "theme")
 
     /** Look with Theme = Glass: the Screen card beside the Selected item and Effects cards. */
     private fun glassLookOptions() {
