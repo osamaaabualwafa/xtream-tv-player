@@ -17,7 +17,7 @@ android {
         minSdk = 21
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "1.3.2"
+        versionName = "1.3.3"
         multiDexEnabled = true
         // Weekly QA (qa/README.md): UI tests on an Android TV emulator against a fake Xtream server.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

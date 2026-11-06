@@ -83,6 +83,8 @@
 
     <!-- Cinema: near-black with velvet red; used by the Cinema theme. -->
     <style name="Palette.Cinema">
+        <!-- Its own red under highlighted buttons (not the Blue colour's deeper shade, review 1.1R). -->
+        <item name="appButtonFocus">?attr/appAccent</item>
         <item name="appBg">#FF0B0707</item>
         <item name="appSurface">#FF1A1212</item>
         <item name="appSurfaceFocus">#FF2A1A1A</item>

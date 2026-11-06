@@ -55,7 +55,17 @@ object FocusFx {
     /** Marks a view that grows through [grow] (a poster in a list, a tile). */
     fun markGrows(v: View) = v.setTag(R.id.focus_fx, true)
 
-    private fun growsItself(v: View) = v.onFocusChangeListener === scaleOnFocus || v.getTag(R.id.focus_fx) == true
+    private fun growsItself(v: View) = v.onFocusChangeListener === scaleOnFocus || v.getTag(R.id.focus_fx) == true || fillsScreen(v)
+
+    /**
+     * Never lift a view that fills most of the screen (the video area while the player's toolbar
+     * is hidden). Lifting raised it above the seek bubbles and the ▶/❚❚ sign, and on Android 10
+     * TVs the raised video "hole" was cut through them: Glass with Lift and glow showed neither.
+     */
+    private fun fillsScreen(v: View): Boolean {
+        val root = v.rootView ?: return false
+        return root.width > 0 && v.width >= root.width * 0.6f && v.height >= root.height * 0.6f
+    }
 
     /** Posters, cards and tiles: [scaleOnFocus] calls this. */
     fun grow(v: View, hasFocus: Boolean) {
@@ -224,7 +234,14 @@ class FocusScrollView @JvmOverloads constructor(context: Context, attrs: Attribu
     override fun computeScrollDeltaToGetChildRectOnScreen(rect: Rect): Int {
         room.set(rect)
         room.inset(0, -(FocusFx.ROOM_DP * resources.displayMetrics.density).toInt())
-        return super.computeScrollDeltaToGetChildRectOnScreen(room)
+        val delta = super.computeScrollDeltaToGetChildRectOnScreen(room)
+        // On the last item the remote can reach: scroll to the very end, so plain text after it
+        // (Settings > About's "Last shared" line in Default and Cinema) comes into view too.
+        val focused = findFocus() ?: return delta
+        val content = getChildAt(0) ?: return delta
+        if (android.view.FocusFinder.getInstance().findNextFocus(this, focused, View.FOCUS_DOWN) != null) return delta
+        val toEnd = (content.height + paddingBottom - height) - scrollY
+        return if (toEnd > delta) toEnd else delta
     }
 }
 

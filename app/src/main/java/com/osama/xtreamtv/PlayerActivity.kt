@@ -1872,9 +1872,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * Some TV chips (seen on a Skyworth with an MStar video decoder) skip a small redraw on top of
-     * playing video: the seek bubble and the ▶/❚❚ sign were "shown" but never appeared, while the
-     * toolbar (which fades over the whole screen) did. Showing or hiding one redraws everything.
+     * Showing or hiding a sign over the video redraws the whole screen. (Tried for signs missing on
+     * a Skyworth TV; the real cause was the Lift highlight raising the video area, see FocusFx.)
      */
     private fun redrawWholeScreen() {
         window.decorView.invalidate()

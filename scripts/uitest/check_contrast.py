@@ -112,6 +112,11 @@ def report():
             for focus in ("Ring", "White", "Solid", "Lift"):
                 layer = "Focus.Daylight" + focus if daylight else "Focus." + focus
                 run(f"Glass {scene[6:]} {glass[6:]} {focus}", "Accent.Blue", "Palette.Glass", "Look.Glass", scene, glass, layer)
+    # A palette with its own accent must also set its own button highlight: otherwise it keeps the
+    # Blue colour's deeper shade (Cinema had blue highlights, 2026-11-06).
+    for palette in [n for n in styles if n.startswith("Palette.") and "appAccent" in styles[n]]:
+        if "appButtonFocus" not in styles[palette]:
+            problems.append(f"{palette}: sets its own accent but not appButtonFocus (it would keep another colour's)")
     for p in problems:
         print("  " + p)
     print(f"  {len(problems)} below {MIN_RATIO}:1" if problems else f"  all at least {MIN_RATIO}:1")
