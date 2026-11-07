@@ -14,4 +14,17 @@ class PosterImageView @JvmOverloads constructor(
         val width = MeasureSpec.getSize(widthMeasureSpec)
         setMeasuredDimension(width, width * 3 / 2)
     }
+
+    /** An award winner's corner ribbon (1.1E): gold or silver glass with its statuette; null for none. */
+    var award: AwardArt.Kind? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        super.onDraw(canvas)
+        award?.let { AwardArt.drawRibbon(canvas, width, it, context) }
+    }
 }

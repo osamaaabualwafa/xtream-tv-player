@@ -214,7 +214,7 @@ class BrowseActivity : AppCompatActivity() {
         }
         itemsView.adapter = itemAdapter
         // Scores filled in on the posters: Top rated's count follows (once a burst has settled).
-        val countTop = Runnable { Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> updateTopCount(Ratings.topRated(all).size) } }
+        val countTop = Runnable { recountTop() }
         itemAdapter.registerAdapterDataObserver(object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
             override fun onItemRangeChanged(positionStart: Int, itemCount: Int, payload: Any?) {
                 if (payload != "scores") return
@@ -707,7 +707,7 @@ class BrowseActivity : AppCompatActivity() {
                 if (cached == null) showLoading(true)
                 val all = cached ?: runCatching { loadStreams(null) }.getOrElse { if (it is CancellationException) throw it; emptyList() }
                 showLoading(false)
-                allItems = Ratings.topRated(all)
+                allItems = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all) }
                 showCategoryTitle(category, allItems.size)
                 updateTopCount(allItems.size)
                 applyFilter()
@@ -776,7 +776,7 @@ class BrowseActivity : AppCompatActivity() {
                 }
                 for ((id, list) in byCategory) {
                     val key = "${type.name}:$id"
-                    if (key !in Session.streamCache) Session.streamCache[key] = list
+                    Session.streamCache.putIfAbsent(key, list)
                 }
                 val map = HashMap<String, Int>()
                 for ((id, list) in byCategory) map[id] = list.size
@@ -802,6 +802,18 @@ class BrowseActivity : AppCompatActivity() {
 
     /** Favorites / Continue watching change on other screens. */
     /** Top rated's count in the category list, as new scores come in (it grows while browsing). */
+    /** Top rated's count, worked out in the background (21,815 movies froze the screen when done here). */
+    private var topCountJob: kotlinx.coroutines.Job? = null
+
+    private fun recountTop() {
+        val all = Session.streamCache["${type.name}:$CAT_ALL"] ?: return
+        topCountJob?.cancel()
+        topCountJob = lifecycleScope.launch {
+            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all).size }
+            updateTopCount(n)
+        }
+    }
+
     private fun updateTopCount(size: Int) {
         if (counts[CAT_TOP] == size) return
         counts = HashMap(counts).apply { put(CAT_TOP, size) }
@@ -811,7 +823,7 @@ class BrowseActivity : AppCompatActivity() {
     private fun refreshLocalCounts() {
         val map = HashMap(counts)
         map[CAT_FAV] = prefs.favorites(type).size
-        Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> map[CAT_TOP] = Ratings.topRated(all).size }
+        recountTop()
         map[CAT_HIDDEN] = prefs.hiddenCategories(type).count { id -> serverCategories.any { it.id == id } }
         if (type != ContentType.LIVE) map[CAT_CONTINUE] = prefs.continueWatching(type).size
         counts = map
@@ -979,7 +991,7 @@ class BrowseActivity : AppCompatActivity() {
             showInfoMeta(item)
             val at = itemAdapter.items.indexOfFirst { it.id == item.id && it.type == item.type }
             if (at >= 0) itemAdapter.notifyItemChanged(at, "scores")
-            Session.streamCache["${type.name}:$CAT_ALL"]?.let { all -> updateTopCount(Ratings.topRated(all).size) }
+            recountTop()
         }
         findViewById<TextView>(R.id.info_plot).apply {
             text = item.plot

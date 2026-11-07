@@ -478,6 +478,13 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun showRow(viewId: Int, titleId: Int, adapter: ItemAdapter, items: List<StreamItem>) {
+        // A row still being laid out can't take new items (Android closes the app): fill it right after.
+        // Seen on the TV 2026-11-07: Back to Home moved the highlight onto the Favorites switch while the
+        // Favorites row was being laid out, and the switch refilled that row.
+        if (findViewById<RecyclerView>(viewId)?.isComputingLayout == true) {
+            window.decorView.post { showRow(viewId, titleId, adapter, items) }
+            return
+        }
         adapter.submit(items)
         // Switched off in Settings > Home layout > Arrange rows: never shown.
         val key = homeRows.entries.firstOrNull { it.value.second == viewId }?.key
@@ -538,7 +545,8 @@ class HomeActivity : AppCompatActivity() {
                 setPadding((14 * d).toInt(), (5 * d).toInt(), (14 * d).toInt(), (5 * d).toInt())
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (12 * d).toInt() }
                 // Highlighting a choice switches the row straight away.
-                setOnFocusChangeListener { _, has -> if (has && prefs.homeFavoritesKind != kind) { prefs.homeFavoritesKind = kind; loadLocalRows() } }
+                // (After the focus change finishes: it can happen in the middle of a row's layout.)
+                setOnFocusChangeListener { v, has -> if (has && prefs.homeFavoritesKind != kind) { prefs.homeFavoritesKind = kind; v.post { loadLocalRows() } } }
                 // OK: down to the posters. (The Activity's findViewById: inside this TextView's apply,
                 // a bare findViewById searched the button itself and crashed, 2026-11-07.)
                 setOnClickListener {
@@ -808,7 +816,8 @@ class HomeActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             try {
-                val top = Ratings.topRated(allStreams(type).await(), 20)
+                val all = allStreams(type).await()
+                val top = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all, 20) }
                 showRow(rowId, titleId, adapter, if (top.size >= 6) top else emptyList())
             } catch (e: CancellationException) {
                 throw e

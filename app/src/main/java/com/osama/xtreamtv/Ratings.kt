@@ -98,6 +98,7 @@ object Ratings {
     fun removeKey() {
         sp.edit().clear().apply()
         synchronized(cache) { cache.clear() }
+        scoresVersion++
         cacheFile.delete()
         RatingsExtras.clear()
     }
@@ -145,11 +146,16 @@ object Ratings {
         val trailerChecked: Boolean = true,
         /** The title's year from MDBList (how long the scores are kept); 0 when unknown. */
         val year: Int = 0,
+        /** Its award ("Oscar winner", …), from the same answer; null when none. */
+        val award: String? = null,
+        /** False for titles saved before awards were kept: posters ask once more (in a group). */
+        val awardChecked: Boolean = true,
     ) {
         val scores get() = RatingBadges.Scores(imdb, tomatoes).takeIf { !it.isEmpty }
         fun toJson() = JSONObject().put("i", imdb).put("t", tomatoes).put("a", at).put("h", how.name).put("r", ref)
             .apply { if (trailerChecked) put("v", trailer ?: "") }
             .apply { if (year > 0) put("y", year) }
+            .apply { if (awardChecked) put("w", award ?: "") }
     }
 
     private val cache: HashMap<String, Entry> by lazy {
@@ -167,6 +173,8 @@ object Ratings {
                     e.optString("v").takeIf { it.isNotEmpty() && it != "null" },
                     e.has("v"),
                     e.optInt("y", 0),
+                    e.optString("w").takeIf { it.isNotEmpty() && it != "null" },
+                    e.has("w"),
                 )
             }
         }
@@ -215,19 +223,64 @@ object Ratings {
 
     private fun tomatoesOf(item: StreamItem): Int = known(item.type, item.ratingId ?: item.id)?.tomatoes ?: 0
 
-    /** Top rated: IMDb 7.5 and up among [all], best first (ties: Rotten Tomatoes). Saved scores only. */
+    /** Bumped whenever saved scores change: lists made from them are made again. */
+    @Volatile private var scoresVersion = 0L
+
+    /**
+     * Each item's IMDb score and Rotten Tomatoes score (0 when none) in one pass: one lock and the
+     * open playlist read once. Looking titles up one by one inside a sort read the playlist and made a
+     * new name for every comparison: hundreds of thousands for 21,815 movies, which froze a TV that was
+     * short of memory for 22 s (diagnostics report, 2026-11-07).
+     */
+    private fun scoreArrays(items: List<StreamItem>): Pair<DoubleArray, IntArray> {
+        val imdb = DoubleArray(items.size)
+        val rt = IntArray(items.size)
+        if (!active) return imdb to rt
+        val prefix = "${Prefs(app).activeId ?: "legacy"}:"
+        synchronized(cache) {
+            for (i in items.indices) {
+                val it = items[i]
+                val e = cache[prefix + it.type.name + ":" + (it.ratingId ?: it.id)] ?: continue
+                imdb[i] = e.imdb?.toDoubleOrNull() ?: 0.0
+                rt[i] = e.tomatoes ?: 0
+            }
+        }
+        return imdb to rt
+    }
+
+    /** The last Top rated list made: made again only for another list, playlist or new scores. */
+    private var topMemo: Triple<List<StreamItem>, String, List<StreamItem>>? = null
+    private val topLock = Any()
+
+    /**
+     * Top rated: IMDb 7.5 and up among [all], best first (ties: Rotten Tomatoes). Saved scores only.
+     * Can take a moment on a big playlist: call it off the main thread.
+     */
     fun topRated(all: List<StreamItem>, limit: Int = Int.MAX_VALUE): List<StreamItem> {
         if (!active) return emptyList()
-        return all.filter { it.type != ContentType.LIVE && scoreOf(it) >= 7.5 }
-            .distinctBy { "${it.type.name}:${it.id}" }
-            .sortedWith(compareByDescending<StreamItem> { scoreOf(it) }.thenByDescending { tomatoesOf(it) })
-            .take(limit)
+        val stamp = "${Prefs(app).activeId}:$scoresVersion"
+        synchronized(topLock) { topMemo?.takeIf { it.first === all && it.second == stamp }?.let { return it.third.take(limit) } }
+        val (imdb, rt) = scoreArrays(all)
+        val seen = HashSet<String>()
+        val result = all.indices
+            .filter { all[it].type != ContentType.LIVE && imdb[it] >= 7.5 && seen.add("${all[it].type.name}:${all[it].id}") }
+            .sortedWith(compareByDescending<Int> { imdb[it] }.thenByDescending { rt[it] })
+            .map { all[it] }
+        synchronized(topLock) { topMemo = Triple(all, stamp, result) }
+        return result.take(limit)
     }
 
     /** Sort by IMDb score: titles with a score first (best first), the rest in their order. */
     fun sortByScore(list: List<StreamItem>): List<StreamItem> {
-        val (scored, rest) = list.partition { scoreOf(it) > 0 }
-        return scored.sortedWith(compareByDescending<StreamItem> { scoreOf(it) }.thenByDescending { tomatoesOf(it) }) + rest
+        val (imdb, rt) = scoreArrays(list)
+        val scored = list.indices.filter { imdb[it] > 0 }.sortedWith(compareByDescending<Int> { imdb[it] }.thenByDescending { rt[it] })
+        return (scored + list.indices.filter { imdb[it] <= 0 }).map { list[it] }
+    }
+
+    /** The TV is short of memory: let go of what can be made again (the name index, Top rated). */
+    fun trimMemory() {
+        synchronized(nameIndexLock) { nameIndex = null }
+        synchronized(topLock) { topMemo = null }
     }
 
     /** This playlist's titles of [type] whose TMDB id is known from a lookup: TMDB id -> stream id. */
@@ -266,6 +319,7 @@ object Ratings {
 
     private fun put(type: ContentType, id: String, e: Entry) {
         synchronized(cache) { cache[cacheKey(type, id)] = e }
+        scoresVersion++
         save()
     }
 
@@ -281,6 +335,10 @@ object Ratings {
     /** MDBList's trailer link for a title, for when the provider has none. */
     fun trailer(type: ContentType, id: String): String? = if (active) entry(type, id)?.takeIf { it.how != How.WRONG }?.trailer else null
 
+    /** A title found before awards were kept, by its TMDB id: its poster asks once more, in a group. */
+    private fun needsAward(type: ContentType, id: String): Boolean =
+        active && entry(type, id)?.let { !it.awardChecked && it.how != How.WRONG && it.ref?.startsWith("tmdb/") == true } == true
+
     /** True when a lookup would ask MDBList (no saved answer still fresh: see isFresh), so it's worth getting the title's ids. */
     fun needsLookup(type: ContentType, id: String): Boolean {
         if (!active || System.currentTimeMillis() < blockedUntil()) return false
@@ -294,6 +352,18 @@ object Ratings {
         if (!needsLookup(item.type, item.id)) return known(item.type, item.id)
         if (!onScreen && left() < KEEP_FOR_SCREEN) return known(item.type, item.id)
         return lookup(titleFor(api, item), onScreen)
+    }
+
+    /**
+     * A poster's award ribbon: winners only, when scores show on posters. From the saved scores, or the
+     * title's page extras for titles saved before awards were kept.
+     */
+    fun awardFor(item: StreamItem): AwardArt.Kind? {
+        if (!active || !showOnPosters || item.type == ContentType.LIVE) return null
+        val id = item.ratingId ?: item.id
+        val e = entry(item.type, id)?.takeIf { it.how != How.WRONG } ?: return null
+        val badge = e.award ?: RatingsExtras.saved(item.type, id)?.awards?.let { RatingsExtras.awardBadge(it) }
+        return AwardArt.parse(badge)?.takeIf { it.winner }?.kind
     }
 
     /** For posters: known scores when "Show on posters" is on (test builds: sample scores). */
@@ -338,6 +408,7 @@ object Ratings {
             gone.forEach { cache.remove(it) }
             gone.size
         }
+        scoresVersion++
         save()
         return n
     }
@@ -351,7 +422,7 @@ object Ratings {
     /** Refresh saved scores: every title is asked again the next time it is shown (matches are kept). */
     fun refreshAll() {
         synchronized(cache) {
-            for ((k, e) in cache.entries.toList()) if (e.how != How.WRONG) cache[k] = Entry(e.imdb, e.tomatoes, 0L, e.how, e.ref, e.trailer, e.trailerChecked, e.year)
+            for ((k, e) in cache.entries.toList()) if (e.how != How.WRONG) cache[k] = Entry(e.imdb, e.tomatoes, 0L, e.how, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked)
         }
         save()
     }
@@ -375,6 +446,9 @@ object Ratings {
 
     /** Titles whose details had no id this session (not read again until the app restarts). */
     private val noId = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Titles whose list id belongs to a film of another year: not asked in poster groups again this session. */
+    private val wrongListId = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /**
      * A poster list fills in the scores of the posters on screen by itself: their ids (from the list
@@ -447,7 +521,7 @@ object Ratings {
         val k = key ?: return@withContext emptySet()
         if (!active || left() < KEEP_FOR_SCREEN || System.currentTimeMillis() < blockedUntil()) return@withContext emptySet()
         fun rid(it: StreamItem) = it.ratingId ?: it.id
-        val need = shown.filter { it.type != ContentType.LIVE && (it.note == null || it.ratingId != null) && needsLookup(it.type, rid(it)) }
+        val need = shown.filter { it.type != ContentType.LIVE && (it.note == null || it.ratingId != null) && "${it.type.name}:${rid(it)}" !in wrongListId && (needsLookup(it.type, rid(it)) || needsAward(it.type, rid(it))) }
             .distinctBy { "${it.type.name}:${rid(it)}" }.take(40)
         if (need.isEmpty()) return@withContext emptySet()
         // Each title's TMDB id: the list's, a saved one, or (movies) its details, read once.
@@ -501,6 +575,12 @@ object Ratings {
                         val item = group[tmdb] ?: continue
                         found.add(tmdb)
                         val id = rid(item)
+                        // The list's id points at a film of another year: left to the title's page,
+                        // which searches by name (see ask).
+                        if (entry(item.type, id)?.ref == null && contradictsYear(item.type, item.year, media.optInt("year", 0))) {
+                            wrongListId.add("${item.type.name}:$id")
+                            continue
+                        }
                         val how = if (entry(item.type, id)?.how == How.NAME) How.NAME else How.ID
                         val e = entryFrom(media, how, "tmdb/$kind/$tmdb")
                         put(item.type, id, e)
@@ -596,6 +676,13 @@ object Ratings {
             val (code, body) = get("/$idRef", key)
             if (code == 200 && body != null) {
                 val media = JSONObject(body)
+                // The provider's id is checked against the title's year (a saved match is not): an id
+                // pointing at another film ("Blade Runner 2049" carrying the 1982 film's id) is replaced
+                // by a search by name.
+                if (ref == null && contradictsYear(t.type, t.year, media.optInt("year", 0))) {
+                    trace("$label · by id $idRef -> year ${media.optInt("year")} isn't ${t.year}: searched by name instead")
+                    return if (findByName) byName(key, t) else Entry(null, null, System.currentTimeMillis(), How.NONE, null)
+                }
                 return entryFrom(media, if (ref != null && t.tmdb == null && t.imdb == null) How.NAME else How.ID, idRef)
                     .also { trace("$label · by id $idRef -> imdb ${it.imdb ?: "-"} · rt ${it.tomatoes ?: "-"}") }
             }
@@ -679,6 +766,17 @@ object Ratings {
         return none.also { trace("${t.type.name} \"${t.name}\" -> not matched") }
     }
 
+    /**
+     * True when the provider's year and MDBList's year clearly disagree: more than a year apart for a
+     * film; for a series only when MDBList's is later (providers often give the latest season's year,
+     * MDBList the first). Unknown years never disagree.
+     */
+    private fun contradictsYear(type: ContentType, providerYear: String?, theirs: Int): Boolean {
+        val ours = providerYear?.toIntOrNull() ?: return false
+        if (theirs <= 0) return false
+        return if (type == ContentType.MOVIE) kotlin.math.abs(theirs - ours) > 1 else theirs > ours + 1
+    }
+
     private fun idRefOf(hit: JSONObject, kind: String): String? {
         val ids = hit.optJSONObject("ids")
         val tmdb = ids?.optString("tmdb")?.takeIf { it.isNotEmpty() && it != "null" } ?: ids?.optString("tmdbid")?.takeIf { it.isNotEmpty() && it != "null" }
@@ -695,18 +793,18 @@ object Ratings {
         val (first, year0) = cleanName(raw)
         var s = first
         // A language tag joined with an underscore: "EN_The Hateful Eight".
-        s = s.replace(Regex("^(?:[A-Z]{2,3})_+"), "")
-        s = s.replace(Regex("\\b(MULTI|VFF|VFQ|VF|VOSTFR|VOST|TRUEFRENCH|SUBFRENCH|FRENCH|DUAL|LATINO|CASTELLANO)\\b", RegexOption.IGNORE_CASE), " ")
+        s = s.replace(RX_UNDERSCORE_TAG, "")
+        s = s.replace(RX_VERSION_TAGS, " ")
         // Dots between two words of 2+ letters: "Glass.Heart" (not "S.W.A.T.", not "Mr. Robot").
-        s = s.replace(Regex("(?<=\\p{L}{2})\\.(?=\\p{L}{2})"), " ")
-        s = s.replace(Regex("\\s+"), " ").trim()
+        s = s.replace(RX_WORD_DOT, " ")
+        s = s.replace(RX_SPACES, " ").trim()
         var year = year0
         // A bare year at the end: "Monster Hunter 2020".
-        Regex("^(.*\\S)\\s+((?:19|20)\\d{2})$").find(s)?.let { m ->
+        RX_TRAILING_YEAR.find(s)?.let { m ->
             if (year == null) year = m.groupValues[2]
             s = m.groupValues[1]
         }
-        s = s.replace(Regex("\\s+"), " ").trim(' ', '-', '|', ':')
+        s = s.replace(RX_SPACES, " ").trim(' ', '-', '|', ':')
         return (if (s.isEmpty()) first else s) to year
     }
 
@@ -726,27 +824,44 @@ object Ratings {
         }
         // The trailer comes in the same answer: a YouTube link (used when the provider has none).
         val trailer = media.optString("trailer").takeIf { it.startsWith("http") && ("youtube" in it || "youtu.be" in it) }
-        return Entry(imdb, tomatoes, System.currentTimeMillis(), how, ref, trailer, year = media.optInt("year", 0))
+        return Entry(imdb, tomatoes, System.currentTimeMillis(), how, ref, trailer, year = media.optInt("year", 0),
+            award = RatingsExtras.awardBadge(media.optString("awards").takeIf { it.isNotBlank() && it != "null" }))
     }
 
     /** "EN - The Matrix (1999) 4K" -> ("The Matrix", "1999"). */
     fun cleanName(raw: String): Pair<String, String?> {
         var s = raw.trim()
-        val year = Regex("[(\\[]((?:19|20)\\d{2})[)\\]]").find(s)?.groupValues?.get(1)
-        s = s.replace(Regex("[(\\[][^)\\]]*[)\\]]"), " ")
+        val year = RX_BRACKET_YEAR.find(s)?.groupValues?.get(1)
+        s = s.replace(RX_BRACKETS, " ")
         // A language or quality tag in front: "EN - ", "|AR| ", "4K - " (a colon is left: "IT: Chapter Two").
-        s = s.replace(Regex("^\\s*\\|?\\s*(?:[A-Z]{2,3}|4K|UHD|FHD|HD)\\s*[-|]\\s*"), "")
-        s = s.replace(Regex("\\b(4K|UHD|FHD|HD|SD|HEVC|H265|MULTI[- ]?SUB|VOSTFR|DUBBED|SUBBED)\\b", RegexOption.IGNORE_CASE), " ")
-        s = s.replace(Regex("(مدبلج|مدبلجة|مترجم|مترجمة)"), " ")
+        s = s.replace(RX_FRONT_TAG, "")
+        s = s.replace(RX_QUALITY_TAGS, " ")
+        s = s.replace(RX_ARABIC_TAGS, " ")
         // "Bayoumi Afandi بيومي افندي": the same name twice; MDBList knows the English one.
         val latin = s.count { it in 'A'..'Z' || it in 'a'..'z' }
         val arabic = s.count { it in '\u0600'..'\u06FF' }
-        if (latin >= 3 && arabic > 0) s = s.replace(Regex("[\\u0600-\\u06FF]+"), " ")
-        s = s.replace(Regex("\\s+"), " ").trim(' ', '-', '|', ':')
+        if (latin >= 3 && arabic > 0) s = s.replace(RX_ARABIC_WORDS, " ")
+        s = s.replace(RX_SPACES, " ").trim(' ', '-', '|', ':')
         return s to year
     }
 
-    private fun normal(s: String) = s.lowercase().replace("&", "and").replace(Regex("[^\\p{L}\\p{N}]+"), "")
+    private fun normal(s: String) = s.lowercase().replace("&", "and").replace(RX_NOT_LETTERS, "")
+
+    // The name-cleaning patterns, made once. Made again for every name, cleaning a 21,815-movie list for
+    // More like this kept two threads busy for over a minute and filled the memory with throwaway
+    // objects (2026-11-07: the row never appeared on the TV).
+    private val RX_UNDERSCORE_TAG = Regex("^(?:[A-Z]{2,3})_+")
+    private val RX_VERSION_TAGS = Regex("\\b(MULTI|VFF|VFQ|VF|VOSTFR|VOST|TRUEFRENCH|SUBFRENCH|FRENCH|DUAL|LATINO|CASTELLANO)\\b", RegexOption.IGNORE_CASE)
+    private val RX_WORD_DOT = Regex("(?<=\\p{L}{2})\\.(?=\\p{L}{2})")
+    private val RX_SPACES = Regex("\\s+")
+    private val RX_TRAILING_YEAR = Regex("^(.*\\S)\\s+((?:19|20)\\d{2})$")
+    private val RX_BRACKET_YEAR = Regex("[(\\[]((?:19|20)\\d{2})[)\\]]")
+    private val RX_BRACKETS = Regex("[(\\[][^)\\]]*[)\\]]")
+    private val RX_FRONT_TAG = Regex("^\\s*\\|?\\s*(?:[A-Z]{2,3}|4K|UHD|FHD|HD)\\s*[-|]\\s*")
+    private val RX_QUALITY_TAGS = Regex("\\b(4K|UHD|FHD|HD|SD|HEVC|H265|MULTI[- ]?SUB|VOSTFR|DUBBED|SUBBED)\\b", RegexOption.IGNORE_CASE)
+    private val RX_ARABIC_TAGS = Regex("(مدبلج|مدبلجة|مترجم|مترجمة)")
+    private val RX_ARABIC_WORDS = Regex("[\\u0600-\\u06FF]+")
+    private val RX_NOT_LETTERS = Regex("[^\\p{L}\\p{N}]+")
 
     /** A name to compare titles by: tags, years and punctuation left out ("The Matrix (1999) 4K" -> "thematrix"). */
     fun nameKey(name: String) = normal(cleanFurther(name).first)
@@ -759,12 +874,18 @@ object Ratings {
     private var nameIndex: Pair<List<StreamItem>, Map<String, StreamItem>>? = null
     private val nameIndexLock = Any()
 
+    /** Only one index is made at a time: a second asker waits for it instead of making it again. */
+    private val nameIndexBuild = Any()
+
     fun nameIndex(all: List<StreamItem>): Map<String, StreamItem> {
         synchronized(nameIndexLock) { nameIndex?.takeIf { it.first === all }?.let { return it.second } }
-        val map = HashMap<String, StreamItem>(all.size * 2)
-        for (s in all) nameKey(s.name).takeIf { it.length >= 3 }?.let { map.putIfAbsent(it, s) }
-        synchronized(nameIndexLock) { nameIndex = all to map }
-        return map
+        synchronized(nameIndexBuild) {
+            synchronized(nameIndexLock) { nameIndex?.takeIf { it.first === all }?.let { return it.second } }
+            val map = HashMap<String, StreamItem>(all.size * 2)
+            for (s in all) nameKey(s.name).takeIf { it.length >= 3 }?.let { map.putIfAbsent(it, s) }
+            synchronized(nameIndexLock) { nameIndex = all to map }
+            return map
+        }
     }
 
     /** "https://image.tmdb.org/t/p/w600/AbC123.jpg" -> "abc123"; null for none or too short to trust. */

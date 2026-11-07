@@ -12,6 +12,17 @@ class XtreamApp : Application(), ImageLoaderFactory {
         super.onCreate()
         Diag.init(this)
         Ratings.init(this)
+        // The TV is short of memory (2026-11-07: Android closed the app on a TV warning 5 times a minute):
+        // let go of what can be made again. In the background, the downloaded lists go too (they are
+        // read again from the server when needed); never while a screen shows them.
+        registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) Ratings.trimMemory()
+                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) Session.streamCache.clear()
+            }
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {}
+            @Deprecated("Deprecated in Java") override fun onLowMemory() = Ratings.trimMemory()
+        })
         // A message left by a screen that closed (the player's "Next episode airs …") shows on the next one.
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: android.app.Activity) = MessagePill.showPending(activity)

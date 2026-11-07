@@ -271,6 +271,8 @@ class DetailsActivity : AppCompatActivity() {
                 setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
                 layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
                     .apply { rightMargin = (8 * density).toInt() }
+                // An award: the same chip in gold or silver glass, with its statuette.
+                AwardArt.styleChip(this, v)
             })
         }
     }
@@ -446,15 +448,26 @@ class DetailsActivity : AppCompatActivity() {
         val recosRow = findViewById<RecyclerView?>(R.id.recos)
         if (isMovie && recosRow?.visibility == View.VISIBLE && event.action == android.view.KeyEvent.ACTION_DOWN) {
             val credits = findViewById<TextView>(R.id.credits)
-            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && buttons.hasFocus()) {
+            // From anywhere above the row, not only the buttons: right after the page opens the
+            // highlight can sit elsewhere (a button added a moment later), and Down then did nothing.
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && !recosRow.hasFocus()) {
+                if ((recosRow.adapter?.itemCount ?: 0) == 0) return super.dispatchKeyEvent(event)
                 plot.visibility = View.GONE
                 credits.visibility = View.GONE
-                recosRow.post { recosRow.getChildAt(0)?.requestFocus() }
+                // Still no room (a big interface size): the chips and next-episode line go too.
+                focusFirstCard(recosRow) {
+                    findViewById<View>(R.id.meta).let { tuckedMeta = it.visibility == View.VISIBLE; it.visibility = View.GONE }
+                    findViewById<View?>(R.id.next_episode)?.let { tuckedNext = it.visibility == View.VISIBLE; it.visibility = View.GONE }
+                }
                 return true
             }
             if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && recosRow.hasFocus()) {
                 plot.visibility = View.VISIBLE
                 credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
+                if (tuckedMeta) findViewById<View>(R.id.meta).visibility = View.VISIBLE
+                tuckedMeta = false
+                if (tuckedNext) findViewById<View?>(R.id.next_episode)?.visibility = View.VISIBLE
+                tuckedNext = false
                 playButton.post { (if (playButton.isShown) playButton else favoriteButton).requestFocus() }
                 return true
             }
@@ -467,7 +480,7 @@ class DetailsActivity : AppCompatActivity() {
                 lastEpisodeFocus = episodesView.focusedChild
                 top.visibility = View.GONE
                 box.visibility = View.VISIBLE
-                recos.post { recos.getChildAt(0)?.requestFocus() }
+                focusFirstCard(recos)
                 return true
             }
             if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && recos.hasFocus()) {
@@ -479,6 +492,29 @@ class DetailsActivity : AppCompatActivity() {
         }
         return super.dispatchKeyEvent(event)
     }
+
+    /**
+     * Highlights a row's first card once the row has really been laid out. On the TV (bigger
+     * interface) More like this sat below the screen with no cards made yet, so the old "right after"
+     * found nothing and Down did nothing (diagnostics report, 2026-11-07). Tries for about a second.
+     */
+    private fun focusFirstCard(row: RecyclerView, makeRoom: (() -> Unit)? = null) {
+        var tries = 0
+        val attempt = object : Runnable {
+            override fun run() {
+                val card = row.layoutManager?.findViewByPosition(0) ?: row.getChildAt(0)
+                if (card != null && card.isShown && card.requestFocus()) return
+                if (tries == 0) row.scrollToPosition(0)
+                if (tries == 4) makeRoom?.invoke()
+                if (++tries < 20) row.postDelayed(this, 50)
+            }
+        }
+        row.post(attempt)
+    }
+
+    /** The next-episode line was tucked away with the chips (shown again on Up). */
+    private var tuckedNext = false
+    private var tuckedMeta = false
 
     private fun showCredits(text: String?) {
         findViewById<TextView>(R.id.credits).apply {

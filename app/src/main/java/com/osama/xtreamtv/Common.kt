@@ -621,7 +621,8 @@ object Session {
     var seriesQueue: SeriesQueue? = null
     /** Set by the TV guide when opened from the live player: channel index to switch to. */
     var pendingChannel: Int? = null
-    val streamCache = HashMap<String, List<StreamItem>>()
+    /** Lists already downloaded. Used from several threads, and emptied on a memory warning. */
+    val streamCache = java.util.concurrent.ConcurrentHashMap<String, List<StreamItem>>()
     val categoryCache = HashMap<ContentType, List<Category>>()
 
     /**
@@ -1026,6 +1027,7 @@ class ItemAdapter(
                 holder.subtitle.visibility = View.VISIBLE
             }
         }
+        (holder.image as? PosterImageView)?.award = Ratings.awardFor(item)
         holder.itemView.findViewById<TextView?>(R.id.score_chip)?.let { chip ->
             val scores = if (item.note != null && item.ratingId != null && item.type != ContentType.LIVE) Ratings.forPoster(chip.context, item) else null
             chip.text = scores?.let { RatingBadges.line(chip.context, it, 0xFFFFFFFF.toInt()) }
