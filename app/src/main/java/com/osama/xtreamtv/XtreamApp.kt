@@ -49,7 +49,7 @@ class XtreamApp : Application(), ImageLoaderFactory {
                     val api = Session.api(context) ?: return
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
                         val all = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { api.streams(type, null) }.getOrElse { emptyList() } }
-                        val item = all.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return@launch android.util.Log.d("Recos", "no title named $name").let { }
+                        val item = all.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: all.firstOrNull { it.name.contains(name, ignoreCase = true) } ?: return@launch android.util.Log.d("Recos", "no title named $name").let { }
                         startActivity(DetailsActivity.intent(context, item).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                     }
                 }
@@ -110,6 +110,10 @@ class XtreamApp : Application(), ImageLoaderFactory {
                     }
                 }
             }, android.content.IntentFilter("com.osama.xtreamtv.debug.NAMES").also { }, if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: the diagnostics report (with its summary) to files/debug_report.txt.
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) = Diag.reportForTests()
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.REPORT"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
         }
         // Settings stay exactly as the user left them, whatever a new version's defaults are.
         Prefs(this).pinSettings(BuildConfig.VERSION_CODE)

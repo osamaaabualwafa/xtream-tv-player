@@ -54,11 +54,12 @@ def main():
     with open(ALL, "w", encoding="utf-8") as f:
         for n in sorted(known):
             f.write(known[n] + "\n")
-    print(f"Saved {name}")
-    print("\n".join(l for l in head if l.strip()))
-    print(f"\n{len(new)} entries new to this computer ({len(lines) - len(head) - len(new)} already seen). All entries: {ALL}")
-    for line in new[-60:]:
-        print(line)
+    print(f"Saved {name} · {len(new)} entries new to this computer ({len(lines) - len(head) - len(new)} already seen). All entries: {ALL}\n")
+    # What matters first: the summary compared with the previous share, then the problems by screen.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import diag_read
+    sys.argv = [sys.argv[0], os.path.join(DIR, name)]
+    diag_read.main()
 
 
 if __name__ == "__main__":

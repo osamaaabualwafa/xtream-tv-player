@@ -76,10 +76,14 @@ class BrowseActivity : AppCompatActivity() {
     /** Items per category id (plus CAT_ALL / CAT_FAV / CAT_CONTINUE), shown next to each category. */
     private var counts: Map<String, Int> = emptyMap()
 
+    /** When the screen opened (diagnostics: how long its content took to be ready). */
+    private val openedAt = android.os.SystemClock.uptimeMillis()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
         prefs = Prefs(this)
+        listReadyLogged = false
         type = try {
             ContentType.valueOf(intent.getStringExtra(EXTRA_TYPE) ?: "LIVE")
         } catch (e: IllegalArgumentException) {
@@ -853,6 +857,9 @@ class BrowseActivity : AppCompatActivity() {
         return api.streams(type, categoryId).also { Session.streamCache[key] = it }
     }
 
+    /** The first list shown since the screen opened has been reported (diagnostics). */
+    private var listReadyLogged = false
+
     private fun applyFilter(scrollToTop: Boolean = true) {
         updateSortButton()
         val query = search.text.toString().trim()
@@ -863,6 +870,10 @@ class BrowseActivity : AppCompatActivity() {
             Session.streamCache["SERIES:__all__"]?.let { itemAdapter.newIds = prefs.newEpisodeSeries(it) }
         }
         itemAdapter.submit(list)
+        if (!listReadyLogged && list.isNotEmpty()) {
+            listReadyLogged = true
+            Diag.ready(if (type == ContentType.LIVE) "Live TV" else if (type == ContentType.MOVIE) "Movies" else "Series", "list", openedAt)
+        }
         if (scrollToTop) itemsView.scrollToPosition(0)
         if (list.isEmpty()) findViewById<View>(R.id.info_strip).visibility = if (style == Appearance.BROWSE_PREVIEW) View.INVISIBLE else View.GONE
         // Typed or cleared while no poster is highlighted: the plate described an item that may be gone.

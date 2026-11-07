@@ -219,6 +219,7 @@ object Updates {
         try {
             activity.startActivity(intent)
             Diag.log("update", "installer opened (${apk.length() / 1024 / 1024} MB)")
+            Diag.expectExit()
             installerOpenedAt = System.currentTimeMillis()
         } catch (e: Exception) {
             Diag.log("update", "installer didn't open: ${e.javaClass.simpleName}")

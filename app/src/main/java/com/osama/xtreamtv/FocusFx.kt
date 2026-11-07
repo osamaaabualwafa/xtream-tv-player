@@ -261,6 +261,7 @@ private object FocusAudit {
             // Long enough for the growth and for scrolling to the item to finish.
             decor.postDelayed({ if (new.isFocused) check(activity, new) }, 900)
             if (old != null && old.isAttachedToWindow && old.rootView === new.rootView) farJump(old, new)
+            if (old != null && activity.hasWindowFocus()) Diag.movedByItself(old, new)
             scheduleText(new)
         }
     }
@@ -325,7 +326,10 @@ private object FocusAudit {
         if (problem != null) found("SizeClip", "$where: $problem ($quote)", "text cut on ${Diag.screen}: $quote ($problem)")
         // Hard to read from the sofa: under about 1.8% of the screen height.
         if (t.textSize < t.rootView.height * 0.018f) {
-            found("UiCheck", "$where: text too small ($quote)", "text too small to read on ${Diag.screen}: $quote")
+            if (seen.add("${Diag.screen} small $where $quote")) {
+                if (BuildConfig.DEBUG) Log.w("UiCheck", "$where: text too small ($quote)")
+                Diag.smallText(quote)
+            }
         }
         // Single letters, signs and emoji are pictures, not text to read.
         if (t.text.count { it.isLetter() } >= 3) contrast(t)?.let { ratio ->
@@ -370,6 +374,18 @@ private object FocusAudit {
         return false
     }
 
+    private fun inSlidingPanel(v: View): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p.id != View.NO_ID) {
+                val name = runCatching { p.resources.getResourceEntryName(p.id) }.getOrDefault("")
+                if (name.startsWith("drawer") || name == "category_panel") return true
+            }
+            p = p.parent as? View
+        }
+        return false
+    }
+
     /** Two items drawn over each other (the focused one may grow a little: that is fine). */
     private fun overlaps(all: List<View>) {
         // The full-screen video (and anything as big) sits under everything by design.
@@ -380,6 +396,8 @@ private object FocusAudit {
             val a = rects[i]
             val b = rects[j]
             if (a.isEmpty || b.isEmpty || isInside(views[i], views[j]) || isInside(views[j], views[i])) continue
+            // A panel that slides over the rest on purpose (Home's quick drawer, the category list).
+            if (inSlidingPanel(views[i]) != inSlidingPanel(views[j])) continue
             val o = android.graphics.Rect()
             if (!o.setIntersect(a, b)) continue
             val smaller = minOf(a.width() * a.height(), b.width() * b.height())

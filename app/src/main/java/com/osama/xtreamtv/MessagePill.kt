@@ -34,7 +34,12 @@ object MessagePill {
         activity.window?.decorView?.post { show(activity, p.first, p.second) }
     }
 
+    /** When the last message was shown (diagnostics: a long-press that showed nothing). */
+    @Volatile var lastShownAt = 0L
+        private set
+
     fun show(activity: Activity, text: CharSequence, length: Int) {
+        lastShownAt = android.os.SystemClock.uptimeMillis()
         val root = activity.window?.decorView as? ViewGroup ?: return
         root.findViewWithTag<View>(TAG)?.let { root.removeView(it) }
         val density = activity.resources.displayMetrics.density

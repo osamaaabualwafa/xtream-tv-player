@@ -76,6 +76,9 @@ class HomeActivity : AppCompatActivity() {
     /** Layout and colour this screen was built with; rebuilt when Settings changes them. */
     private var builtLook = ""
 
+    /** When the screen opened (diagnostics: how long its content took to be ready). */
+    private val openedAt = android.os.SystemClock.uptimeMillis()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
@@ -149,6 +152,9 @@ class HomeActivity : AppCompatActivity() {
             startActivity(PlayerActivity.liveIntent(this, index))
         })
         favoritesAdapter = row(R.id.row_favorites, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) },
+            // Long-press on Home: remove from favorites, after asking (owner, 2026-11-07). In Movies,
+            // Series and More like this a long-press adds or removes straight away.
+            onLongClick = { _, item -> confirmRemoveFavorite(this, prefs, item) { loadLocalRows() } },
             onBindExtra = { vh, item ->
                 // 1.1E: a followed series with an episode due within two weeks says when.
                 if (item.type == ContentType.SERIES) RatingsExtras.cardLine(RatingsExtras.saved(item.type, item.id))?.let { line ->
@@ -206,6 +212,7 @@ class HomeActivity : AppCompatActivity() {
         // Scores found while away (a title's page, pre-fill) show on the cards already there.
         for (a in listOf(newAdapter, recentAdapter, recentSeriesAdapter, topRatedAdapter, topSeriesAdapter)) a.notifyItemRangeChanged(0, a.itemCount, "scores")
         // Pre-fill: once 20 s after opening (if nothing is pressed), then each idle minute.
+        window.decorView.post { restoreHighlight() }
         lastKeyAt = android.os.SystemClock.uptimeMillis() - 40_000
         window.decorView.removeCallbacks(prefillCheck)
         window.decorView.postDelayed(prefillCheck, 20_000)
@@ -223,7 +230,57 @@ class HomeActivity : AppCompatActivity() {
 
     private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.homeRowOrder.joinToString(",")}|${prefs.homeRowHidden.sorted().joinToString(",")}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
+    /** Where the highlight was when Home was left: a row's title (row, "TYPE:id", place), or a button. */
+    private var leftOn: Triple<Int, String?, Int>? = null
+
+    private fun rememberHighlight() {
+        val f = currentFocus ?: return
+        var child: View = f
+        var p = f.parent
+        while (p is View && p !is RecyclerView) { child = p; p = p.parent }
+        val row = p as? RecyclerView
+        val adapter = row?.adapter as? ItemAdapter
+        if (row != null && adapter != null && row.id != View.NO_ID) {
+            val at = row.getChildAdapterPosition(child)
+            val item = adapter.items.getOrNull(at)
+            leftOn = Triple(row.id, item?.let { "${it.type.name}:${it.id}" }, at)
+        } else if (f.id != View.NO_ID) {
+            leftOn = Triple(f.id, null, -1)
+        }
+    }
+
+    /**
+     * Back on Home: the highlight returns to the title it was on (or the same place in that row).
+     * The rows are refilled on return, and the highlight used to fall back to the first tile or the
+     * row above (TV, 2026-11-07).
+     */
+    private fun restoreHighlight(tries: Int = 0) {
+        val (viewId, key, place) = leftOn ?: return
+        val view = findViewById<View?>(viewId) ?: return
+        // The screen becomes visible just after it comes back: wait for it (up to about 2 s).
+        if (!view.isShown || !hasWindowFocus()) {
+            if (tries < 20) window.decorView.postDelayed({ restoreHighlight(tries + 1) }, 100) else leftOn = null
+            return
+        }
+        val row = view as? RecyclerView
+        if (row == null) { if (!view.hasFocus()) view.requestFocus(); leftOn = null; return }
+        val adapter = row.adapter as? ItemAdapter ?: return
+        if (adapter.itemCount == 0) { if (tries < 20) row.postDelayed({ restoreHighlight(tries + 1) }, 100) else leftOn = null; return }
+        val at = adapter.items.indexOfFirst { "${it.type.name}:${it.id}" == key }.takeIf { it >= 0 } ?: place.coerceIn(0, adapter.itemCount - 1)
+        val card = row.layoutManager?.findViewByPosition(at)
+        if (card != null) {
+            if (!card.hasFocus()) card.requestFocus()
+            leftOn = null
+        } else if (tries < 20) {
+            row.scrollToPosition(at)
+            row.postDelayed({ restoreHighlight(tries + 1) }, 100)
+        } else {
+            leftOn = null
+        }
+    }
+
     override fun onPause() {
+        rememberHighlight()
         super.onPause()
         prefillJob?.cancel()
         window.decorView.removeCallbacks(prefillCheck)
@@ -476,6 +533,9 @@ class HomeActivity : AppCompatActivity() {
         }
         return adapter
     }
+
+    /** The first heavy row filled since Home opened has been reported (diagnostics). */
+    private var rowsReadyLogged = false
 
     private fun showRow(viewId: Int, titleId: Int, adapter: ItemAdapter, items: List<StreamItem>) {
         // A row still being laid out can't take new items (Android closes the app): fill it right after.
@@ -839,6 +899,10 @@ class HomeActivity : AppCompatActivity() {
                 val recent = all.filter { it.added > 0 }.sortedByDescending { it.added }.take(25)
                 adapter.favorites = prefs.favoriteIds(type)
                 showRow(rowId, titleId, adapter, recent)
+                if (!rowsReadyLogged && recent.isNotEmpty()) {
+                    rowsReadyLogged = true
+                    Diag.ready("Home", "recently added rows", openedAt)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -38,7 +38,7 @@ import java.util.concurrent.Executors
 
 /** A message on screen, also kept in the diagnostics report (what the user was told). */
 fun showToast(context: Context, text: CharSequence, length: Int) {
-    Diag.log("message", text.toString())
+    Diag.log("message", "$text · on ${Diag.screen}")
     // On a screen: the themed pill (MessagePill). Without one (rare): Android's own message.
     var c: Context? = context
     while (c is android.content.ContextWrapper && c !is android.app.Activity) c = c.baseContext
@@ -98,13 +98,26 @@ object Diag {
             // Kept even with Diagnostics off: crashes are rare and the most useful thing to know.
             runCatching {
                 val where = error.stackTrace.take(6).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
-                write("crash", "${error.javaClass.simpleName}: ${error.message ?: ""} · on $screen · at $where", System.currentTimeMillis())
+                write("crash", "${error.javaClass.simpleName}: ${error.message ?: ""} · on $screen · at $where" + problemContext(), System.currentTimeMillis())
                 // For the message on the next open and the red dot until the report is shared.
                 sp.edit().putLong("diag_crash_at", System.currentTimeMillis()).putBoolean("diag_crash_prompted", false).commit()
             }
             previous?.uncaughtException(thread, error)
         }
         io.execute { prune() }
+        // The last session was in front of you and didn't end normally (no crash recorded): Android
+        // closed it, usually for memory (2026-11-07: only guessed from a freeze followed by silence).
+        if (sp.getBoolean("diag_alive", false)) {
+            val crashAt = sp.getLong("diag_crash_at", 0L)
+            val lastSeen = sp.getLong("diag_last_seen", 0L)
+            if (lastSeen > 0 && crashAt < lastSeen - 60_000) {
+                val at = SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(lastSeen))
+                log("ended", "the last session ended unexpectedly on ${sp.getString("diag_last_screen", "?")} (about $at, probably closed by Android)" +
+                    " · last memory: ${sp.getString("diag_last_mem", "not measured")} · keys: ${sp.getString("diag_last_keys", "none")}" +
+                    " · [${sp.getString("diag_last_tag", "?")}]")
+            }
+        }
+        sp.edit().putBoolean("diag_alive", false).apply()
         application.registerActivityLifecycleCallbacks(Screens)
         application.registerComponentCallbacks(Memory)
         sp.registerOnSharedPreferenceChangeListener(settingsWatcher)
@@ -112,11 +125,53 @@ object Diag {
         startWatchdog()
     }
 
-    /** Adds a line; nothing happens while Diagnostics is off. */
+    /** Adds a line; nothing happens while Diagnostics is off. Problem lines also get the keys pressed
+     *  just before and the look and player settings in use (to replay it and tie it to a setting). */
     fun log(kind: String, text: String) {
         if (!enabled) return
         val time = System.currentTimeMillis()
-        io.execute { write(kind, text, time) }
+        val full = if (kind in PROBLEMS) text + problemContext() else text
+        io.execute { write(kind, full, time) }
+    }
+
+    private val PROBLEMS = setOf("ui", "freeze", "error")
+
+    /** " · keys: ↓ ↓ → OK · [Glass·Midnight·home 2·browse 3·size 3·text 1·focus 2]". */
+    fun problemContext(): String = " · keys: ${trail(6)} · [${settingsTag()}]"
+
+    /** The last [n] keys pressed, as arrows. */
+    fun trail(n: Int): String = synchronized(keys) { keys.toList().takeLast(n) }.joinToString(" ") {
+        when (it) { "UP" -> "↑"; "DOWN" -> "↓"; "LEFT" -> "←"; "RIGHT" -> "→"; "CENTER" -> "OK"; "BACK" -> "Back"; else -> it }
+    }.ifEmpty { "none" }
+
+    /** The look (and, on the player, the player) settings in use: never logins or titles. */
+    fun settingsTag(): String = runCatching {
+        val p = Prefs(app)
+        val theme = Appearance.THEMES.firstOrNull { it.first == p.themeIndex }?.second ?: "theme ${p.themeIndex}"
+        val scene = if (p.themeIndex == Appearance.THEME_GLASS) "·" + Appearance.SCENE_NAMES.getOrElse(p.glassScene) { "?" } else ""
+        val player = if (screen == "Player") "·decoder ${p.decoderMode}·buffer ${p.bufferSize}" else ""
+        "$theme$scene·home ${p.homeStyle}·browse ${p.browseStyle}·size ${p.uiSize}·text ${p.textSize}·focus ${p.focusStyle}$player"
+    }.getOrDefault("?")
+
+    /** How long a screen took to show a part of its content ("Details: scores ready after 1.2 s"). */
+    fun ready(screenName: String, part: String, sinceUptime: Long) {
+        val s = (SystemClock.uptimeMillis() - sinceUptime) / 100 / 10.0
+        log("speed", "$screenName: $part ready after $s s")
+    }
+
+    // ---- Text too small: one line per screen with a count, not one per label ----
+    private val smallText = HashMap<String, Pair<Int, String>>()
+
+    fun smallText(quote: String) {
+        synchronized(smallText) {
+            val (n, first) = smallText[screen] ?: (0 to quote)
+            smallText[screen] = (n + 1) to first
+        }
+    }
+
+    private fun flushSmallText(name: String) {
+        val (n, first) = synchronized(smallText) { smallText.remove(name) } ?: return
+        log("ui", "text too small to read on $name: $n ${if (n == 1) "item" else "items"} (e.g. $first)")
     }
 
     /** A title for the report, only when the user allowed titles. */
@@ -272,6 +327,12 @@ object Diag {
 
     private val stamp get() = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
 
+    /** Test builds: the report as it would be shared, written to files/debug_report.txt. */
+    fun reportForTests() {
+        if (!BuildConfig.DEBUG) return
+        io.execute { runCatching { File(app.filesDir, "debug_report.txt").writeText(report("Test report", sp.getLong("diag_shared_upto", 0L)).first) } }
+    }
+
     private fun report(name: String, since: Long): Pair<String, Long> {
         prune()
         val lines = if (file.exists()) file.readLines().filter { it.isNotBlank() } else emptyList()
@@ -290,6 +351,8 @@ object Diag {
         out.append("Entries: ${if (seqs.isEmpty()) "none" else "#${seqs.minOrNull()}–#$last"} · ${seqs.count { it > since }} new since the last share\n")
         out.append("Totals: ${kinds.entries.sortedByDescending { it.value }.joinToString(", ") { "${it.key} ${it.value}" }}\n")
         out.append("Seeks that landed somewhere else: ${lines.count { it.contains("jumped") }}\n\n")
+        val recent = lines.filter { (it.substringBefore('\t').removePrefix("#").toLongOrNull() ?: 0L) > since }
+        out.append(summary(recent.ifEmpty { lines }, if (recent.isEmpty()) "all entries" else "since the last share"))
         val time = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
         for (line in lines) {
             val parts = line.split('\t', limit = 4)
@@ -298,6 +361,56 @@ object Diag {
                 .append(parts[2].padEnd(10)).append(' ').append(parts[3]).append('\n')
         }
         return out.toString() to last
+    }
+
+    /**
+     * The report's summary (2026-11-07): what went wrong and how fast things were, in one block, with
+     * stable names ("  crashes: 0") so the computer can compare it with the previous report.
+     */
+    private fun summary(lines: List<String>, scope: String): String {
+        val entries = lines.mapNotNull { l -> l.split('\t', limit = 4).takeIf { it.size == 4 }?.let { it[2] to it[3] } }
+        fun count(kind: String, test: (String) -> Boolean = { true }) = entries.count { it.first == kind && test(it.second) }
+        fun ui(text: String) = count("ui") { it.contains(text) }
+        val out = StringBuilder("Summary ($scope: ${entries.size} entries)\n")
+        fun line(name: String, value: Any) { out.append("  $name: $value\n") }
+        line("crashes", count("crash"))
+        line("ended unexpectedly", count("ended"))
+        line("freezes", count("freeze"))
+        line("highlight moved by itself", ui("moved by itself"))
+        line("came back on another item", ui("came back to"))
+        line("long-press problems", ui("long-press"))
+        line("key pressed 3 times, nothing moved", ui("pressed 3 times"))
+        line("nothing highlighted", ui("nothing highlighted"))
+        line("More like this not shown", ui("More like this not shown"))
+        line("text cut", ui("text cut"))
+        line("items on top of each other", ui("on top of each other"))
+        line("partly off screen", ui("partly off screen"))
+        line("highlight cut", ui("highlight cut"))
+        line("posters failed", entries.filter { it.first == "ui" && it.second.contains("posters failed") }.sumOf { Regex("^(\\d+)").find(it.second)?.groupValues?.get(1)?.toIntOrNull() ?: 0 })
+        line("errors", count("error"))
+        // Slowest opening per screen.
+        val opens = entries.filter { it.first == "screen" }.mapNotNull { Regex("^(\\w+) took (\\d+) ms to open").find(it.second)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() } }
+        opens.groupBy({ it.first }, { it.second }).toSortedMap().forEach { (name, ms) -> line("slowest open $name", "${ms.max()} ms (${ms.size}x over 0.7 s)") }
+        // Content ready: median and worst.
+        val ready = entries.filter { it.first == "speed" }.mapNotNull { Regex("^(.+?) ready after ([\\d.]+) s").find(it.second)?.let { m -> m.groupValues[1] to m.groupValues[2].toDouble() } }
+        ready.groupBy({ it.first }, { it.second }).toSortedMap().forEach { (name, s) ->
+            val sorted = s.sorted()
+            line("ready $name", "median ${sorted[sorted.size / 2]} s, worst ${sorted.last()} s (${s.size}x)")
+        }
+        val stutters = entries.filter { it.first == "smooth" }.mapNotNull { Regex("^(\\w+): \\d+ stutters \\(worst (\\d+) ms\\)").find(it.second)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() } }
+        stutters.maxByOrNull { it.second }?.let { line("worst stutter", "${it.second} ms on ${it.first}") }
+        val mem = entries.filter { it.first == "memory" }.mapNotNull { Regex("app (\\d+) MB · TV free (\\d+) MB").find(it.second)?.let { m -> m.groupValues[1].toInt() to m.groupValues[2].toInt() } }
+        if (mem.isNotEmpty()) line("memory", "app up to ${mem.maxOf { it.first }} MB · TV free down to ${mem.minOf { it.second }} MB")
+        line("TV low on memory warnings", count("memory") { it.contains("low on memory") || it.contains("(low)") })
+        // Problems by the settings they happened with.
+        val tags = entries.filter { it.first in setOf("ui", "freeze", "error", "crash", "ended") }
+            .mapNotNull { Regex("\\[([^\\]]+)\\]\\s*$").find(it.second)?.groupValues?.get(1) }
+        tags.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(5).forEach { line("problems with [${it.key}]", it.value) }
+        // The messages you saw, most frequent first.
+        entries.filter { it.first == "message" }.map { it.second.substringBefore(" · on ") }
+            .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(6)
+            .forEach { line("message \"${it.key.take(40)}\"", "${it.value}x") }
+        return out.append("\n").toString()
     }
 
     // ---- Sharing over the home Wi-Fi ----
@@ -506,8 +619,11 @@ object Diag {
                     }
                     // A key can pass through here more than once (windows inside windows): count it once.
                     val id = event.downTime * 31 + event.eventTime * 7 + event.keyCode * 3 + event.repeatCount
+                    if (event.action == KeyEvent.ACTION_DOWN) lastKeyAt = SystemClock.uptimeMillis()
                     if (enabled && event.action == KeyEvent.ACTION_DOWN && id != lastKeyId) {
                         lastKeyId = id
+                        // A held OK on a card: did anything happen (a message, a question, another screen)?
+                        if ((event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER) && event.repeatCount == 1) watchLongPress(activity)
                         // Mark shortcuts: the red button, or INFO / Menu held down (some TVs keep Menu for themselves).
                         val markKey = (event.keyCode == KeyEvent.KEYCODE_PROG_RED && event.repeatCount == 0) ||
                             ((event.keyCode == KeyEvent.KEYCODE_INFO || event.keyCode == KeyEvent.KEYCODE_MENU) && event.repeatCount == 1)
@@ -554,7 +670,19 @@ object Diag {
             screen = activity.javaClass.simpleName.removeSuffix("Activity")
             if (previous.isNotEmpty() && previous != screen) log("screen", "$previous → $screen (last key ${lastKey.ifEmpty { "none" }})")
             previous = screen
+            remember()
+            resumedAt = SystemClock.uptimeMillis()
+            movedAlone = 0
             if (!enabled) return
+            // Back on a screen: is the highlight where it was when the screen was left?
+            leftPlace.remove(activity.javaClass.name)?.let { expected ->
+                val back = resumedAt
+                activity.window.decorView.postDelayed({
+                    if (activity.isFinishing || !activity.hasWindowFocus() || lastKeyAt > back) return@postDelayed
+                    val now = place(activity.currentFocus)
+                    if (now != expected) log("ui", "came back to $screen on another item: should land on $expected, landed on $now")
+                }, 2500)
+            }
             slowFrames = 0
             worstFrame = 0
             postersFailed = 0
@@ -605,6 +733,9 @@ object Diag {
         }
 
         override fun onActivityPaused(activity: Activity) {
+            activity.currentFocus?.let { leftPlace[activity.javaClass.name] = place(it) }
+            flushSmallText(screen)
+            remember()
             frames = null
             if (slowFrames > 0) log("smooth", "$screen: $slowFrames stutters (worst $worstFrame ms)")
             if (postersFailed > 0) log("ui", "$postersFailed posters failed to load on $screen")
@@ -619,17 +750,124 @@ object Diag {
             if (started == 0 && !firstStart) log("app", "came back from the background to ${activity.javaClass.simpleName.removeSuffix("Activity")}")
             if (started == 0 && !firstStart) Updates.noteReturn()
             firstStart = false
+            if (started == 0) {
+                sp.edit().putBoolean("diag_alive", true).apply()
+                main.removeCallbacks(memoryTick)
+                main.postDelayed(memoryTick, 20_000)
+            }
             started++
         }
 
         override fun onActivityStopped(activity: Activity) {
             started = (started - 1).coerceAtLeast(0)
-            if (started == 0) log("app", "went to the background from $screen")
+            if (started == 0) {
+                log("app", "went to the background from $screen")
+                sp.edit().putBoolean("diag_alive", false).apply()
+                main.removeCallbacks(memoryTick)
+            }
         }
 
         private var firstStart = true
         override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {}
+    }
+
+    // ---- The session's last known state (for "ended unexpectedly") and memory every 2 minutes ----
+
+    private fun remember() {
+        if (!::app.isInitialized) return
+        sp.edit().putString("diag_last_screen", screen).putLong("diag_last_seen", System.currentTimeMillis())
+            .putString("diag_last_keys", trail(6)).putString("diag_last_tag", settingsTag()).apply()
+    }
+
+    /** An update is about to replace the app: its end is expected, not "unexpected". */
+    fun expectExit() {
+        if (::app.isInitialized) sp.edit().putBoolean("diag_alive", false).commit()
+    }
+
+    private var memoryLoggedAt = 0L
+    private var memoryLoggedApp = 0L
+
+    private val memoryTick: Runnable = object : Runnable {
+        override fun run() {
+            if (enabled) io.execute { sampleMemory() }
+            main.postDelayed(this, 120_000)
+        }
+    }
+
+    /**
+     * The app's memory and the TV's free memory. Saved every 2 minutes (for "ended unexpectedly");
+     * written to the report when it moved by 25 MB or more, when the TV is low, or every 10 minutes.
+     */
+    private fun sampleMemory() {
+        runCatching {
+            val am = app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val info = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+            val appMb = android.os.Debug.getPss() / 1024
+            val freeMb = info.availMem / (1024 * 1024)
+            val text = "app $appMb MB · TV free $freeMb MB${if (info.lowMemory) " (low)" else ""} · on $screen"
+            sp.edit().putString("diag_last_mem", text).putLong("diag_last_seen", System.currentTimeMillis())
+                .putString("diag_last_keys", trail(6)).apply()
+            val now = System.currentTimeMillis()
+            if (kotlin.math.abs(appMb - memoryLoggedApp) >= 25 || info.lowMemory || now - memoryLoggedAt >= 600_000) {
+                memoryLoggedAt = now
+                memoryLoggedApp = appMb
+                log("memory", text)
+            }
+        }
+    }
+
+    // ---- Unexpected movements of the highlight (owner, 2026-11-07): where it should be, where it landed ----
+
+    @Volatile var lastKeyAt = 0L
+        private set
+    @Volatile private var resumedAt = 0L
+    private var movedAlone = 0
+    /** Where the highlight was when each screen was left. */
+    private val leftPlace = HashMap<String, String>()
+
+    /**
+     * Where the highlight is, in words: "row_favorites, item 2" (plus the title when titles are
+     * included in the report) for a card in a list, else the item's name ("tile_live", "play").
+     */
+    fun place(v: View?): String {
+        v ?: return "nothing"
+        var child: View = v
+        var p = v.parent
+        while (p is View && p !is androidx.recyclerview.widget.RecyclerView) { child = p; p = p.parent }
+        val list = p as? androidx.recyclerview.widget.RecyclerView ?: return viewName(v)
+        val name = if (list.id != View.NO_ID) runCatching { list.resources.getResourceEntryName(list.id) }.getOrDefault("a list") else "a list"
+        val pos = list.getChildAdapterPosition(child)
+        val text = (child as? ViewGroup)?.findViewById<TextView?>(R.id.title)?.text?.toString()
+        return "$name, item ${pos + 1}" + title(text)
+    }
+
+    /**
+     * The highlight moved with no key pressed (a list refilled, a row hidden…), well after the screen
+     * opened: logged up to 5 times per visit to a screen. Not the player (its controls come and go).
+     */
+    fun movedByItself(old: View, new: View) {
+        if (!enabled || screen == "Player") return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastKeyAt < 1500 || now - resumedAt < 3000 || movedAlone >= 5) return
+        movedAlone++
+        log("ui", "highlight moved by itself on $screen (no key pressed): should stay on ${place(old)}, landed on ${place(new)}")
+    }
+
+    /** A held OK on a card: nothing happened 1.5 s later (no message, no question, no other screen). */
+    private fun watchLongPress(activity: Activity) {
+        val focus = activity.currentFocus ?: return
+        if (place(focus).let { !it.contains(", item ") }) return
+        val at = SystemClock.uptimeMillis()
+        val where = screen
+        val card = place(focus)
+        activity.window.decorView.postDelayed({
+            when {
+                MessagePill.lastShownAt >= at -> Unit                        // a message: it did something
+                screen != where -> log("ui", "long-press OK on $where ($card) has no action of its own: it opened $screen like a normal OK")
+                !activity.isFinishing && activity.hasWindowFocus() -> log("ui", "long-press OK did nothing on $where ($card)")
+            }
+        }, 1500)
     }
 
     /** A short readable name for a view: its id, or its text. */

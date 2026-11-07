@@ -718,6 +718,20 @@ fun confirmRemoveProgress(activity: Activity, prefs: Prefs, item: StreamItem, on
         .show()
 }
 
+/** Home's Favorites row: long-press asks before removing a title from favorites. */
+fun confirmRemoveFavorite(activity: Activity, prefs: Prefs, item: StreamItem, onRemoved: () -> Unit) {
+    androidx.appcompat.app.AlertDialog.Builder(activity)
+        .setTitle("Remove from favorites?")
+        .setMessage(item.name)
+        .setPositiveButton("Remove") { _, _ ->
+            if (prefs.favoriteIds(item.type).contains(item.id)) prefs.toggleFavorite(item)
+            showToast(activity, "Removed ${item.name} from favorites", android.widget.Toast.LENGTH_SHORT)
+            onRemoved()
+        }
+        .setNegativeButton("Keep", null)
+        .show()
+}
+
 /** "7.491" -> "7.5" (favorites saved before ratings were rounded keep the raw value). */
 fun displayRating(raw: String?): String? {
     val value = raw?.toDoubleOrNull() ?: return raw
@@ -908,9 +922,27 @@ class ItemAdapter(
     /** Series with new episodes ("NEW" badge on the poster). */
     var newIds: Set<String> = emptySet()
 
+    /**
+     * New items for the list. The highlight stays on the same title: the same titles in the same
+     * order only refresh the cards in place; a changed list puts the highlight back on that title (or
+     * the same place). Refilling a row with notifyDataSetChanged threw its cards away, so coming back
+     * from a title's page moved the highlight to the row above (TV, 2026-11-07).
+     */
     fun submit(list: List<StreamItem>) {
+        val rv = recycler
+        val focusedPos = rv?.takeIf { it.hasFocus() }?.focusedChild?.let { rv.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
+        val focused = items.getOrNull(focusedPos)
+        val sameTitles = list.size == items.size && list.indices.all { list[it].id == items[it].id && list[it].type == items[it].type }
         items = list
+        if (sameTitles) {
+            notifyItemRangeChanged(0, list.size)
+            return
+        }
         notifyDataSetChanged()
+        if (focused == null || rv == null || list.isEmpty()) return
+        val at = list.indexOfFirst { it.id == focused.id && it.type == focused.type }.takeIf { it >= 0 } ?: focusedPos.coerceAtMost(list.size - 1)
+        rv.scrollToPosition(at)
+        rv.post { rv.layoutManager?.findViewByPosition(at)?.requestFocus() }
     }
 
     override fun getItemCount() = items.size

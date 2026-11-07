@@ -70,6 +70,9 @@ class DetailsActivity : AppCompatActivity() {
 
     private val isMovie get() = item.type == ContentType.MOVIE
 
+    /** When the screen opened (diagnostics: how long its content took to be ready). */
+    private val openedAt = android.os.SystemClock.uptimeMillis()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         api = Session.api(this) ?: return goToLogin()
@@ -282,7 +285,7 @@ class DetailsActivity : AppCompatActivity() {
      * shows for titles matched by name, the only ones that can be wrong.
      */
     private fun showScores(tmdb: String?, imdb: String?, releaseDate: String?, cover: String?, name: String, originalName: String? = null) {
-        if (!Ratings.hasKey) return
+        if (!Ratings.isOn) return showSimilarOnly()
         baseMeta = metaValues
         Ratings.known(item.type, item.id)?.let { scores = it; setMeta(metaValues) }
         val title = Ratings.Title(item.type, item.id, name, releaseDate?.let { Regex("(19|20)\\d{2}").find(it)?.value }, tmdb, imdb, item.image ?: cover,
@@ -296,6 +299,7 @@ class DetailsActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val found = Ratings.lookup(title, onScreen = true)
             scores = found
+            if (found != null) Diag.ready("Details", "scores", openedAt)
             setMeta(metaValues)
             // No trailer from the provider: MDBList's, when it has one (asked once more for titles
             // saved before trailers were kept).
@@ -315,7 +319,7 @@ class DetailsActivity : AppCompatActivity() {
                 showToast(this@DetailsActivity, "Scores removed. This title won't be matched again.", Toast.LENGTH_SHORT)
             }
             buttons.post { alignButtons() }
-            if (found != null || Ratings.how(item.type, item.id) == Ratings.How.ID) showExtras()
+            if (found != null || Ratings.how(item.type, item.id) == Ratings.How.ID) showExtras() else showSimilarOnly()
         }
     }
 
@@ -324,7 +328,7 @@ class DetailsActivity : AppCompatActivity() {
      * age rating and awards as chips, the next episode (series) and More like this.
      */
     private suspend fun showExtras() {
-        val e = RatingsExtras.forTitle(item.type, item.id) ?: return
+        val e = RatingsExtras.forTitle(item.type, item.id) ?: return showSimilarOnly()
         extras = e
         if (plot.text.isNullOrBlank() || plot.text.toString() == "Details unavailable.") e.description?.let { plot.text = it }
         val year = Regex("^(19|20)\\d{2}$")
@@ -396,20 +400,32 @@ class DetailsActivity : AppCompatActivity() {
             val found = if (!similar) fromMdbList else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { similarTitles(all, e) }
             if (BuildConfig.DEBUG) android.util.Log.d("Recos", "${item.name}: ${recs.size} recommended, ${fromMdbList.size} in the playlist" +
                 (if (similar) " · similar instead: ${found.size}" else "") + " · " + found.take(6).map { it.name })
-            if (found.size < 3) return@launch
+            if (found.size < 3) {
+                // Diagnostics: why the row isn't there.
+                Diag.log("ui", "More like this not shown on Details${Diag.title(item.name)}: MDBList recommended ${recs.size}, ${fromMdbList.size} in the playlist, ${found.size} similar in the same category")
+                return@launch
+            }
             findViewById<TextView>(R.id.recos_title).text = if (similar) "Similar in your playlist" else "More like this"
             val view = findViewById<RecyclerView>(R.id.recos)
             val adapter = recosAdapter ?: ItemAdapter(
                 grid = true,
                 onClick = { _, it -> startActivity(intent(this@DetailsActivity, it)) },
-                onLongClick = null,
+                // Long-press: favourite or not, straight away (as in Movies and Series), with the star.
+                onLongClick = { pos, it ->
+                    val added = prefs.toggleFavorite(it)
+                    recosAdapter?.let { a -> a.favorites = prefs.favoriteIds(it.type); a.notifyItemChanged(pos) }
+                    showToast(this@DetailsActivity, if (added) "Added ${it.name} to favorites" else "Removed ${it.name} from favorites", Toast.LENGTH_SHORT)
+                },
                 layout = R.layout.item_poster_mini,
             ).also { a ->
                 recosAdapter = a
                 view.layoutManager = RowLayoutManager(this@DetailsActivity)
                 view.adapter = a
             }
+            // The favourite star on cards that are favourites.
+            adapter.favorites = prefs.favoriteIds(item.type)
             adapter.submit(found)
+            Diag.ready("Details", if (similar) "Similar in your playlist" else "More like this", openedAt)
             if (isMovie) {
                 findViewById<View>(R.id.recos_title).visibility = View.VISIBLE
                 view.visibility = View.VISIBLE
@@ -419,6 +435,18 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
+    /** The provider's genre for this title ("Action, Drama"), for Similar in your playlist. */
+    private var pageGenre: String? = null
+
+    /**
+     * Similar in your playlist without MDBList (no key, or the title isn't matched): the same rule as
+     * when MDBList has fewer than 3 recommendations in the playlist (owner, 2026-11-07).
+     */
+    private fun showSimilarOnly() {
+        val genres = pageGenre?.split('/', ',', '&', '|')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+        showRecos(RatingsExtras.Extras(0L, null, 0, 0, genres, null, null, null, null, null, emptyList()))
+    }
+
     /** Titles like this one from the playlist: same category, most genres in common, best rated first. */
     private fun similarTitles(all: List<StreamItem>, e: RatingsExtras.Extras): List<StreamItem> {
         val me = all.firstOrNull { it.id == item.id } ?: item
@@ -426,14 +454,12 @@ class DetailsActivity : AppCompatActivity() {
         fun genresOf(s: StreamItem): Set<String> =
             (RatingsExtras.saved(s.type, s.id)?.genres ?: s.genre?.split('/', ',', '&', '|')?.map { it.trim() } ?: emptyList())
                 .map { it.lowercase() }.filter { it.isNotEmpty() }.toSet()
-        val mine = e.genres.map { it.lowercase() }.toSet() + genresOf(me)
-        // No genres known: nothing to be similar by (the category's best titles alone looked random).
-        if (mine.isEmpty()) return emptyList()
+        val mine = (e.genres + (pageGenre?.split('/', ',', '&', '|') ?: emptyList())).map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet() + genresOf(me)
+        // Most genres in common first; then, to fill the row, the same category's best rated (many
+        // provider lists carry no genre for each title, 2026-11-07).
         return all.asSequence()
             .filter { it.id != item.id && it.categoryIds.any { c -> c in cats } }
-            .map { s -> s to genresOf(s).intersect(mine).size }
-            .filter { it.second > 0 }
-            .map { (s, shared) -> s to (shared * 10 + Ratings.scoreOf(s)) }
+            .map { s -> s to (genresOf(s).intersect(mine).size * 10 + Ratings.scoreOf(s)) }
             .sortedWith(compareByDescending<Pair<StreamItem, Double>> { it.second }.thenByDescending { it.first.added })
             .map { it.first }
             .distinctBy { it.id }
@@ -545,6 +571,8 @@ class DetailsActivity : AppCompatActivity() {
                     info.duration?.takeIf { parseLength(it)?.let { ms -> ms > 0 } ?: true }?.let { durationText(it) },
                     info.genre?.takeIf { it.isNotBlank() },
                 ))
+                pageGenre = info.genre
+                Diag.ready("Details", "page", openedAt)
                 plot.text = info.plot
                 showCredits(listOfNotNull(
                     info.director?.let { "Director: $it" },
@@ -642,6 +670,8 @@ class DetailsActivity : AppCompatActivity() {
                     validYear(info.releaseDate),
                     info.genre?.takeIf { it.isNotBlank() },
                 ))
+                pageGenre = info.genre
+                Diag.ready("Details", "page", openedAt)
                 plot.text = info.plot
                 showCredits(info.cast?.let { "Cast: $it" })
                 showTrailer(info.trailer)
