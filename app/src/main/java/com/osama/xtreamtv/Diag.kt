@@ -402,6 +402,9 @@ object Diag {
         val mem = entries.filter { it.first == "memory" }.mapNotNull { Regex("app (\\d+) MB · TV free (\\d+) MB").find(it.second)?.let { m -> m.groupValues[1].toInt() to m.groupValues[2].toInt() } }
         if (mem.isNotEmpty()) line("memory", "app up to ${mem.maxOf { it.first }} MB · TV free down to ${mem.minOf { it.second }} MB")
         line("TV low on memory warnings", count("memory") { it.contains("low on memory") || it.contains("(low)") })
+        // The whole-playlist ratings fill, in counts (2.2.1).
+        RatingsFill.summaryLine()?.let { line("ratings fill", it) }
+        line("ratings fill groups in this report", count("ratings") { it.startsWith("fill: group of") && it.contains("found") })
         // Problems by the settings they happened with.
         val tags = entries.filter { it.first in setOf("ui", "freeze", "error", "crash", "ended") }
             .mapNotNull { Regex("\\[([^\\]]+)\\]\\s*$").find(it.second)?.groupValues?.get(1) }

@@ -42,9 +42,28 @@ object RatingsFill {
     private const val STEADY_MS = 15_000L
     private val RETRY_MS = longArrayOf(30_000L, 120_000L, 600_000L)
 
-    enum class State { OFF, STARTING, FILLING, BROWSING, PLAYBACK, TOMORROW, OFFLINE, DONE, BAD_KEY, STOPPED }
+    enum class State {
+        OFF, STARTING, FILLING, BROWSING, PLAYBACK, TOMORROW, OFFLINE, DONE, BAD_KEY, STOPPED,
+        /** Every title has scores; old ones are being asked again (after Refresh saved scores, or when they expire). */
+        REFRESHING,
+        /** The day's lookups are used, but ids are still being found for tomorrow. */
+        IDS_ONLY,
+    }
 
-    private class Job(val type: ContentType, val id: String, val ref: String?, val year: String?, val rank: Long)
+    private class Job(val type: ContentType, val id: String, val ref: String?, val year: String?, val rank: Long, val refresh: Boolean = false)
+
+    // This session, for the diagnostics report's summary (counts only).
+    @Volatile private var groupsSent = 0
+    @Volatile private var titlesAsked = 0
+    @Volatile private var titlesFound = 0
+    @Volatile private var providerAsked = 0
+
+    /** One line for the report's summary; null when the fill has done nothing since the app started. */
+    fun summaryLine(): String? {
+        if (total == 0 && groupsSent == 0) return null
+        return "${state.name.lowercase()} · $ready of $total ready · since the app started: $groupsSent groups ($titlesAsked titles, $titlesFound found) · " +
+            "TMDB named $tmdbFound of $tmdbAsked · provider asked $providerAsked · $noId without an id"
+    }
 
     private lateinit var app: Application
     @Volatile private var foreground = 0
@@ -249,6 +268,8 @@ object RatingsFill {
                 else -> return
             }
         }
+        // Out of lookups for today while ids are still being found: said plainly.
+        if (!canAsk && refQueue.isNotEmpty() && state == State.FILLING) state = State.IDS_ONLY
         lastStepAt = SystemClock.uptimeMillis()
     }
 
@@ -281,7 +302,7 @@ object RatingsFill {
             val kind = if (type == ContentType.MOVIE) "movie" else "show"
             val details = runCatching { Ratings.db.detailIds(pl, type) }.getOrDefault(HashMap())
             for (item in list) {
-                val (saved, savedRef) = Ratings.fillState("$pl:${type.name}:${item.id}")
+                val (saved, savedRef, answered) = Ratings.fillState("$pl:${type.name}:${item.id}")
                 if (saved == 2) { all++; done++; continue }
                 val d = details[item.id]
                 if (d?.first == RatingsDb.Detail.BAD_ID) continue
@@ -297,7 +318,8 @@ object RatingsFill {
                 val same = if (ref != null) Ratings.sameTitle(known, type, ref, if (saved == 0) item.year else null) else null
                 when {
                     same != null -> { all++; done++; reused["$pl:${type.name}:${item.id}"] = same }
-                    ref != null -> { all++; refs.add(Job(type, item.id, ref, item.year, rank)) }
+                    // An old answer being asked again stays counted as ready: its scores are still shown.
+                    ref != null -> { all++; if (saved == 1 && answered) done++; refs.add(Job(type, item.id, ref, item.year, rank, refresh = saved == 1 && answered)) }
                     // Asked before, no id; or (without a TMDB key) a series with no id in the list: left to its page.
                     d != null || (type != ContentType.MOVIE && !tmdb) -> none++
                     else -> { all++; ids.add(Job(type, item.id, null, item.year, rank)) }
@@ -325,7 +347,7 @@ object RatingsFill {
             val j = it.next()
             if (j.type == head.type && j.ref!!.startsWith("$family/")) { taken.add(j); it.remove() }
         }
-        state = State.FILLING
+        state = if (taken.all { it.refresh } && idQueue.isEmpty() && providerQueue.isEmpty()) State.REFRESHING else State.FILLING
         val r = Ratings.fillBatch(pl, head.type, taken.map { Triple(it.id, it.ref!!, it.year) })
         lastBatchAt = SystemClock.uptimeMillis()
         if (r.code != 200) {
@@ -341,8 +363,9 @@ object RatingsFill {
         }
         fails = 0
         for (id in r.badIds) runCatching { Ratings.db.markBadId("$pl:${head.type.name}:$id") }
-        ready += taken.size - r.badIds.size
+        ready += taken.count { !it.refresh } - r.badIds.size
         total -= r.badIds.size
+        groupsSent++; titlesAsked += taken.size; titlesFound += r.found
         refsLeft = refQueue.size
         Ratings.announce(r.changed)
         note("fill: group of ${taken.size}: ${r.found} found")
@@ -379,7 +402,9 @@ object RatingsFill {
                 tmdbFound++
                 val key = "$pl:${job.type.name}:${job.id}"
                 runCatching { Ratings.db.putDetail(key, RatingsDb.Detail(RatingsDb.Detail.OK, f.id, null, f.cast?.take(600), f.director?.take(200), f.genres?.take(200), f.year, f.minutes, "tmdb")) }
-                gotRef(pl, job, "tmdb/${if (job.type == ContentType.MOVIE) "movie" else "show"}/${f.id}", job.year ?: f.year.takeIf { it > 0 }?.toString())
+                val ref = "tmdb/${if (job.type == ContentType.MOVIE) "movie" else "show"}/${f.id}"
+                Ratings.noteTmdb(key, ref)
+                gotRef(pl, job, ref, job.year ?: f.year.takeIf { it > 0 }?.toString())
             }
         }
         fails = 0
@@ -398,7 +423,8 @@ object RatingsFill {
 
     /** A title's id is known now: the same title's saved answer is used, or it joins the next MDBList group. */
     private fun gotRef(pl: String, job: Job, ref: String, year: String?) {
-        val same = Ratings.sameTitle(Ratings.freshByRefCached(), job.type, ref, year)
+        val named = Ratings.howAt("$pl:${job.type.name}:${job.id}") == Ratings.How.TMDB
+        val same = Ratings.sameTitle(Ratings.freshByRefCached(), job.type, ref, year, if (named) Ratings.How.TMDB else Ratings.How.ID)
         if (same != null) {
             Ratings.adopt(mapOf("$pl:${job.type.name}:${job.id}" to same))
             Ratings.announce(setOf("${job.type.name}:${job.id}"))
@@ -415,6 +441,7 @@ object RatingsFill {
         if (job.type != ContentType.MOVIE) { total--; noId++; counts(); return }
         val api = Session.api(app) ?: run { providerQueue.addFirst(job); return }
         state = State.FILLING
+        providerAsked++
         val info = try {
             kotlinx.coroutines.runBlocking { api.vodInfo(job.id) }
         } catch (e: IOException) {

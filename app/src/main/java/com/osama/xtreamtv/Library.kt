@@ -24,11 +24,20 @@ import java.io.IOException
  * is copied aside (the last one only), for "Undo last change".
  */
 object Library {
-    const val FILE_NAME = "xtream-tv-library.xtlib"
+    private const val FILE_START = "xtream-tv-library"
+    private const val FILE_END = ".xtlib"
+
+    /** "xtream-tv-library-2026-11-11.xtlib": the date in the name, so a new backup doesn't replace an older one. */
+    fun fileName(): String = FILE_START + "-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) + FILE_END
     private const val SCHEMA = "2"
 
     /** Used when the TV has no file picker: the app's own folder (no permission needed). */
-    fun fallbackFile(context: Context): File = File(context.getExternalFilesDir(null) ?: context.filesDir, FILE_NAME)
+    fun fallbackFile(context: Context): File = File(context.getExternalFilesDir(null) ?: context.filesDir, fileName())
+
+    /** Without a file picker: the newest library file in the app's own folder, or null. */
+    fun newestFallback(context: Context): File? =
+        (context.getExternalFilesDir(null) ?: context.filesDir).listFiles { f -> f.isFile && f.name.startsWith(FILE_START) && f.name.endsWith(FILE_END) }
+            ?.maxByOrNull { it.lastModified() }
 
     private fun dbFile(context: Context) = context.getDatabasePath("titles.db")
     private fun undoFile(context: Context) = File(context.filesDir, "library-undo.db")

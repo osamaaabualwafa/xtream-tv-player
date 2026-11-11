@@ -171,7 +171,11 @@ object Ratings {
     // ---- Saved scores ----
 
     /** How a title was matched. */
-    enum class How { ID, NAME, NONE, WRONG }
+    enum class How {
+        ID, NAME, NONE, WRONG,
+        /** Recognised by TMDB from its name, year and poster (2.2.1: counted apart from the provider's own ids). */
+        TMDB,
+    }
 
     class Entry(
         val imdb: String?, val tomatoes: Int?, val at: Long, val how: How, val ref: String?,
@@ -419,16 +423,16 @@ object Ratings {
     // ---- The whole-playlist fill's side ([RatingsFill]) ----
 
     /** For the fill's queue: 0 = nothing saved, 1 = saved but old, 2 = fresh or a wrong match (skip); and the saved reference. */
-    internal fun fillState(key: String): Pair<Int, String?> {
-        val e = synchronized(cache) { cache[key] } ?: return 0 to null
-        return (if (e.how == How.WRONG || isFresh(e)) 2 else 1) to e.ref
+    internal fun fillState(key: String): Triple<Int, String?, Boolean> {
+        val e = synchronized(cache) { cache[key] } ?: return Triple(0, null, false)
+        return Triple(if (e.how == How.WRONG || isFresh(e)) 2 else 1, e.ref, e.scores != null)
     }
 
     /** Every fresh answer by its MDBList reference ("tmdb/movie/123"), from all playlists: for [sameTitle]. */
     internal fun freshByRef(): HashMap<String, Entry> {
         val map = HashMap<String, Entry>()
         synchronized(cache) {
-            for (e in cache.values) if (e.ref != null && (e.how == How.ID || e.how == How.NAME) && isFresh(e)) map[e.ref] = e
+            for (e in cache.values) if (e.ref != null && (e.how == How.ID || e.how == How.NAME || e.how == How.TMDB) && isFresh(e)) map[e.ref] = e
         }
         return map
     }
@@ -438,10 +442,10 @@ object Ratings {
      * instead of asking MDBList again; null when there is none, or the list's year says the id is
      * another film's.
      */
-    internal fun sameTitle(index: Map<String, Entry>, type: ContentType, ref: String, listYear: String?): Entry? {
+    internal fun sameTitle(index: Map<String, Entry>, type: ContentType, ref: String, listYear: String?, how: How = How.ID): Entry? {
         val e = index[ref] ?: return null
         if (contradictsYear(type, listYear, e.year)) return null
-        return Entry(e.imdb, e.tomatoes, e.at, How.ID, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked, e.poster, e.posterChecked)
+        return Entry(e.imdb, e.tomatoes, e.at, how, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked, e.poster, e.posterChecked)
     }
 
     /** Test builds: the database's size in counts ("titles, works, people, genres"), never its contents. */
@@ -455,6 +459,23 @@ object Ratings {
         refIndex?.let { if (now - it.first < 60_000) return it.second }
         return freshByRef().also { refIndex = now to it }
     }
+
+    /**
+     * TMDB has named this title: remembered at once, with no answer yet (the fill asks MDBList for its
+     * scores next), so it is counted as found through TMDB and its page uses the id straight away.
+     */
+    internal fun noteTmdb(key: String, ref: String) {
+        synchronized(cache) {
+            val have = cache[key]
+            if (have != null && have.how != How.NONE) return
+            cache[key] = Entry(null, null, 0L, How.TMDB, ref)
+            dirty.add(key)
+        }
+        save()
+    }
+
+    /** How a title was matched (full key), or null. */
+    internal fun howAt(key: String): How? = synchronized(cache) { cache[key]?.how }
 
     /** Saves answers taken from [sameTitle] (full keys: playlist:TYPE:id). */
     internal fun adopt(rows: Map<String, Entry>) = putAll(rows)
@@ -502,7 +523,7 @@ object Ratings {
                 if (saved?.how == How.WRONG) continue
                 // An id that belongs to a title of another year: left to the title's page (a name search).
                 if (saved?.ref == null && contradictsYear(type, t.third, media.optInt("year", 0))) { bad.add(t.first); continue }
-                rows[key] = entryFrom(media, if (saved?.how == How.NAME) How.NAME else How.ID, t.second)
+                rows[key] = entryFrom(media, if (saved?.how == How.NAME || saved?.how == How.TMDB) saved.how else How.ID, t.second)
                 changed.add("${type.name}:${t.first}")
             }
         }
@@ -685,13 +706,18 @@ object Ratings {
         RatingsFill.rebuild()
     }
 
-    class Matching(val byId: Int, val byName: Int, val notFound: Int, val wrong: Int)
+    class Matching(val byId: Int, val byName: Int, val notFound: Int, val wrong: Int, val byTmdb: Int = 0)
+
+    /** "4,937 by ID · 310 by TMDB · 9 by name · 130 not found" (the TMDB part only when there are any). */
+    fun matchingText(m: Matching) = "${m.byId} by ID · " + (if (m.byTmdb > 0) "${m.byTmdb} by TMDB · " else "") + "${m.byName} by name · ${m.notFound} not found"
 
     /** Check matching: the titles of the open playlist, by how they were matched. */
     fun matching(): Matching {
         val prefix = "${Prefs(app).activeId ?: "legacy"}:"
         val list = synchronized(cache) { cache.filterKeys { it.startsWith(prefix) }.values.toList() }
-        return Matching(list.count { it.how == How.ID }, list.count { it.how == How.NAME }, list.count { it.how == How.NONE }, list.count { it.how == How.WRONG })
+        // A title TMDB has named but MDBList has not answered for yet is not counted: it has no answer.
+        return Matching(list.count { it.how == How.ID }, list.count { it.how == How.NAME }, list.count { it.how == How.NONE }, list.count { it.how == How.WRONG },
+            list.count { it.how == How.TMDB && it.at > 0 })
     }
 
     // ---- Posters on screen ----
@@ -831,7 +857,7 @@ object Ratings {
                             wrongListId.add("${item.type.name}:$id")
                             continue
                         }
-                        val how = if (entry(item.type, id)?.how == How.NAME) How.NAME else How.ID
+                        val how = entry(item.type, id)?.how?.takeIf { it == How.NAME || it == How.TMDB } ?: How.ID
                         val e = entryFrom(media, how, "tmdb/$kind/$tmdb")
                         put(item.type, id, e)
                         changed.add("${item.type.name}:$id")
@@ -901,6 +927,7 @@ object Ratings {
                 Diag.log("ratings", when (result.how) {
                     How.ID -> "found by id"
                     How.NAME -> "found by name and year"
+                    How.TMDB -> "found through TMDB"
                     else -> "not found"
                 })
                 result.scores
@@ -937,7 +964,12 @@ object Ratings {
                     trace("$label · by id $idRef -> year ${media.optInt("year")} isn't ${t.year}: searched by name instead")
                     return if (findByName) byName(key, t) else Entry(null, null, System.currentTimeMillis(), How.NONE, null)
                 }
-                return entryFrom(media, if ((ref != null || fromTmdb != null) && t.tmdb == null && t.imdb == null) How.NAME else How.ID, idRef)
+                val how = when {
+                    fromTmdb != null -> How.TMDB
+                    ref != null && t.tmdb == null && t.imdb == null -> entry(t.type, t.id)?.how?.takeIf { it == How.TMDB } ?: How.NAME
+                    else -> How.ID
+                }
+                return entryFrom(media, how, idRef)
                     .also { trace("$label · by id $idRef -> imdb ${it.imdb ?: "-"} · rt ${it.tomatoes ?: "-"}") }
             }
             trace("$label · by id $idRef -> answer $code")

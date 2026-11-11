@@ -344,7 +344,7 @@ class DetailsActivity : AppCompatActivity() {
                 Ratings.trailer(item.type, item.id)?.let { showTrailer(it); buttons.post { alignButtons() } }
             }
             val wrong = findViewById<Button?>(R.id.wrong_scores) ?: return@launch
-            wrong.visibility = if (found != null && Ratings.how(item.type, item.id) == Ratings.How.NAME) View.VISIBLE else View.GONE
+            wrong.visibility = if (found != null && Ratings.how(item.type, item.id).let { it == Ratings.How.NAME || it == Ratings.How.TMDB }) View.VISIBLE else View.GONE
             wrong.setOnClickListener {
                 Ratings.markWrong(item.type, item.id)
                 scores = null

@@ -63,9 +63,7 @@ def home_layouts(name):
 
 
 def settings(name):
-    home(home_style=2)
-    press(U, RT, OK)
-    reach("SettingsActivity")
+    open_settings()                   # the old way in (Side layout: Up, Right, OK) no longer reached Settings
     press(RT, D, D, L)                # Home layout
     for _ in range(5):                # Movies, Ratings, Player, Look, Playlists
         press(D, RT, D, D, L)

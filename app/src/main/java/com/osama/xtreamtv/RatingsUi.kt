@@ -427,6 +427,7 @@ button{width:100%;font-size:17px;font-weight:600;padding:14px;border:0;border-ra
             c.line("The titles of this playlist looked up so far", 13f)
             val boxes = c.row(c.dp(14))
             c.box(boxes, "By ID", m.byId.toString(), 1f)
+            if (m.byTmdb > 0) c.box(boxes, "By TMDB", m.byTmdb.toString(), 1f)
             c.box(boxes, "By name", m.byName.toString(), 1f)
             c.box(boxes, "Not found", m.notFound.toString(), 1f)
             if (m.wrong > 0) c.box(boxes, "Marked wrong", m.wrong.toString(), 1.2f)

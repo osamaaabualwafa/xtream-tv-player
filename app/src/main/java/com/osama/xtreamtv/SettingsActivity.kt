@@ -365,6 +365,13 @@ class SettingsActivity : AppCompatActivity() {
                         text = value
                         textSize = 17f
                         setTextColor(warn ?: themeColor(R.attr.appText))
+                        // A long number ("13957") stays on one line: it shrinks to fit its box instead of
+                        // breaking in two at the biggest text sizes (size check, 2026-11-11).
+                        // (maxLines, not singleLine: a single-line field scrolls sideways and never shrinks.)
+                        maxLines = 1
+                        ellipsize = null
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(this, 8, 17, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
                     })
                 })
             }
@@ -534,7 +541,7 @@ class SettingsActivity : AppCompatActivity() {
             startAction("Refresh saved scores", R.drawable.ic_glass_refresh, "r_refresh") {
                 // Asks first (2026-11-10: pressed to see what it does, and the whole playlist started again from 0).
                 val m = Ratings.matching()
-                val lookups = (m.byId + m.byName + RatingsFill.BATCH - 1) / RatingsFill.BATCH
+                val lookups = (m.byId + m.byTmdb + m.byName + RatingsFill.BATCH - 1) / RatingsFill.BATCH
                 confirm(
                     "Refresh saved scores?",
                     "Every saved score is asked again from MDBList" + (if (lookups > 0) ", about $lookups of today's lookups" else "") + ". " +
@@ -593,12 +600,12 @@ class SettingsActivity : AppCompatActivity() {
         small("No ID: the same name and year, and the same poster.", top = 0)
         run {
             val m = Ratings.matching()
-            val tried = m.byId + m.byName + m.notFound
+            val tried = m.byId + m.byTmdb + m.byName + m.notFound
             val u = Ratings.usage()
             val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(u?.resetsAt ?: System.currentTimeMillis()))
             linkRow("Today", "Resets at $at · scores kept 7 to 30 days", u?.let { "${"%,d".format(it.used)} of ${"%,d".format(it.limit)}" } ?: "–", "r_today",
                 tint = if (u != null && u.used * 10 >= u.limit * 8) DiagUi.YELLOW else null, onClick = null)
-            linkRow("Matching so far", if (tried == 0) "Nothing looked up yet" else "${m.byId} by ID · ${m.byName} by name · ${m.notFound} not found", null, "r_tried", onClick = null)
+            linkRow("Matching so far", if (tried == 0) "Nothing looked up yet" else Ratings.matchingText(m), null, "r_tried", onClick = null)
             addDivider(target ?: body)
             (target ?: body).addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) })
             startAction("Check matching", R.drawable.ic_glass_check, "r_check") { RatingsUi.matching(this) }
@@ -717,7 +724,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun backUpLibrary() {
         if (Library.hasFilePicker(this, android.content.Intent.ACTION_CREATE_DOCUMENT)) {
             try {
-                createLibrary.launch(Library.FILE_NAME)
+                createLibrary.launch(Library.fileName())
                 return
             } catch (e: android.content.ActivityNotFoundException) {
                 // fall through to the app folder
@@ -740,13 +747,13 @@ class SettingsActivity : AppCompatActivity() {
                 // fall through to the app folder
             }
         }
-        val file = Library.fallbackFile(this)
-        if (file.exists()) {
+        val file = Library.newestFallback(this)
+        if (file != null) {
             restoreLibrary { tmp -> file.copyTo(tmp, overwrite = true) }
         } else {
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("No library data file found")
-                .setMessage("This TV has no file picker. Put the file here, then choose Restore again:\n${file.absolutePath}")
+                .setMessage("This TV has no file picker. Put the file in this folder, then choose Restore again:\n${Library.fallbackFile(this).parentFile?.absolutePath}")
                 .setPositiveButton("OK", null)
                 .show()
         }
@@ -918,6 +925,8 @@ class SettingsActivity : AppCompatActivity() {
                     RatingsFill.State.OFF -> (if (Ratings.fillWhole) "●  Off · ratings are off" else "●  Off · switched off") to grey
                     RatingsFill.State.STARTING -> "●  Starting · playlist loading" to grey
                     RatingsFill.State.FILLING -> "●  Filling · ${about(p.secondsLeft)}" to DiagUi.GREEN
+                    RatingsFill.State.REFRESHING -> "●  Refreshing scores · ${about(p.secondsLeft)}" to DiagUi.GREEN
+                    RatingsFill.State.IDS_ONLY -> "●  Daily limit reached · still finding IDs" to DiagUi.YELLOW
                     RatingsFill.State.BROWSING -> "●  Paused · remote in use" to grey
                     RatingsFill.State.PLAYBACK -> "●  Paused · something is playing" to grey
                     RatingsFill.State.TOMORROW -> "●  Waiting · daily limit reached" to DiagUi.YELLOW
@@ -936,7 +945,7 @@ class SettingsActivity : AppCompatActivity() {
                             if (u.used * 10 >= u.limit * 8) DiagUi.YELLOW else null)
                     }
                     val m = Ratings.matching()
-                    if (m.byId + m.byName + m.notFound > 0) setRow("r_tried", "Matching so far", "${m.byId} by ID · ${m.byName} by name · ${m.notFound} not found", "", null)
+                    if (m.byId + m.byTmdb + m.byName + m.notFound > 0) setRow("r_tried", "Matching so far", Ratings.matchingText(m), "", null)
                 }
                 host.postDelayed(this, 1000)
             }

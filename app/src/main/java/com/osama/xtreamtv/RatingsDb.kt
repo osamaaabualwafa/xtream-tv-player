@@ -139,6 +139,8 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
                     )
                     val ref = e.ref ?: continue
                     if (e.how == Ratings.How.WRONG) continue
+                    // Named by TMDB, no answer yet: the work's own row (another title may share it) is left alone.
+                    if (e.at == 0L && e.imdb == null && e.tomatoes == null) continue
                     db.execSQL("INSERT OR IGNORE INTO works (ref) VALUES (?)", arrayOf(ref))
                     db.update("works", ContentValues().apply {
                         put("imdb", e.imdb); put("rt", e.tomatoes); put("at", e.at)
