@@ -60,6 +60,9 @@ class T04_MoviesTest : QaTest() {
         Qa.expect(PlayerActivity::class.java, "movie player")
         Qa.expectPlaying("the movie")
         Qa.shot("movie_playing", "Movie playing")
+        // Resume and Continue watching only keep a movie after 30 s of watching (shorter visits are
+        // dropped, by design): most of that is watched here, the rest after the jump below.
+        SystemClock.sleep(20_000)
 
         Qa.step("OK shows the controls")
         Qa.ok()
@@ -77,15 +80,21 @@ class T04_MoviesTest : QaTest() {
         val after = Qa.player()?.positionMs ?: 0
         Qa.shot("after_seek", "After pressing Right (jump forward)")
         if (after - before < 5000) Qa.finding("problem", "Right didn't jump forward in a movie", "Position $before ms -> $after ms")
+        // Back again, so the 45 s test movie isn't near its end (its last 5% counts as finished).
+        Qa.left()
+        Qa.settle(1000)
 
         Qa.step("pause")
-        Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-        Qa.settle(1500)
+        // OK (above) shows the controls and pauses, by design: Play/Pause is only pressed when it plays.
+        if (Qa.player()?.playing == true) {
+            Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            Qa.settle(1500)
+        }
         assertTrue("Paused", Qa.player()?.playing == false)
         Qa.shot("movie_paused", "Movie paused")
         Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         Qa.expectPlaying("movie after un-pausing")
-        SystemClock.sleep(4000)
+        SystemClock.sleep(8000)
 
         Qa.step("Back saves the position; details now offer Resume")
         Qa.leavePlayer()

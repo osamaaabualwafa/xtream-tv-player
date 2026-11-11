@@ -935,7 +935,9 @@ class ItemAdapter(
         val sameTitles = list.size == items.size && list.indices.all { list[it].id == items[it].id && list[it].type == items[it].type }
         items = list
         if (sameTitles) {
-            notifyItemRangeChanged(0, list.size)
+            // With a payload the cards are refreshed in place (without one, a card can be swapped for
+            // another during the change, and the highlight on it is lost).
+            notifyItemRangeChanged(0, list.size, "refresh")
             return
         }
         notifyDataSetChanged()
@@ -976,7 +978,13 @@ class ItemAdapter(
     /** Pictures already asked for (so scrolling back and forth doesn't ask again). */
     private val prefetched = HashSet<String>()
 
-    private fun loadPoster(holder: VH, url: String?) {
+    /**
+     * The card's picture: the provider's, or MDBList's poster when the provider has none or its
+     * link is dead (known only for titles whose scores are saved).
+     */
+    private fun loadPoster(holder: VH, item: StreamItem) {
+        val own = item.image?.takeIf { it.isNotBlank() }
+        val url = own ?: Ratings.posterFor(item)
         holder.image.load(url) {
             // Short fade over a still placeholder: a moving shimmer on every card still loading,
             // plus long fades, keep the whole grid redrawing while it scrolls.
@@ -984,6 +992,14 @@ class ItemAdapter(
             placeholder(PLACEHOLDER_TINT)
             error(R.drawable.placeholder)
             fallback(R.drawable.placeholder)
+            if (own != null) listener(onError = { _, _ ->
+                val other = Ratings.posterFor(item) ?: return@listener
+                // Still the same title on this card (cards are reused while scrolling).
+                if (items.getOrNull(holder.bindingAdapterPosition) === item) holder.image.load(other) {
+                    placeholder(PLACEHOLDER_TINT)
+                    error(R.drawable.placeholder)
+                }
+            })
         }
     }
 
@@ -1090,7 +1106,7 @@ class ItemAdapter(
             }
         }
         holder.fav?.visibility = if (favorites.contains(item.id)) View.VISIBLE else View.GONE
-        loadPoster(holder, item.image)
+        loadPoster(holder, item)
         prefetchAhead(holder, position)
         holder.itemView.setOnClickListener {
             val p = holder.bindingAdapterPosition

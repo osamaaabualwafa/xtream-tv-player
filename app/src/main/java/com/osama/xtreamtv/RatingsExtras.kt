@@ -34,6 +34,10 @@ object RatingsExtras {
         val last: Episode?,
         /** The recommended titles, best first: "TMDB id<TAB>title" (older saves: the id only). */
         val recs: List<String>,
+        /** MDBList's poster link: used when the provider has no picture, or its picture doesn't load. */
+        val poster: String? = null,
+        /** False for extras saved before posters were kept: asked again once. */
+        val posterChecked: Boolean = true,
     ) {
         // Saved before recommendations kept their titles (2026-11-07): asked again once. Kept a week;
         // once the listed next episode has aired, asked again at most once a day until MDBList moves on
@@ -41,14 +45,14 @@ object RatingsExtras {
         val fresh: Boolean get() {
             val now = System.currentTimeMillis()
             if (recs.isNotEmpty() && !recs.first().contains('\t')) return false
-            if (now - at >= WEEK_MS) return false
+            if (now - at >= WEEK_MS || !posterChecked) return false
             val aired = next != null && next.airAt > 0 && next.airAt <= now
             return !aired || now - at < DAY_MS
         }
 
         fun toJson() = JSONObject().put("a", at).put("d", description).put("y", year).put("r", runtime)
             .put("g", JSONArray(genres)).put("c", certification).put("w", awards).put("st", status)
-            .put("n", next?.toJson()).put("l", last?.toJson()).put("rc", JSONArray(recs))
+            .put("n", next?.toJson()).put("l", last?.toJson()).put("rc", JSONArray(recs)).put("p", poster ?: "")
     }
 
     private lateinit var app: Context
@@ -72,7 +76,7 @@ object RatingsExtras {
         fun list(a: JSONArray?) = (0 until (a?.length() ?: 0)).mapNotNull { a?.optString(it)?.takeIf { s -> s.isNotEmpty() } }
         fun str(k: String) = e.optString(k).takeIf { it.isNotEmpty() && it != "null" }
         return Extras(e.optLong("a"), str("d"), e.optInt("y"), e.optInt("r"), list(e.optJSONArray("g")), str("c"), str("w"), str("st"),
-            ep(e.optJSONObject("n")), ep(e.optJSONObject("l")), list(e.optJSONArray("rc")))
+            ep(e.optJSONObject("n")), ep(e.optJSONObject("l")), list(e.optJSONArray("rc")), str("p"), e.has("p"))
     }
 
     /** Written on the ratings' one save thread, so two saves never mix in the same file. */
@@ -125,7 +129,7 @@ object RatingsExtras {
         // Shows: "runtime" is the whole series; only a movie's length is shown.
         val runtime = if (m.optString("type") == "movie") m.optInt("runtime") else 0
         return Extras(System.currentTimeMillis(), s("description"), m.optInt("year"), runtime, genres, s("certification"), s("awards"), s("status"),
-            ep(m.optJSONObject("next_episode")), ep(m.optJSONObject("last_episode")), recs)
+            ep(m.optJSONObject("next_episode")), ep(m.optJSONObject("last_episode")), recs, s("poster")?.takeIf { it.startsWith("http") })
     }
 
     private fun parseDate(text: String): Long? = runCatching {

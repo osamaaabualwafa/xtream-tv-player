@@ -163,11 +163,11 @@ class HomeActivity : AppCompatActivity() {
                     vh.subtitle.visibility = View.VISIBLE
                 }
             })
-        recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
-        recentSeriesAdapter = row(R.id.row_recent_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
-        newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
-        topRatedAdapter = row(R.id.row_top_rated, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
-        topSeriesAdapter = row(R.id.row_top_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) })
+        recentAdapter = row(R.id.row_recent, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        recentSeriesAdapter = row(R.id.row_recent_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        topRatedAdapter = row(R.id.row_top_rated, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        topSeriesAdapter = row(R.id.row_top_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
         backdrop = FocusBackdrop.attach(this)
         setupFeatured()
 
@@ -184,6 +184,30 @@ class HomeActivity : AppCompatActivity() {
         intent.getStringExtra(WatchNext.EXTRA_RESUME_KEY)?.let { key ->
             intent.removeExtra(WatchNext.EXTRA_RESUME_KEY)
             resume(key)
+        }
+    }
+
+    /**
+     * Long-press on a poster in Recently added, New episodes and Top rated: add or remove a favorite,
+     * as in Movies and Series (16.1: these rows had no long-press, and Top rated showed no star).
+     * Continue watching and the Favorites row keep their own long-press (remove, after asking).
+     */
+    private fun toggleHomeFavorite(@Suppress("UNUSED_PARAMETER") position: Int, item: StreamItem) {
+        val added = prefs.toggleFavorite(item)
+        showToast(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT)
+        refreshStars()
+        loadLocalRows()
+    }
+
+    /** The favorite star on every Home poster row, from the saved favorites. */
+    private fun refreshStars() {
+        if (!::topSeriesAdapter.isInitialized) return
+        val movies = prefs.favoriteIds(ContentType.MOVIE)
+        val series = prefs.favoriteIds(ContentType.SERIES)
+        for ((a, ids) in listOf(recentAdapter to movies, topRatedAdapter to movies, recentSeriesAdapter to series, newAdapter to series, topSeriesAdapter to series)) {
+            if (a.favorites == ids) continue
+            a.favorites = ids
+            a.notifyItemRangeChanged(0, a.itemCount, "fav")
         }
     }
 
@@ -208,6 +232,7 @@ class HomeActivity : AppCompatActivity() {
         }
         loadLocalRows()
         loadNewEpisodes()
+        refreshStars()
         prepareSections()
         // Scores found while away (a title's page, pre-fill) show on the cards already there.
         for (a in listOf(newAdapter, recentAdapter, recentSeriesAdapter, topRatedAdapter, topSeriesAdapter)) a.notifyItemRangeChanged(0, a.itemCount, "scores")
@@ -447,6 +472,7 @@ class HomeActivity : AppCompatActivity() {
     /** Pre-fill (1.1E): after a minute without a key press on Home, the rows' scores are asked for. */
     private var lastKeyAt = 0L
     private var prefillJob: kotlinx.coroutines.Job? = null
+    private var topRatedAt = -1L
     private val prefillCheck = object : Runnable {
         override fun run() {
             val idle = android.os.SystemClock.uptimeMillis() - lastKeyAt >= 60_000
@@ -456,9 +482,12 @@ class HomeActivity : AppCompatActivity() {
                     addAll(prefs.favorites(ContentType.MOVIE))
                     addAll(prefs.favorites(ContentType.SERIES))
                 }
-                prefillJob = lifecycleScope.launch {
-                    Ratings.prefill(api, items)
-                    loadTopRated()
+                // The whole-playlist fill does the asking now; Home only names its rows (filled early)
+                // and redraws Top rated when scores have changed.
+                RatingsFill.homeRows(items)
+                if (Ratings.version != topRatedAt) {
+                    topRatedAt = Ratings.version
+                    prefillJob = lifecycleScope.launch { loadTopRated() }
                 }
             }
             window.decorView.postDelayed(this, 60_000)
@@ -845,6 +874,7 @@ class HomeActivity : AppCompatActivity() {
                 val ids = prefs.newEpisodeSeries(all)
                 val items = all.filter { it.id in ids }.sortedByDescending { it.added }
                 newAdapter.newIds = ids
+                newAdapter.favorites = prefs.favoriteIds(ContentType.SERIES)
                 favoritesAdapter.newIds = ids
                 favoritesAdapter.notifyItemRangeChanged(0, favoritesAdapter.itemCount, "new")
                 showRow(R.id.row_new, R.id.row_new_title, newAdapter, items)
@@ -878,6 +908,7 @@ class HomeActivity : AppCompatActivity() {
             try {
                 val all = allStreams(type).await()
                 val top = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all, 20) }
+                adapter.favorites = prefs.favoriteIds(type)
                 showRow(rowId, titleId, adapter, if (top.size >= 6) top else emptyList())
             } catch (e: CancellationException) {
                 throw e

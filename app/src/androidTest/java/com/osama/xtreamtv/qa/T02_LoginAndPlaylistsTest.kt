@@ -209,7 +209,8 @@ class T02_LoginAndPlaylistsTest : QaTest() {
         Qa.reset(users = listOf("demo"))
         Qa.launchApp()
         Qa.expect(HomeActivity::class.java, "Home")
-        Qa.focusId(R.id.logout, "Log out / switch")
+        // The Playlists button at the bottom of Home went in 1.3.0: the chip at the top opens the chooser.
+        Qa.focusId(R.id.playlist_chip, "Playlists chip")
         Qa.ok()
         Qa.expect(PlaylistsActivity::class.java, "playlist chooser after logging out")
         Qa.shot("after_logout", "After logging out")

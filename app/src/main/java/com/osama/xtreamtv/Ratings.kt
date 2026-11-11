@@ -54,7 +54,35 @@ object Ratings {
     fun init(application: Application) {
         app = application
         RatingsExtras.init(application)
+        Tmdb.init(application)
+        // The saved scores are read (and, once, moved out of the old file) before a screen asks for them.
+        saver.execute { runCatching { cache.size } }
+        RatingsFill.init(application)
     }
+
+    /** Test builds: a stand-in MDBList on this device (the stress test). Never set in a release build. */
+    @Volatile internal var baseForTests: String? = null
+
+    /** Whole-playlist fill (work list, Section 5): on by default once a key works. */
+    var fillWhole: Boolean
+        get() = sp.getBoolean("fill_whole", true)
+        set(value) = sp.edit().putBoolean("fill_whole", value).apply()
+
+    /** Off: the fill waits while a video plays. */
+    var fillDuringPlayback: Boolean
+        get() = sp.getBoolean("fill_playing", true)
+        set(value) = sp.edit().putBoolean("fill_playing", value).apply()
+
+    /**
+     * The fill may ask the provider for a movie's details when its id is not known any other way
+     * (one every 5 s). Off: only TMDB is used, and what it can't name is left to the title's page.
+     */
+    var askProvider: Boolean
+        get() = sp.getBoolean("fill_provider", true)
+        set(value) = sp.edit().putBoolean("fill_provider", value).apply()
+
+    /** Goes up whenever a saved score changes (Home's Top rated rows read it). */
+    val version: Long get() = scoresVersion
 
     // ---- Settings ----
 
@@ -95,11 +123,17 @@ object Ratings {
     fun looksLikeKey(text: String): Boolean = text.trim().length in 10..80 && text.trim().all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
     /** Remove key: ratings off, the key and every saved score gone. */
-    fun removeKey() {
+    fun removeKey(keepTmdb: Boolean = false) {
+        // Both keys live in this file: the TMDB key is put back when only the MDBList key goes.
+        val tmdb = if (keepTmdb) Tmdb.key else null
+        val tmdbOk = Tmdb.keyWorks
         sp.edit().clear().apply()
-        synchronized(cache) { cache.clear() }
+        if (tmdb != null) sp.edit().putString("tmdb_key", tmdb).putBoolean("tmdb_ok", tmdbOk).apply()
+        synchronized(cache) { cache.clear(); dirty.clear() }
         scoresVersion++
         cacheFile.delete()
+        saver.execute { runCatching { db.clearRatings() } }
+        RatingsFill.reset()
         RatingsExtras.clear()
     }
 
@@ -126,13 +160,13 @@ object Ratings {
         sp.edit().putInt("u_used", used).putInt("u_limit", limit).putLong("u_reset", resetsAt ?: nextUtcMidnight()).apply()
     }
 
-    private fun left(): Int {
+    internal fun left(): Int {
         val u = usage() ?: return Int.MAX_VALUE
         return u.limit - u.used
     }
 
     /** Daily limit reached (429): nothing more until MDBList's day ends. */
-    private fun blockedUntil() = sp.getLong("blocked_until", 0L)
+    internal fun blockedUntil() = sp.getLong("blocked_until", 0L)
 
     // ---- Saved scores ----
 
@@ -150,15 +184,38 @@ object Ratings {
         val award: String? = null,
         /** False for titles saved before awards were kept: posters ask once more (in a group). */
         val awardChecked: Boolean = true,
+        /** MDBList's poster link, for titles the provider gives no picture (or a dead one). */
+        val poster: String? = null,
+        /** False for titles saved before posters were kept: asked once more when the list has no picture. */
+        val posterChecked: Boolean = true,
     ) {
         val scores get() = RatingBadges.Scores(imdb, tomatoes).takeIf { !it.isEmpty }
         fun toJson() = JSONObject().put("i", imdb).put("t", tomatoes).put("a", at).put("h", how.name).put("r", ref)
             .apply { if (trailerChecked) put("v", trailer ?: "") }
             .apply { if (year > 0) put("y", year) }
             .apply { if (awardChecked) put("w", award ?: "") }
+            .apply { if (posterChecked) put("ps", poster ?: "") }
     }
 
+    internal val db by lazy { RatingsDb(app) }
+
+    /**
+     * Every saved answer, in memory (screens read from here, never from the database). Read from the
+     * database; the first time after the update, the old file is moved into it and deleted.
+     */
     private val cache: HashMap<String, Entry> by lazy {
+        val map = runCatching { db.loadRatings() }.getOrElse { HashMap() }
+        if (cacheFile.exists()) {
+            val old = readOldFile()
+            val moved = runCatching { db.writeRatings(old.filterKeys { it !in map }) }.isSuccess
+            for ((k, e) in old) if (k !in map) map[k] = e
+            // Kept when the move failed: tried again at the next start, nothing lost.
+            if (moved) { cacheFile.delete(); Diag.log("ratings", "saved scores moved to the database: ${old.size}") }
+        }
+        map
+    }
+
+    private fun readOldFile(): HashMap<String, Entry> {
         val map = HashMap<String, Entry>()
         runCatching {
             val o = JSONObject(cacheFile.readText())
@@ -175,24 +232,53 @@ object Ratings {
                     e.optInt("y", 0),
                     e.optString("w").takeIf { it.isNotEmpty() && it != "null" },
                     e.has("w"),
+                    e.optString("ps").takeIf { it.isNotEmpty() && it != "null" },
+                    e.has("ps"),
                 )
             }
         }
-        map
+        return map
     }
 
+    /** Everything changed so far is written before this returns (the library backup copies the database). */
+    internal fun flush() {
+        save()
+        runCatching { saver.submit { }.get() }
+    }
+
+    /** The database changed underneath (a restore, a clear, an undo): memory is read again from it. */
+    internal fun reload() {
+        val fresh = runCatching { db.loadRatings() }.getOrElse { return }
+        synchronized(cache) { cache.clear(); cache.putAll(fresh); dirty.clear() }
+        refIndex = null
+        scoresVersion++
+        synchronized(topLock) { topMemo = null }
+    }
+
+    /** Titles changed (or removed) since the last save. Guarded by [cache]. */
+    private val dirty = HashSet<String>()
+
     /**
-     * Saves the cache soon, on one background thread: changes made close together are written once
-     * (a screen of posters used to rewrite the whole file 25 times), and two writes never mix in the
-     * same file (a save from the main thread during a lookup could leave a broken file: every score lost).
+     * Saves the changed titles soon, on one background thread: changes made close together are written
+     * in one go, only the rows that changed (the old file was rewritten whole each time).
      */
     private fun save() {
         if (!saveQueued.compareAndSet(false, true)) return
         saver.execute {
             Thread.sleep(400)
             saveQueued.set(false)
-            val text = synchronized(cache) { JSONObject().apply { for ((k, e) in cache) put(k, e.toJson()) }.toString() }
-            writeFile(cacheFile, text)
+            val rows = synchronized(cache) {
+                val m = HashMap<String, Entry?>(dirty.size * 2)
+                for (k in dirty) m[k] = cache[k]
+                dirty.clear()
+                m
+            }
+            if (rows.isEmpty()) return@execute
+            runCatching { db.writeRatings(rows) }.onFailure {
+                // Not written: kept for the next save.
+                synchronized(cache) { dirty.addAll(rows.keys) }
+                Diag.log("ratings", "save failed: ${it.javaClass.simpleName}")
+            }
         }
     }
 
@@ -318,9 +404,126 @@ object Ratings {
     private fun entry(type: ContentType, id: String) = synchronized(cache) { cache[cacheKey(type, id)] }
 
     private fun put(type: ContentType, id: String, e: Entry) {
-        synchronized(cache) { cache[cacheKey(type, id)] = e }
+        synchronized(cache) { val k = cacheKey(type, id); cache[k] = e; dirty.add(k) }
         scoresVersion++
         save()
+    }
+
+    private fun putAll(rows: Map<String, Entry>) {
+        if (rows.isEmpty()) return
+        synchronized(cache) { cache.putAll(rows); dirty.addAll(rows.keys) }
+        scoresVersion++
+        save()
+    }
+
+    // ---- The whole-playlist fill's side ([RatingsFill]) ----
+
+    /** For the fill's queue: 0 = nothing saved, 1 = saved but old, 2 = fresh or a wrong match (skip); and the saved reference. */
+    internal fun fillState(key: String): Pair<Int, String?> {
+        val e = synchronized(cache) { cache[key] } ?: return 0 to null
+        return (if (e.how == How.WRONG || isFresh(e)) 2 else 1) to e.ref
+    }
+
+    /** Every fresh answer by its MDBList reference ("tmdb/movie/123"), from all playlists: for [sameTitle]. */
+    internal fun freshByRef(): HashMap<String, Entry> {
+        val map = HashMap<String, Entry>()
+        synchronized(cache) {
+            for (e in cache.values) if (e.ref != null && (e.how == How.ID || e.how == How.NAME) && isFresh(e)) map[e.ref] = e
+        }
+        return map
+    }
+
+    /**
+     * The saved answer for the same title in another playlist (or another copy in this one), to use
+     * instead of asking MDBList again; null when there is none, or the list's year says the id is
+     * another film's.
+     */
+    internal fun sameTitle(index: Map<String, Entry>, type: ContentType, ref: String, listYear: String?): Entry? {
+        val e = index[ref] ?: return null
+        if (contradictsYear(type, listYear, e.year)) return null
+        return Entry(e.imdb, e.tomatoes, e.at, How.ID, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked, e.poster, e.posterChecked)
+    }
+
+    /** Test builds: the database's size in counts ("titles, works, people, genres"), never its contents. */
+    fun dbCountsForTests(): String = runCatching { db.counts().joinToString(", ") }.getOrDefault("unreadable")
+
+    private var refIndex: Pair<Long, HashMap<String, Entry>>? = null
+
+    /** [freshByRef], made again at most once a minute (the fill's id steps ask every 5 s). */
+    internal fun freshByRefCached(): HashMap<String, Entry> {
+        val now = android.os.SystemClock.uptimeMillis()
+        refIndex?.let { if (now - it.first < 60_000) return it.second }
+        return freshByRef().also { refIndex = now to it }
+    }
+
+    /** Saves answers taken from [sameTitle] (full keys: playlist:TYPE:id). */
+    internal fun adopt(rows: Map<String, Entry>) = putAll(rows)
+
+    /** What one group request of the fill did. [code]: MDBList's answer (200 = fine), -1 = no connection. */
+    internal class Batch(val code: Int, val found: Int, val changed: Set<String>, val badIds: List<String>)
+
+    /**
+     * The fill's group lookup: titles of one [type] and one id family ("tmdb/…" or "imdb/…"), each as
+     * (provider id, MDBList reference, the list's year), in ONE request. Sent: the ids, the media type
+     * and the key, nothing else. Old scores stay until new ones arrive: a title MDBList no longer
+     * answers for keeps what it had.
+     */
+    internal fun fillBatch(playlist: String, type: ContentType, titles: List<Triple<String, String, String?>>): Batch {
+        val none = Batch(0, 0, emptySet(), emptyList())
+        val k = key ?: return none
+        if (titles.isEmpty()) return none
+        val kind = mediaType(type)
+        val family = titles.first().second.substringBefore('/')
+        val byRef = LinkedHashMap<String, ArrayList<Triple<String, String, String?>>>()
+        for (t in titles) if (t.second.startsWith("$family/")) byRef.getOrPut(t.second.substringAfterLast('/')) { ArrayList() }.add(t)
+        val ids = JSONArray()
+        for (x in byRef.keys) if (family == "tmdb") x.toLongOrNull()?.let { ids.put(it) } else ids.put(x)
+        val body = JSONObject().put("ids", ids).toString()
+        val (code, text) = kotlinx.coroutines.runBlocking {
+            lock.withLock { runCatching { request("/$family/$kind", k, body) }.getOrDefault(-1 to null) }
+        }
+        if (code != 200 || text == null) return Batch(code, 0, emptySet(), emptyList())
+        val answers = runCatching { JSONArray(text) }.getOrNull() ?: return Batch(-2, 0, emptySet(), emptyList())
+        val rows = HashMap<String, Entry>()
+        val changed = HashSet<String>()
+        val bad = ArrayList<String>()
+        val found = HashSet<String>()
+        for (i in 0 until answers.length()) {
+            val media = answers.optJSONObject(i) ?: continue
+            val idsObj = media.optJSONObject("ids")
+            val ext = (if (family == "tmdb") listOf(idsObj?.opt("tmdb"), idsObj?.opt("tmdbid"), media.opt("tmdb_id"), media.opt("tmdbid"))
+            else listOf(idsObj?.opt("imdb"), idsObj?.opt("imdbid"), media.opt("imdb_id"), media.opt("imdbid")))
+                .firstNotNullOfOrNull { v -> v?.toString()?.takeIf { it.isNotEmpty() && it != "null" && it != "0" } } ?: continue
+            val group = byRef[ext] ?: continue
+            found.add(ext)
+            for (t in group) {
+                val key = "$playlist:${type.name}:${t.first}"
+                val saved = synchronized(cache) { cache[key] }
+                if (saved?.how == How.WRONG) continue
+                // An id that belongs to a title of another year: left to the title's page (a name search).
+                if (saved?.ref == null && contradictsYear(type, t.third, media.optInt("year", 0))) { bad.add(t.first); continue }
+                rows[key] = entryFrom(media, if (saved?.how == How.NAME) How.NAME else How.ID, t.second)
+                changed.add("${type.name}:${t.first}")
+            }
+        }
+        val now = System.currentTimeMillis()
+        for ((ext, group) in byRef) if (ext !in found) for (t in group) {
+            val key = "$playlist:${type.name}:${t.first}"
+            val saved = synchronized(cache) { cache[key] }
+            if (saved?.how == How.WRONG) continue
+            rows[key] = if (saved != null && saved.scores != null) Entry(saved.imdb, saved.tomatoes, now, saved.how, saved.ref, saved.trailer, saved.trailerChecked, saved.year, saved.award, saved.awardChecked, saved.poster, saved.posterChecked)
+            else Entry(null, null, now, How.NONE, t.second)
+        }
+        putAll(rows)
+        return Batch(200, found.size, changed, bad)
+    }
+
+    /** Posters on screen, told which titles ("TYPE:id") got new scores from the fill. */
+    private val watchers = java.util.concurrent.CopyOnWriteArrayList<(Set<String>) -> Unit>()
+
+    internal fun announce(changed: Set<String>) {
+        if (changed.isEmpty() || watchers.isEmpty()) return
+        main.launch { for (w in watchers) w(changed) }
     }
 
     /** Scores already known for a title (any age), or null. */
@@ -338,6 +541,20 @@ object Ratings {
     /** A title found before awards were kept, by its TMDB id: its poster asks once more, in a group. */
     private fun needsAward(type: ContentType, id: String): Boolean =
         active && entry(type, id)?.let { !it.awardChecked && it.how != How.WRONG && it.ref?.startsWith("tmdb/") == true } == true
+
+    /** A title with no picture from the provider, found before posters were kept: asked once more, in a group. */
+    private fun needsPoster(item: StreamItem): Boolean =
+        active && item.image.isNullOrBlank() &&
+            entry(item.type, item.ratingId ?: item.id)?.let { !it.posterChecked && it.how != How.WRONG && it.ref?.startsWith("tmdb/") == true } == true
+
+    /** MDBList's poster for a title whose own picture is missing or doesn't load; null when not known. */
+    fun posterFor(item: StreamItem): String? {
+        if (!active || item.type == ContentType.LIVE) return null
+        val id = item.ratingId ?: item.id
+        val e = entry(item.type, id)?.takeIf { it.how != How.WRONG } ?: return null
+        // From the saved scores, or from the title's page (for titles saved before posters were kept).
+        return e.poster ?: RatingsExtras.saved(item.type, id)?.poster
+    }
 
     /** True when a lookup would ask MDBList (no saved answer still fresh: see isFresh), so it's worth getting the title's ids. */
     fun needsLookup(type: ContentType, id: String): Boolean {
@@ -395,6 +612,45 @@ object Ratings {
         }.start()
     }
 
+    /**
+     * Test builds (work list, Section 1): the largest group MDBList's batch lookup accepts, and what
+     * each size costs from the day's allowance. One request per size, each with ids not asked before
+     * in this probe; stops at the first refusal, a short answer, or a size that costs more than one
+     * request. Logs counts only ("BatchProbe"): never ids, titles or the key.
+     *   adb shell am broadcast -a com.osama.xtreamtv.debug.BATCH
+     */
+    fun batchProbeForTests(sizes: IntArray, kind: String = "movie") {
+        if (!BuildConfig.DEBUG) return
+        val k = key ?: return android.util.Log.d("BatchProbe", "no key").let { }
+        Thread {
+            val saved = synchronized(cache) {
+                cache.values.mapNotNull { it.ref?.takeIf { r -> r.startsWith("tmdb/$kind/") }?.substringAfterLast('/')?.toLongOrNull() }
+            }
+            val pool = (saved + (550L..2500L)).distinct()
+            var offset = 0
+            fun remaining() = sp.getInt("u_limit", 0) - sp.getInt("u_used", 0)
+            var last = -1
+            for (n in intArrayOf(1) + sizes) {
+                val ids = pool.drop(offset).take(n)
+                offset += n
+                val body = JSONObject().put("ids", JSONArray(ids)).toString()
+                val started = System.currentTimeMillis()
+                val (code, text) = runCatching { request("/tmdb/$kind", k, body) }.getOrElse { -1 to it.javaClass.simpleName }
+                val ms = System.currentTimeMillis() - started
+                val now = remaining()
+                val cost = if (last >= 0) last - now else -1
+                last = now
+                val count = runCatching { JSONArray(text).length() }.getOrDefault(-1)
+                android.util.Log.d("BatchProbe", "$kind · sent $n ids -> answer $code · ${if (count >= 0) "$count titles" else "not a list"} · " +
+                    "${text?.length ?: 0} bytes · $ms ms · cost ${if (cost >= 0) "$cost request(s)" else "baseline"} · $now left today")
+                if (code != 200 || count < 0) break
+                if (cost > 1) { android.util.Log.d("BatchProbe", "stopped: a batch costs more than one request"); break }
+                Thread.sleep(1500)
+            }
+            android.util.Log.d("BatchProbe", "done")
+        }.start()
+    }
+
     /** Test builds: "SERIES:123" of the titles that found nothing. */
     fun notFoundIdsForTests(): Set<String> = synchronized(cache) {
         cache.filterValues { it.how == How.NONE }.keys.map { it.substringAfter(':') }.toSet()
@@ -406,6 +662,7 @@ object Ratings {
         val n = synchronized(cache) {
             val gone = cache.filterValues { it.how == How.NONE }.keys
             gone.forEach { cache.remove(it) }
+            dirty.addAll(gone)
             gone.size
         }
         scoresVersion++
@@ -422,9 +679,10 @@ object Ratings {
     /** Refresh saved scores: every title is asked again the next time it is shown (matches are kept). */
     fun refreshAll() {
         synchronized(cache) {
-            for ((k, e) in cache.entries.toList()) if (e.how != How.WRONG) cache[k] = Entry(e.imdb, e.tomatoes, 0L, e.how, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked)
+            for ((k, e) in cache.entries.toList()) if (e.how != How.WRONG) cache[k] = Entry(e.imdb, e.tomatoes, 0L, e.how, e.ref, e.trailer, e.trailerChecked, e.year, e.award, e.awardChecked, e.poster, e.posterChecked)
         }
-        save()
+        saver.execute { runCatching { db.expireRatings() } }
+        RatingsFill.rebuild()
     }
 
     class Matching(val byId: Int, val byName: Int, val notFound: Int, val wrong: Int)
@@ -488,32 +746,24 @@ object Ratings {
             override fun onChanged() = schedule()
         })
         rv.post { schedule() }
-    }
-
-    /** Pre-fill uses at most this many lookups a day, and none when fewer than [PREFILL_KEEP] are left. */
-    private const val PREFILL_DAY = 200
-    private const val PREFILL_KEEP = 300
-
-    /**
-     * Pre-fill (1.1E): while Home sits idle, the scores of [items] (Continue watching, favorites, the
-     * Home rows) are asked for in groups, so they show at once later. Titles with an id only (a name
-     * search is left to the highlight and the page). Stops at its own daily share; cancelled by a key press.
-     */
-    suspend fun prefill(api: XtreamApi, items: List<StreamItem>) {
-        if (!active) return
-        val today = java.text.SimpleDateFormat("yyyyDDD", java.util.Locale.US).format(java.util.Date())
-        if (sp.getString("pf_day", "") != today) sp.edit().putString("pf_day", today).putInt("pf_used", 0).apply()
-        val todo = items.filter { it.type != ContentType.LIVE && needsLookup(it.type, it.ratingId ?: it.id) }
-            .distinctBy { "${it.type.name}:${it.ratingId ?: it.id}" }
-        var done = 0
-        for (chunk in todo.chunked(25)) {
-            if (left() < PREFILL_KEEP || sp.getInt("pf_used", 0) >= PREFILL_DAY) break
-            val before = usage()?.used ?: 0
-            done += fill(api, chunk).size
-            val spent = ((usage()?.used ?: before) - before).coerceAtLeast(0)
-            sp.edit().putInt("pf_used", sp.getInt("pf_used", 0) + spent).apply()
+        // The whole-playlist fill: only the cards on screen that got new scores are refreshed, in
+        // place (the highlight stays where it is; nothing else is redrawn).
+        val watcher: (Set<String>) -> Unit = watcher@{ changed ->
+            if (!showOnPosters || !rv.isAttachedToWindow || rv.isComputingLayout) return@watcher
+            val lm = rv.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager ?: return@watcher
+            val first = lm.findFirstVisibleItemPosition()
+            val last = minOf(lm.findLastVisibleItemPosition(), adapter.items.size - 1)
+            if (first < 0) return@watcher
+            for (i in first..last) {
+                val item = adapter.items[i]
+                if ("${item.type.name}:${item.ratingId ?: item.id}" in changed) adapter.notifyItemChanged(i, "scores")
+            }
         }
-        if (done > 0) Diag.log("ratings", "pre-fill: $done titles")
+        rv.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: android.view.View) { if (watcher !in watchers) watchers.add(watcher) }
+            override fun onViewDetachedFromWindow(v: android.view.View) { watchers.remove(watcher) }
+        })
+        if (rv.isAttachedToWindow) watchers.add(watcher)
     }
 
     /** "TYPE:id" of the titles whose scores changed. */
@@ -521,7 +771,7 @@ object Ratings {
         val k = key ?: return@withContext emptySet()
         if (!active || left() < KEEP_FOR_SCREEN || System.currentTimeMillis() < blockedUntil()) return@withContext emptySet()
         fun rid(it: StreamItem) = it.ratingId ?: it.id
-        val need = shown.filter { it.type != ContentType.LIVE && (it.note == null || it.ratingId != null) && "${it.type.name}:${rid(it)}" !in wrongListId && (needsLookup(it.type, rid(it)) || needsAward(it.type, rid(it))) }
+        val need = shown.filter { it.type != ContentType.LIVE && (it.note == null || it.ratingId != null) && "${it.type.name}:${rid(it)}" !in wrongListId && (needsLookup(it.type, rid(it)) || needsAward(it.type, rid(it)) || needsPoster(it)) }
             .distinctBy { "${it.type.name}:${rid(it)}" }.take(40)
         if (need.isEmpty()) return@withContext emptySet()
         // Each title's TMDB id: the list's, a saved one, or (movies) its details, read once.
@@ -645,7 +895,8 @@ object Ratings {
             withContext(Dispatchers.IO) {
                 // Another screen may have asked while this one waited.
                 if (!fresh) entry(title.type, title.id)?.takeIf { isFresh(it) }?.let { return@withContext it.scores }
-                val result = runCatching { ask(k, title, saved?.ref) }.getOrNull() ?: return@withContext saved?.scores
+                val known = saved?.ref ?: runCatching { db.refOf(cacheKey(title.type, title.id)) }.getOrNull()
+                val result = runCatching { ask(k, title, known) }.getOrNull() ?: return@withContext saved?.scores
                 put(title.type, title.id, result)
                 Diag.log("ratings", when (result.how) {
                     How.ID -> "found by id"
@@ -670,8 +921,11 @@ object Ratings {
     /** Null when MDBList couldn't be asked (no network, limit, bad key): try again later. */
     private fun ask(key: String, t: Title, ref: String?): Entry? {
         val kind = mediaType(t.type)
-        val idRef = ref ?: t.tmdb?.let { "tmdb/$kind/$it" } ?: t.imdb?.let { "imdb/$kind/$it" }
         val label = "${t.type.name} \"${t.name}\""
+        // No id anywhere, and a TMDB key: TMDB recognises it by name, year and poster (the same rule
+        // as the whole-playlist fill), before MDBList's own name search is tried.
+        val fromTmdb = if (ref == null && t.tmdb == null && t.imdb == null) tmdbRef(t, kind, label) else null
+        val idRef = ref ?: t.tmdb?.let { "tmdb/$kind/$it" } ?: t.imdb?.let { "imdb/$kind/$it" } ?: fromTmdb
         if (idRef != null) {
             val (code, body) = get("/$idRef", key)
             if (code == 200 && body != null) {
@@ -683,7 +937,7 @@ object Ratings {
                     trace("$label · by id $idRef -> year ${media.optInt("year")} isn't ${t.year}: searched by name instead")
                     return if (findByName) byName(key, t) else Entry(null, null, System.currentTimeMillis(), How.NONE, null)
                 }
-                return entryFrom(media, if (ref != null && t.tmdb == null && t.imdb == null) How.NAME else How.ID, idRef)
+                return entryFrom(media, if ((ref != null || fromTmdb != null) && t.tmdb == null && t.imdb == null) How.NAME else How.ID, idRef)
                     .also { trace("$label · by id $idRef -> imdb ${it.imdb ?: "-"} · rt ${it.tomatoes ?: "-"}") }
             }
             trace("$label · by id $idRef -> answer $code")
@@ -692,6 +946,18 @@ object Ratings {
         }
         if (!findByName) return Entry(null, null, System.currentTimeMillis(), How.NONE, null).also { trace("$label · no id, Find by name off") }
         return byName(key, t) ?: return null
+    }
+
+    /** A title's page asking TMDB which movie or series it is; what TMDB says about it is kept. Null when not recognised. */
+    private fun tmdbRef(t: Title, kind: String, label: String): String? {
+        if (!Tmdb.usable || !Tmdb.canTry(t.name, t.year, t.poster)) return null
+        val f = Tmdb.lookup(t.type, t.name, t.year, t.poster).found ?: return null.also { trace("$label · no id: TMDB by name -> not recognised") }
+        runCatching {
+            db.putDetail(cacheKey(t.type, t.id), RatingsDb.Detail(RatingsDb.Detail.OK, f.id, null, f.cast?.take(600), f.director?.take(200), f.genres?.take(200), f.year, f.minutes, "tmdb"))
+        }
+        trace("$label · no id: TMDB by name -> recognised")
+        Diag.log("ratings", "recognised by TMDB")
+        return "tmdb/$kind/${f.id}"
     }
 
     /**
@@ -825,7 +1091,8 @@ object Ratings {
         // The trailer comes in the same answer: a YouTube link (used when the provider has none).
         val trailer = media.optString("trailer").takeIf { it.startsWith("http") && ("youtube" in it || "youtu.be" in it) }
         return Entry(imdb, tomatoes, System.currentTimeMillis(), how, ref, trailer, year = media.optInt("year", 0),
-            award = RatingsExtras.awardBadge(media.optString("awards").takeIf { it.isNotBlank() && it != "null" }))
+            award = RatingsExtras.awardBadge(media.optString("awards").takeIf { it.isNotBlank() && it != "null" }),
+            poster = media.optString("poster").takeIf { it.startsWith("http") })
     }
 
     /** "EN - The Matrix (1999) 4K" -> ("The Matrix", "1999"). */
@@ -920,7 +1187,8 @@ object Ratings {
     /** GET, or POST with a JSON [body] (the batch lookup, which MDBList counts as one read). */
     private fun request(path: String, key: String, body: String?, vararg params: Pair<String, String>): Pair<Int, String?> {
         val query = (params.toList() + ("apikey" to key)).joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
-        val conn = URL("$BASE$path?$query").openConnection() as HttpURLConnection
+        val base = if (BuildConfig.DEBUG) baseForTests ?: BASE else BASE
+        val conn = URL("$base$path?$query").openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 8000
             conn.readTimeout = 15000

@@ -154,7 +154,8 @@ class T10_BadNetworkTest : QaTest() {
         Qa.start(PlayerActivity.vodIntent(Qa.ctx, url, "Restart test movie", "movie_106", 0, null, false))
         Qa.expect(PlayerActivity::class.java, "movie")
         Qa.expectPlaying("movie")
-        SystemClock.sleep(12_000)
+        // A movie joins Resume Watching after 30 s of watching (shorter visits are not kept, by design).
+        SystemClock.sleep(33_000)
         Qa.leavePlayer()
         Qa.step("close everything and open the app again")
         Qa.finishAll()
@@ -166,6 +167,6 @@ class T10_BadNetworkTest : QaTest() {
         assertTrue("Favorite kept", Prefs(Qa.ctx).favoriteIds(ContentType.LIVE).contains(channel.id))
         val pos = Prefs(Qa.ctx).position("movie_106")
         Qa.metric("saved_position_ms", pos)
-        if (pos < 5000) Qa.finding("problem", "Movie position not saved after leaving the player", "Saved: $pos ms after ~15 s of watching")
+        if (pos < 5000) Qa.finding("problem", "Movie position not saved after leaving the player", "Saved: $pos ms after ~35 s of watching")
     }
 }

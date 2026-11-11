@@ -49,7 +49,8 @@ class XtreamApp : Application(), ImageLoaderFactory {
                     val api = Session.api(context) ?: return
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
                         val all = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { api.streams(type, null) }.getOrElse { emptyList() } }
-                        val item = all.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: all.firstOrNull { it.name.contains(name, ignoreCase = true) } ?: return@launch android.util.Log.d("Recos", "no title named $name").let { }
+                        // "?noid": the first title with no id and no saved answer that TMDB could be asked about.
+                        val item = (if (name == "?noid") all.firstOrNull { it.tmdb == null && Ratings.how(type, it.id) == null && Tmdb.canTry(it.name, it.year, it.image) } else null) ?: all.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: all.firstOrNull { it.name.contains(name, ignoreCase = true) } ?: return@launch android.util.Log.d("Recos", "no title named $name").let { }
                         startActivity(DetailsActivity.intent(context, item).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                     }
                 }
@@ -110,6 +111,53 @@ class XtreamApp : Application(), ImageLoaderFactory {
                     }
                 }
             }, android.content.IntentFilter("com.osama.xtreamtv.debug.NAMES").also { }, if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: MDBList batch sizes (work list, Section 1). --es sizes "25,50,100,200" --es kind movie
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val sizes = (intent.getStringExtra("sizes") ?: "25,50,100,200").split(',').mapNotNull { it.trim().toIntOrNull() }.toIntArray()
+                    Ratings.batchProbeForTests(sizes, intent.getStringExtra("kind") ?: "movie")
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.BATCH"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds (work list 2.1): where the lists' TMDB ids come from, in counts only ("ListIds").
+            //   adb shell am broadcast -a com.osama.xtreamtv.debug.LISTIDS
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val api = Session.api(context) ?: return
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        for (type in listOf(ContentType.MOVIE, ContentType.SERIES)) {
+                            val all = runCatching { api.streams(type, null) }.getOrElse { emptyList() }
+                            val matched = all.groupingBy { Ratings.how(type, it.id)?.name ?: "not looked up" }.eachCount()
+                            android.util.Log.d("ListIds", "${type.name}: ${all.size} in the list · ${all.count { it.tmdb != null }} with a TMDB id from the list · " +
+                                "${all.count { it.year == null }} without a year · ${all.count { it.image.isNullOrBlank() }} without a picture · saved lookups: $matched")
+                        }
+                        for ((action, kind) in listOf("get_series" to "tv", "get_vod_streams" to "movie")) {
+                            val raw = runCatching { api.debugRaw("action" to action) }.getOrNull() as? org.json.JSONArray ?: continue
+                            var field = 0; var backdrop = 0; var tmdbHost = 0; var numbered = 0; var hashed = 0; var none = 0
+                            for (i in 0 until raw.length()) {
+                                val o = raw.optJSONObject(i) ?: continue
+                                if (o.tmdbId("tmdb", "tmdb_id") != null) field++ else if (o.backdropTmdb(kind) != null) backdrop++
+                                val cover = (o.optString("cover").ifBlank { o.optString("stream_icon") }).substringBefore('?')
+                                val file = cover.substringAfterLast('/').substringBeforeLast('.')
+                                when {
+                                    cover.isBlank() -> none++
+                                    Regex("^\\d{2,9}([_-].*)?$").matches(file) -> numbered++
+                                    else -> hashed++
+                                }
+                                if ("tmdb.org" in cover || "/t/p/" in cover) tmdbHost++
+                            }
+                            android.util.Log.d("ListIds", "$action (${raw.length()}): id in its own field $field · id only in the backdrop's file name $backdrop · " +
+                                "poster files: $tmdbHost on TMDB's picture server, $numbered named with a number, $hashed with another name, $none none")
+                        }
+                        android.util.Log.d("ListIds", "done")
+                    }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.LISTIDS"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: how many titles TMDB recognises, in counts only ("TmdbProbe"). --ei sample 80
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    Tmdb.probeForTests(intent.getIntExtra("sample", 60))
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.TMDB"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
             // Test builds: the diagnostics report (with its summary) to files/debug_report.txt.
             registerReceiver(object : android.content.BroadcastReceiver() {
                 override fun onReceive(context: android.content.Context, intent: android.content.Intent) = Diag.reportForTests()

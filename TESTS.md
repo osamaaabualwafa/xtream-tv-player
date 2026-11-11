@@ -8,7 +8,7 @@ then the failures, then measurements and pictures.
 | When | What | Report |
 |---|---|---|
 | After every push to `main` | Short list: data, Live TV, new features (T11, T12), Settings, old themes moving to Default, bad network, biggest sizes (`qa/shards.py`, `PUSH_SHARDS`) | branch `qa-report-push` |
-| Wednesdays 02:00 Riyadh | Full suite T01–T12 (`app/src/androidTest/.../qa`) | branch `qa-report` |
+| Wednesdays 02:00 Riyadh | Full suite T01–T13 (`app/src/androidTest/.../qa`) | branch `qa-report` |
 | `[full qa]` in a push's commit message | The full suite right after the short list | branch `qa-report` |
 
 It only warns: the APK is published whatever the tests find. Every push to `main` also publishes a

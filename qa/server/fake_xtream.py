@@ -40,7 +40,7 @@ PORT = int(os.environ.get("PORT", "8080"))
 # Address the emulator uses to reach this machine (image URLs must point there).
 PUBLIC = os.environ.get("PUBLIC_BASE", "http://10.0.2.2:%d" % PORT)
 
-ACCOUNTS = {"demo", "second", "expiring", "expired", "banned", "slow", "broken", "tsonly", "huge"}
+ACCOUNTS = {"demo", "second", "expiring", "expired", "banned", "slow", "broken", "tsonly", "huge", "fill"}
 SEG_SECONDS = 4
 SEG_COUNT = 8
 BROKEN_CHANNEL = "13"
@@ -48,6 +48,14 @@ SLOW_CHANNEL = "14"
 BROKEN_MOVIE = "113"
 
 state = {"down_until": 0.0}
+
+# A stand-in MDBList for the whole-playlist ratings fill (T13): /mdb/... answers like MDBList's
+# group lookup, counts requests like its daily allowance, and keeps what each request carried
+# (names of its parts only, never the key's value) so the test can check pace and privacy.
+#   /__mdb?mode=ok|429|401&remaining=N&retry=S   set how it answers
+#   /__mdblog[?clear=1]                          what was asked, and the most requests at once
+mdb = {"mode": "ok", "remaining": 1000, "limit": 1000, "retry": 20, "inflight": 0, "max_inflight": 0, "log": []}
+mdb_lock = threading.Lock()
 request_log = []
 log_lock = threading.Lock()
 
@@ -291,6 +299,39 @@ def huge(kind):
     return _huge[kind]
 
 
+def fill(kind):
+    """T13: 20,000 movies and 5,000 series, 9 in 10 with a TMDB id in the list."""
+    key = "fill_" + kind
+    if key in _huge:
+        return _huge[key]
+    if kind == "vod":
+        data = []
+        for i in range(1, 20001):
+            row = {"num": i, "name": "Fill movie %05d" % i, "stream_type": "movie", "stream_id": 700000 + i,
+                   "stream_icon": img("poster", i), "rating": "7", "added": str(1700000000 + i),
+                   "category_id": str(101 + i % 60), "container_extension": "mp4"}
+            if i % 10:
+                row["tmdb_id"] = str(10000 + i)
+            data.append(row)
+    elif kind == "series":
+        data = []
+        for i in range(1, 5001):
+            row = {"num": i, "name": "Fill series %05d" % i, "series_id": 900000 + i, "cover": img("poster", i),
+                   "rating": "8", "last_modified": str(1700000000 + i), "category_id": str(301 + i % 30)}
+            if i % 10:
+                row["tmdb"] = str(50000 + i)
+            data.append(row)
+    else:
+        return huge(kind)
+    _huge[key] = json.dumps(data).encode("utf-8")
+    return _huge[key]
+
+
+def mdb_title(kind, tid):
+    return {"ids": {"tmdb": tid, "imdb": "tt%07d" % tid}, "title": "Title %d" % tid, "year": 0, "type": kind,
+            "ratings": [{"source": "imdb", "value": 5 + (tid % 40) / 10.0}, {"source": "tomatoes", "value": 40 + tid % 60}]}
+
+
 # ----------------------------------------------------------------------------- EPG
 
 def short_epg(stream_id):
@@ -419,9 +460,65 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    # --- the stand-in MDBList
+    def mdb_request(self, url, q):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else None
+        except ValueError:
+            body = "unreadable"
+        ids = body.get("ids") if isinstance(body, dict) else None
+        path = url.path[len("/mdb"):]
+        usual = {"host", "user-agent", "accept", "content-type", "content-length", "connection", "accept-encoding"}
+        with mdb_lock:
+            mdb["inflight"] += 1
+            mdb["max_inflight"] = max(mdb["max_inflight"], mdb["inflight"])
+            mdb["log"].append({
+                "t": int(time.time() * 1000), "method": self.command, "path": path,
+                "query_keys": sorted(q.keys()), "body_keys": sorted(body.keys()) if isinstance(body, dict) else ([] if body is None else ["?"]),
+                "n": len(ids) if isinstance(ids, list) else 0, "ids": ids if isinstance(ids, list) else [],
+                "other_headers": sorted(h for h in self.headers.keys() if h.lower() not in usual),
+            })
+            del mdb["log"][:-2000]
+            mode = mdb["mode"]
+        try:
+            time.sleep(0.15)
+            if mode == "401":
+                return self.send_bytes(b'{"error": "invalid key"}', code=401)
+            if mode == "429":
+                return self.send_bytes(b'{"error": "limit"}', code=429, extra={"Retry-After": str(mdb["retry"])})
+            with mdb_lock:
+                mdb["remaining"] = max(0, mdb["remaining"] - 1)
+                left = mdb["remaining"]
+            extra = {"X-RateLimit-Limit": str(mdb["limit"]), "X-RateLimit-Remaining": str(left),
+                     "X-RateLimit-Reset": str(int(time.time()) + 3600)}
+            if path == "/user":
+                return self.send_bytes(json.dumps({"api_requests": mdb["limit"], "api_requests_count": mdb["limit"] - left}).encode("utf-8"), extra=extra)
+            m = re.match(r"^/tmdb/(movie|show)(?:/(\d+))?$", path)
+            if not m:
+                return self.send_bytes(b'{"error": "not found"}', code=404, extra=extra)
+            kind, one = m.groups()
+            if one:
+                return self.send_bytes(json.dumps(mdb_title(kind, int(one))).encode("utf-8"), extra=extra)
+            # 1 title in 20 is unknown to it, as with the real one.
+            answers = [mdb_title(kind, int(t)) for t in (ids or []) if int(t) % 20]
+            return self.send_bytes(json.dumps(answers).encode("utf-8"), extra=extra)
+        finally:
+            with mdb_lock:
+                mdb["inflight"] -= 1
+
     # --- routes
     def do_HEAD(self):
         self.do_GET()
+
+    def do_POST(self):
+        url = urlparse(self.path)
+        if time.time() < state["down_until"]:
+            return self.drop()
+        if url.path.startswith("/mdb/"):
+            return self.mdb_request(url, {k: v[0] for k, v in parse_qs(url.query).items()})
+        return self.send_bytes(b"not found", "text/plain", 404)
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -439,9 +536,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(request_log[-200:])
         if path == "/__health":
             return self.send_json({"ok": True})
+        if path == "/__mdb":
+            with mdb_lock:
+                if "mode" in q:
+                    mdb["mode"] = q["mode"]
+                if "remaining" in q:
+                    mdb["remaining"] = int(q["remaining"])
+                if "retry" in q:
+                    mdb["retry"] = int(q["retry"])
+                return self.send_json({"mode": mdb["mode"], "remaining": mdb["remaining"]})
+        if path == "/__mdblog":
+            with mdb_lock:
+                out = {"max_inflight": mdb["max_inflight"], "log": list(mdb["log"])}
+                if q.get("clear"):
+                    mdb["log"] = []
+                    mdb["max_inflight"] = 0
+            return self.send_json(out)
         if time.time() < state["down_until"]:
             return self.drop()
 
+        if path.startswith("/mdb/"):
+            return self.mdb_request(url, q)
         if path.startswith("/img/"):
             name = os.path.basename(path)
             ctype = "image/jpeg" if name.endswith(".jpg") else "image/png"
@@ -567,6 +682,15 @@ class Handler(BaseHTTPRequestHandler):
                 if cid and action in ("get_live_streams", "get_vod_streams", "get_series"):
                     rows = [r for r in json.loads(body) if r["category_id"] == cid]
                     return self.send_json(rows)
+                return self.send_bytes(body)
+
+        if user == "fill":
+            table = {"get_vod_categories": "vod_cats", "get_series_categories": "series_cats", "get_vod_streams": "vod", "get_series": "series"}
+            if action in table:
+                body = fill(table[action])
+                cid = q.get("category_id")
+                if cid and action in ("get_vod_streams", "get_series"):
+                    return self.send_json([r for r in json.loads(body) if r["category_id"] == cid])
                 return self.send_bytes(body)
 
         cid = q.get("category_id")

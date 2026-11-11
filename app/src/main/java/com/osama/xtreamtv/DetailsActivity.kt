@@ -53,7 +53,7 @@ class DetailsActivity : AppCompatActivity() {
 
     private lateinit var poster: ImageView
     private lateinit var title: TextView
-    private lateinit var meta: android.widget.LinearLayout
+    private lateinit var meta: android.view.ViewGroup
     private lateinit var plot: TextView
     private lateinit var buttons: View
     private lateinit var playButton: Button
@@ -96,7 +96,17 @@ class DetailsActivity : AppCompatActivity() {
 
         poster = findViewById(R.id.poster)
         title = findViewById(R.id.title)
-        meta = findViewById(R.id.meta)
+        // The chips row wraps to a second line when it doesn't fit (a long genre list pushed the award
+        // chip off the edge, 2026-11-10): the layout's plain row is swapped for a wrapping one.
+        meta = findViewById<android.view.ViewGroup>(R.id.meta).let { old ->
+            val parent = old.parent as android.view.ViewGroup
+            val at = parent.indexOfChild(old)
+            val row = FlowRow(this).also { it.id = R.id.meta }
+            val lp = old.layoutParams.also { it.width = android.view.ViewGroup.LayoutParams.MATCH_PARENT }
+            parent.removeViewAt(at)
+            parent.addView(row, at, lp)
+            row
+        }
         plot = findViewById(R.id.plot)
         keepButtonsVisible()
         buttons = findViewById(R.id.buttons)
@@ -211,8 +221,26 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadPoster(url: String?) {
-        if (url.isNullOrBlank()) return
+    /** The provider has no picture for this title, or its picture didn't load: MDBList's is used once known. */
+    private var posterMissing = false
+
+    private fun useMdbPoster() {
+        val link = extras?.poster ?: return
+        if (!posterMissing) return
+        posterMissing = false
+        loadPoster(link, fromMdbList = true)
+        // Episode cards without a still show the poster.
+        if (!isMovie && ::episodeAdapter.isInitialized) episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount)
+    }
+
+    private fun loadPoster(url: String?, fromMdbList: Boolean = false) {
+        if (url.isNullOrBlank()) {
+            if (posterUrl == null) {
+                posterMissing = true
+                useMdbPoster()
+            }
+            return
+        }
         posterUrl = url
         poster.load(url) {
             crossfade(true)
@@ -224,6 +252,14 @@ class DetailsActivity : AppCompatActivity() {
             if (glass) Look.blurBackdrop(backdrop)
             backdrop.load(url) {
                 crossfade(true)
+                // The provider's picture is gone (a dead link): MDBList's poster instead.
+                if (!fromMdbList) listener(onError = { _, _ ->
+                    if (posterUrl == url) {
+                        posterUrl = null
+                        posterMissing = true
+                        useMdbPoster()
+                    }
+                })
                 // Older TVs have no blur: a tiny picture scaled up gives the same softness.
                 if (glass && android.os.Build.VERSION.SDK_INT < 31) size(32, 48)
             }
@@ -258,7 +294,7 @@ class DetailsActivity : AppCompatActivity() {
                 setBackgroundResource(R.drawable.bg_meta_chip)
                 setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
                 layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply { rightMargin = (8 * density).toInt() }
+                    .apply { rightMargin = (8 * density).toInt(); bottomMargin = (6 * density).toInt() }
             })
         }
         for (v in values.filter { it.isNotBlank() }) {
@@ -273,7 +309,7 @@ class DetailsActivity : AppCompatActivity() {
                 setBackgroundResource(R.drawable.bg_meta_chip)
                 setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
                 layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply { rightMargin = (8 * density).toInt() }
+                    .apply { rightMargin = (8 * density).toInt(); bottomMargin = (6 * density).toInt() }
                 // An award: the same chip in gold or silver glass, with its statuette.
                 AwardArt.styleChip(this, v)
             })
@@ -330,6 +366,7 @@ class DetailsActivity : AppCompatActivity() {
     private suspend fun showExtras() {
         val e = RatingsExtras.forTitle(item.type, item.id) ?: return showSimilarOnly()
         extras = e
+        useMdbPoster()
         if (plot.text.isNullOrBlank() || plot.text.toString() == "Details unavailable.") e.description?.let { plot.text = it }
         val year = Regex("^(19|20)\\d{2}$")
         val fills = ArrayList<String>()

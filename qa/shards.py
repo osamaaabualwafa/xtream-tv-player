@@ -13,6 +13,8 @@ SHARDS = [
     ("themes-b", ["T08_ThemesTest#glassBackgrounds1+glassBackgrounds2+glassBackgrounds3+glassStyles+glassHighlightsDark+glassHighlightsDaylight+glassMovingBackground"], False),
     ("themes-c", ["T08_ThemesTest#colours+palettesAndBackgrounds+sizesSmallSmall+sizesLargeExtraLarge+sizesCompactExtraLarge+sizesNormalLarge+sizesLargeLarge+effects"], False),
     ("stress-random", ["T09_StressTest"], True),
+    # The whole-playlist ratings fill against a stand-in MDBList: pace, limits, privacy, playback.
+    ("ratings-fill", ["T13_FillTest"], False),
 ]
 
 # After each push to main: the core checks, what's new, and past crashes. Warns only.

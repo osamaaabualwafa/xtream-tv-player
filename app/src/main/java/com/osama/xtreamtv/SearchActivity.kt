@@ -44,6 +44,7 @@ class SearchActivity : AppCompatActivity() {
     /** Results per section, and the section shown (null = All). */
     private var found: Map<ContentType, List<StreamItem>> = emptyMap()
     private var section: ContentType? = null
+    private val prefs by lazy { Prefs(this) }
     private lateinit var sections: View
     private lateinit var chips: View
     private val rowAdapters = HashMap<ContentType, ItemAdapter>()
@@ -217,7 +218,7 @@ class SearchActivity : AppCompatActivity() {
         progress = findViewById(R.id.search_progress)
         results = findViewById(R.id.search_results)
 
-        adapter = ItemAdapter(grid = false, onClick = { _, item -> open(item) }, onLongClick = null)
+        adapter = ItemAdapter(grid = false, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite)
         sections = findViewById(R.id.search_sections)
         chips = findViewById(R.id.search_chips)
         // "All": a row per section (channel cards, posters), like Home.
@@ -227,7 +228,7 @@ class SearchActivity : AppCompatActivity() {
             ContentType.SERIES to (R.id.sec_series to R.layout.item_poster_row),
         )
         for ((type, ids) in rows) {
-            val rowAdapter = ItemAdapter(grid = type != ContentType.LIVE, onClick = { _, item -> open(item) }, onLongClick = null, layout = ids.second)
+            val rowAdapter = ItemAdapter(grid = type != ContentType.LIVE, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite, layout = ids.second)
             findViewById<RecyclerView>(ids.first).apply {
                 layoutManager = RowLayoutManager(this@SearchActivity)
                 this.adapter = rowAdapter
@@ -235,8 +236,8 @@ class SearchActivity : AppCompatActivity() {
             rowAdapters[type] = rowAdapter
         }
         // One section: channels as a list, movies / series as a poster grid.
-        channelList = ItemAdapter(grid = false, onClick = { _, item -> open(item) }, onLongClick = null)
-        posterGrid = ItemAdapter(grid = true, onClick = { _, item -> open(item) }, onLongClick = null)
+        channelList = ItemAdapter(grid = false, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite)
+        posterGrid = ItemAdapter(grid = true, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite)
         listOf(R.id.chip_all to null, R.id.chip_live to ContentType.LIVE, R.id.chip_movies to ContentType.MOVIE, R.id.chip_series to ContentType.SERIES)
             .forEach { (id, type) -> findViewById<View>(id).setOnClickListener { showSection(type) } }
 
@@ -320,6 +321,21 @@ class SearchActivity : AppCompatActivity() {
     }
 
     /** Chips with counts, then either the section rows (All) or one section's full list. */
+    /**
+     * Long-press on a result: add or remove a favorite, with the star, as in Movies, Series and Live TV
+     * (16.1: search results had no long-press and no star).
+     */
+    private fun toggleFavorite(@Suppress("UNUSED_PARAMETER") position: Int, item: StreamItem) {
+        val added = prefs.toggleFavorite(item)
+        showToast(this, if (added) "Added ${item.name} to favorites" else "Removed ${item.name} from favorites", Toast.LENGTH_SHORT)
+        val ids = prefs.favoriteIds(item.type)
+        val shown = listOfNotNull(rowAdapters[item.type], if (item.type == ContentType.LIVE) channelList else posterGrid.takeIf { section == item.type })
+        for (a in shown) {
+            a.favorites = ids
+            a.notifyItemRangeChanged(0, a.itemCount, "fav")
+        }
+    }
+
     private fun showResults() {
         val total = found.values.sumOf { it.size }
         chips.visibility = if (total == 0) View.GONE else View.VISIBLE
@@ -357,6 +373,7 @@ class SearchActivity : AppCompatActivity() {
                     this.visibility = visibility
                     scrollToPosition(0)
                 }
+                rowAdapters.getValue(type).favorites = prefs.favoriteIds(type)
                 rowAdapters.getValue(type).submit(items.take(ROW_RESULTS))
             }
         } else {
@@ -368,12 +385,14 @@ class SearchActivity : AppCompatActivity() {
                     results.layoutManager = RowLayoutManager(this, LinearLayoutManager.VERTICAL)
                     results.adapter = channelList
                 }
+                channelList.favorites = prefs.favoriteIds(ContentType.LIVE)
                 channelList.submit(items)
             } else {
                 if (results.adapter !== posterGrid) {
                     results.layoutManager = CenterGridLayoutManager(this, 8)
                     results.adapter = posterGrid
                 }
+                posterGrid.favorites = prefs.favoriteIds(one)
                 posterGrid.submit(items)
             }
             results.scrollToPosition(0)

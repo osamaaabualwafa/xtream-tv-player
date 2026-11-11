@@ -232,6 +232,18 @@ class PlayerActivity : AppCompatActivity() {
     /** Live: tries for the current channel after the server refused it (connection still counted). */
     private var liveRetries = 0
     private val retryLive = Runnable { playChannel(channelIndex, banner = false, retry = true) }
+
+    /**
+     * After the quick retries: the channel is tried again every 10 s for as long as its error is on
+     * screen, so a Wi-Fi drop longer than a few seconds ends by itself when the connection returns
+     * (weekly QA 2026-11-11: the channel stayed on the error until a key was pressed).
+     */
+    private val keepTryingLive = Runnable {
+        if (isLive && player != null && !isFinishing && errorView.visibility == View.VISIBLE) {
+            Diag.log("play", "live: trying the channel again after a lost connection")
+            playChannel(channelIndex, banner = false, retry = true)
+        }
+    }
     /** Episodes started on their own (no key pressed since): ask "Still watching?" at [STILL_WATCHING_AFTER]. */
     private var autoEpisodes = 0
     private val retryVod = Runnable {
@@ -464,6 +476,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        RatingsFill.player(false, false, false)
         // Leaving with the resume card up: it would stay on screen over the playing video.
         resumeDialog?.takeIf { it.isShowing }?.dismiss()
         resumeDialog = null
@@ -699,6 +712,13 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /** The whole-playlist ratings fill slows down while a video plays and waits while it buffers or starts. */
+    private fun fillNote() {
+        val p = player
+        if (p == null) RatingsFill.player(false, false, false)
+        else RatingsFill.player(true, p.isPlaying, p.playbackState == Player.STATE_BUFFERING || (p.playWhenReady && p.playbackState == Player.STATE_IDLE))
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             val now = android.os.SystemClock.elapsedRealtime()
@@ -708,6 +728,7 @@ class PlayerActivity : AppCompatActivity() {
                 playedMs += now - playingSince
                 playingSince = 0
             }
+            fillNote()
             if (BuildConfig.DEBUG && okPressedAt > 0) {
                 android.util.Log.d("PlayerOk", "ok-to-state ${now - okPressedAt} ms playing=$isPlaying")
                 okPressedAt = 0
@@ -717,6 +738,7 @@ class PlayerActivity : AppCompatActivity() {
 
         override fun onPlaybackStateChanged(state: Int) {
             progress.visibility = if (state == Player.STATE_BUFFERING && !isInPictureInPictureModeCompat()) View.VISIBLE else View.GONE
+            fillNote()
             if (state == Player.STATE_READY) {
                 errorView.visibility = View.GONE
                 vodRetries = 0
@@ -804,7 +826,14 @@ class PlayerActivity : AppCompatActivity() {
                 playUrl(fallback)
                 return
             }
-            showPlaybackError(describe(error))
+            val lostConnection = isLive && (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT)
+            showPlaybackError(describe(error), retrying = lostConnection)
+            if (lostConnection) {
+                playerView.removeCallbacks(keepTryingLive)
+                playerView.postDelayed(keepTryingLive, 10_000)
+            }
         }
     }
 
@@ -847,10 +876,10 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun showPlaybackError(reason: String) {
+    private fun showPlaybackError(reason: String, retrying: Boolean = false) {
         progress.visibility = View.GONE
         val what = if (isLive) "This channel can't be played right now." else "This video can't be played."
-        val hint = if (isLive) "\n\nPress Up/Down to change channel." else ""
+        val hint = (if (retrying) "\nTrying again every 10 seconds." else "") + if (isLive) "\n\nPress Up/Down to change channel." else ""
         errorView.text = "$what\n$reason$hint" + if (Diag.enabled) "\n\nPress OK to mark this for Claude." else ""
         errorView.visibility = View.VISIBLE
         if (!isLive) controls.hide()
@@ -888,6 +917,7 @@ class PlayerActivity : AppCompatActivity() {
         if (list.isEmpty()) return finish()
         channelIndex = Math.floorMod(channelIndex + step, list.size)
         playerView.removeCallbacks(retryLive)
+        playerView.removeCallbacks(keepTryingLive)
         // Drop the old stream now (one connection), so the next one can start straight away.
         player?.stop()
         errorView.visibility = View.GONE
@@ -899,6 +929,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun playChannel(index: Int, banner: Boolean = true, retry: Boolean = false) {
         playerView.removeCallbacks(startZap)
         playerView.removeCallbacks(retryLive)
+        playerView.removeCallbacks(keepTryingLive)
         if (!retry) liveRetries = 0
         diagPlayStart = SystemClock.elapsedRealtime()
         val list = Session.zapList
@@ -1466,7 +1497,8 @@ class PlayerActivity : AppCompatActivity() {
      */
     private fun diagSeek(deltaMs: Long, before: Long, target: Long, toolbar: Boolean, bubble: Boolean) {
         if (!Diag.enabled) return
-        val key = KeyEvent.keyCodeToString(diagSeekKey).removePrefix("KEYCODE_")
+        // From the controls (timeline or the jump buttons) no seek key is involved: say so, not a stale key.
+        val key = if (toolbar) "controls" else KeyEvent.keyCodeToString(diagSeekKey).removePrefix("KEYCODE_")
         val where = if (toolbar) "toolbar open" else "toolbar hidden"
         Diag.log("seek", "$key ${if (deltaMs > 0) "+" else "−"}${kotlin.math.abs(deltaMs) / 1000} s, $where: " +
             "${formatDuration(before)} → ${formatDuration(target)}${if (toolbar) "" else if (bubble) ", bubble shown" else ", bubble NOT shown"}")
@@ -2845,7 +2877,7 @@ class PlayerActivity : AppCompatActivity() {
         if (::playerView.isInitialized) playerView.removeCallbacks(sleepNow)
         if (::playerView.isInitialized) playerView.removeCallbacks(retryVod)
         if (::playerView.isInitialized) playerView.removeCallbacks(startZap)
-        if (::playerView.isInitialized) playerView.removeCallbacks(retryLive)
+        if (::playerView.isInitialized) { playerView.removeCallbacks(retryLive); playerView.removeCallbacks(keepTryingLive) }
         if (::numberEntry.isInitialized) numberEntry.removeCallbacks(commitNumber)
         super.onDestroy()
     }

@@ -34,33 +34,54 @@ object RatingsUi {
 
     // ---- Add or change key ----
 
+    /** Which service a key is for: its name, where to get the key, and how it is tested and kept. */
+    class Kind(
+        val name: String, val where: String,
+        val has: () -> Boolean, val looksLike: (String) -> Boolean,
+        val test: suspend (String) -> Boolean?, val save: (String) -> Unit, val worked: () -> String,
+        val remove: () -> Unit, val removed: String,
+    )
+
+    val MDBLIST = Kind(
+        "MDBList", "mdblist.com/preferences → API Access",
+        { Ratings.hasKey }, { Ratings.looksLikeKey(it) }, { Ratings.test(it) }, { Ratings.key = it },
+        { "Key works" + (Ratings.usage()?.let { " · ${it.used} of ${"%,d".format(it.limit)} lookups used today" } ?: "") },
+        { Ratings.removeKey(keepTmdb = true) }, "Ratings are off and the MDBList key is deleted",
+    )
+
+    val TMDB = Kind(
+        "TMDB", "themoviedb.org → Settings → API → API Key",
+        { Tmdb.hasKey }, { Tmdb.looksLikeKey(it) }, { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Tmdb.test(it) } }, { Tmdb.key = it },
+        { "Key works · titles without an ID will be recognised by name and year" },
+        { Tmdb.removeKey() }, "The TMDB key is deleted",
+    )
+
     /**
      * Tests a key from the phone or the remote and saves it when MDBList accepts it. [say] shows how
      * it went; [onWorks] runs once the key is saved.
      */
-    fun checkKey(activity: Activity, candidate: String, from: String, say: (String, Int) -> Unit, onWorks: () -> Unit) {
-        if (!Ratings.looksLikeKey(candidate)) {
-            say("That doesn't look like an MDBList key. Copy the whole key and try again.", DiagUi.RED)
+    fun checkKey(activity: Activity, candidate: String, from: String, say: (String, Int) -> Unit, kind: Kind = MDBLIST, onWorks: () -> Unit) {
+        if (!kind.looksLike(candidate)) {
+            say("That doesn't look like ${if (kind === MDBLIST) "an" else "a"} ${kind.name} key. Copy the whole key and try again.", DiagUi.RED)
             return
         }
         say("Testing the key…", DiagUi.BLUE)
         (activity as LifecycleOwner).lifecycleScope.launch {
-            when (Ratings.test(candidate)) {
+            when (kind.test(candidate.trim())) {
                 true -> {
-                    Ratings.key = candidate
-                    Diag.log("ratings", "key added ($from)")
-                    val u = Ratings.usage()
-                    say("Key works" + (u?.let { " · ${it.used} of ${"%,d".format(it.limit)} lookups used today" } ?: ""), DiagUi.GREEN)
+                    kind.save(candidate.trim())
+                    Diag.log("ratings", "${kind.name} key added ($from)")
+                    say(kind.worked(), DiagUi.GREEN)
                     onWorks()
                 }
-                false -> say("MDBList didn't accept this key. Check it and send it again.", DiagUi.RED)
-                null -> say("Couldn't reach MDBList. Check the TV's internet, then try again.", DiagUi.YELLOW)
+                false -> say("${kind.name} didn't accept this key. Check it and send it again.", DiagUi.RED)
+                null -> say("Couldn't reach ${kind.name}. Check the TV's internet, then try again.", DiagUi.YELLOW)
             }
         }
     }
 
     /** [onClose] runs when the window closes (Settings shows the new state). [typing]: opens on typing with the remote. */
-    fun keyWindow(activity: Activity, typing: Boolean = false, onClose: () -> Unit) {
+    fun keyWindow(activity: Activity, typing: Boolean = false, kind: Kind = MDBLIST, onClose: () -> Unit) {
         val main = Handler(Looper.getMainLooper())
         var drop: KeyDrop? = null
         var done = false
@@ -75,7 +96,7 @@ object RatingsUi {
 
         fun tryKey(candidate: String, from: String) {
             if (done) return
-            checkKey(activity, candidate, from, ::say) {
+            checkKey(activity, candidate, from, ::say, kind) {
                 done = true
                 drop?.stop()
                 c.body.findViewWithTag<View>("qr_area")?.visibility = View.GONE
@@ -87,8 +108,8 @@ object RatingsUi {
         }
 
         c = DiagUi.card(activity, 760) { card ->
-            card.title(if (Ratings.hasKey) "Change your MDBList key" else "Add your MDBList key", R.drawable.ic_glass_key, card.color(R.attr.appAccent))
-            card.line("Get it free at mdblist.com/preferences → API Access", 13f)
+            card.title(if (kind.has()) "Change your ${kind.name} key" else "Add your ${kind.name} key", R.drawable.ic_glass_key, card.color(R.attr.appAccent))
+            card.line("Get it free at ${kind.where}", 13f)
 
             // The QR code and the three steps beside it.
             val ip = localAddress()
@@ -145,7 +166,7 @@ object RatingsUi {
                     setTextColor(card.color(R.attr.appTextSecondary))
                     setPadding(0, card.dp(4), 0, 0)
                 })
-                drop = KeyDrop(token) { key -> main.post { tryKey(key, "phone") } }.also { if (!it.start()) area.visibility = View.GONE }
+                drop = KeyDrop(token, kind) { key -> main.post { tryKey(key, "phone") } }.also { if (!it.start()) area.visibility = View.GONE }
                 // Test builds: the page's address for the test tools (the token only opens this page, for 5 minutes).
                 if (BuildConfig.DEBUG) android.util.Log.d("RatingsKey", "page /k/$token")
             } else {
@@ -157,7 +178,7 @@ object RatingsUi {
             typeArea.tag = "type_area"
             typeArea.visibility = if (area.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             val field = EditText(activity).apply {
-                hint = "Your MDBList key"
+                hint = "Your ${kind.name} key"
                 textSize = 16f
                 isSingleLine = true
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -187,11 +208,11 @@ object RatingsUi {
                     field.requestFocus()
                 }
             }
-            if (Ratings.hasKey) card.pill(buttons, "Remove key") {
-                Ratings.removeKey()
-                Diag.log("ratings", "key removed")
+            if (kind.has()) card.pill(buttons, "Remove key") {
+                kind.remove()
+                Diag.log("ratings", "${kind.name} key removed")
                 card.dialog.dismiss()
-                showToast(activity, "Ratings are off and the key is deleted", android.widget.Toast.LENGTH_SHORT)
+                showToast(activity, kind.removed, android.widget.Toast.LENGTH_SHORT)
             }.setTextColor(0xFFF2A7A7.toInt())
             val close = card.pill(buttons, "Close") { card.dialog.dismiss() }
             (typeButton ?: field.takeIf { typeArea.visibility == View.VISIBLE } ?: close).let { v -> v.post { v.requestFocus() } }
@@ -251,7 +272,7 @@ object RatingsUi {
      * phone pastes the key. Only that address answers; it stops once a key works, after 5 minutes,
      * or when the window closes. The key goes straight to the TV and is never logged.
      */
-    private class KeyDrop(private val token: String, private val onKey: (String) -> Unit) {
+    private class KeyDrop(private val token: String, private val kind: Kind, private val onKey: (String) -> Unit) {
         @Volatile private var socket: ServerSocket? = null
         private val endsAt = SystemClock.elapsedRealtime() + PHONE_MS
 
@@ -300,7 +321,7 @@ object RatingsUi {
                         String(buf, 0, read)
                     }
                     val key = body.split('&').firstOrNull { it.startsWith("key=") }?.let { URLDecoder.decode(it.removePrefix("key="), "UTF-8").trim() } ?: ""
-                    if (Ratings.looksLikeKey(key)) {
+                    if (kind.looksLike(key)) {
                         onKey(key)
                         "200 OK" to page("Sent", "<div class=\"big ok\">&#10003;</div><h1>Sent</h1><p>Your TV is testing the key now and shows the result. You can close this page.</p>")
                     } else {
@@ -319,7 +340,7 @@ object RatingsUi {
 
         private fun form(problem: String?) = page(
             "Send your key",
-            "<h1>Send your MDBList key to the TV</h1><p>Paste the key from <b>mdblist.com/preferences</b> &rarr; <b>API Access</b>.</p>" +
+            "<h1>Send your ${kind.name} key to the TV</h1><p>Paste the key from <b>${kind.where.replace("→", "&rarr;")}</b>.</p>" +
                 (problem?.let { "<p class=bad>$it</p>" } ?: "") +
                 "<form method=post><input name=key placeholder=\"Paste the key here\" autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
                 "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. The key goes straight to your TV.</p>",
@@ -337,44 +358,63 @@ button{width:100%;font-size:17px;font-weight:600;padding:14px;border:0;border-ra
 
     // ---- How it works ----
 
+    /**
+     * How it works, in two pages (the size rule: at the biggest text size one page no longer fitted
+     * the screen, 2026-11-11): the keys first, then the fill, the library data and good to know.
+     */
     fun help(activity: Activity, onAddKey: (() -> Unit)?) {
         DiagUi.card(activity, 880) { c ->
-            c.title("Show IMDb and Rotten Tomatoes ratings", R.drawable.ic_glass_star, c.color(R.attr.appAccent))
-            c.line("The app gets real scores from MDBList, a free service. It needs a free key from MDBList: a kind of password that lets the app ask for ratings.", 13f)
-            val columns = c.row(c.dp(10))
-            columns.gravity = Gravity.TOP
-            fun column(right: Int) = LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = right }
-                columns.addView(this)
+            fun page(second: Boolean) {
+                c.clear()
+                c.title("Show IMDb and Rotten Tomatoes ratings", R.drawable.ic_glass_star, c.color(R.attr.appAccent))
+                c.line(
+                    if (!second) "The app gets real scores from MDBList, and works out which movie a title is with TMDB. Both are free, and each needs a free key: a kind of password that lets the app ask."
+                    else "Once a key is in, the app fills in the scores by itself.",
+                    13f,
+                )
+                val columns = c.row(c.dp(10))
+                columns.gravity = Gravity.TOP
+                fun column(right: Int) = LinearLayout(activity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = right }
+                    columns.addView(this)
+                }
+                fun LinearLayout.part(head: String, text: String) {
+                    addView(TextView(activity).apply {
+                        this.text = head
+                        textSize = 14f
+                        setTextColor(c.color(R.attr.appText))
+                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                        setPadding(0, c.dp(8), 0, c.dp(2))
+                    })
+                    addView(TextView(activity).apply {
+                        this.text = text
+                        textSize = 12.5f
+                        setLineSpacing(0f, 1.15f)
+                        setTextColor(c.color(R.attr.appTextSecondary))
+                    })
+                }
+                val left = column(c.dp(24))
+                val right = column(0)
+                if (!second) {
+                    left.part("1. MDBList key: the scores (needed)", "On your phone or computer, sign in at mdblist.com, open mdblist.com/preferences → API Access, and copy the key.")
+                    left.part("2. TMDB key: titles without an ID (optional)", "Many playlists don't say which movie a title is. With a TMDB key the app works it out from the name, year and poster. Sign in at themoviedb.org, open Settings → API, and copy the API Key (32 letters and digits).")
+                    right.part("3. Add a key", "Add key shows a code: scan it with your phone, paste the key, tap Send. Or choose Type key instead and use the remote. The key is tested as soon as it's saved.")
+                    right.part("4. Choose what you see", "Show on posters: scores under each poster's name. Off: only on the details page and the Home banner.\nFind by name: a title's own page may search by name and year, accepted only when the poster matches.")
+                } else {
+                    left.part("Whole playlist", "Scores for every title fill in quietly: only while the remote rests, and slowly during a video. Progress and Status show how far it is. The first time takes a day or more.\nAsk the provider for missing IDs: off, only TMDB is used.")
+                    left.part("Library data", "Back up saves everything looked up to one file, with no logins, keys or playlist names in it. Restore adds it on another TV, so that TV need not ask again.")
+                    right.part("If something looks wrong", "Wrong scores on a title? Open it and choose Wrong scores: that title is never matched again.\nCheck matching shows how titles were found.\nRefresh saved scores asks for every score again; the Whole playlist progress starts over.")
+                    right.part("Good to know", "• MDBList allows 1,000 lookups a day; 100 are kept for your browsing.\n• Scores are kept a week for recent titles, a month for older ones.\n• Both keys stay on this TV. MDBList gets a title's ID; TMDB gets its name and year. Never your login or what you watch.\n• Remove keys lets you choose which key to delete.")
+                    c.line("Ratings provided by MDBList. This app uses the TMDB API but is not endorsed or certified by TMDB. IMDb and Rotten Tomatoes scores belong to their owners.", 11.5f, top = 12)
+                }
+                val buttons = c.row(c.dp(14))
+                val turn = c.pill(buttons, if (!second) "Next: filling and good to know" else "Back: the keys") { page(!second) }
+                if (!second && onAddKey != null) c.pill(buttons, "Add key now") { c.dialog.dismiss(); onAddKey() }
+                c.pill(buttons, "Close") { c.dialog.dismiss() }
+                turn.post { turn.requestFocus() }
             }
-            fun LinearLayout.part(head: String, text: String) {
-                addView(TextView(activity).apply {
-                    this.text = head
-                    textSize = 14f
-                    setTextColor(c.color(R.attr.appText))
-                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                    setPadding(0, c.dp(8), 0, c.dp(2))
-                })
-                addView(TextView(activity).apply {
-                    this.text = text
-                    textSize = 12.5f
-                    setLineSpacing(0f, 1.15f)
-                    setTextColor(c.color(R.attr.appTextSecondary))
-                })
-            }
-            val left = column(c.dp(24))
-            left.part("1. Get your free key (about 2 minutes)", "On your phone or computer, sign in at mdblist.com, open mdblist.com/preferences → API Access, and copy the key.")
-            left.part("2. Add the key", "Add key shows a code: scan it with your phone, paste the key, tap Send. Or choose Type key instead and use the remote. The app tests the key as soon as it's saved.")
-            left.part("3. Choose what you see", "Show on posters: scores under each poster's name. Off: only on the details page and the Home banner.\nFind by name: titles without an ID are searched by name and year, and only accepted when the poster matches. Off: IDs only.")
-            val right = column(0)
-            right.part("If something looks wrong", "Wrong scores on a title? Open it and choose Wrong scores: that title is never matched again.\nCheck matching shows how many titles were found by ID, by name, or not found.\nRefresh saved scores asks again now instead of waiting.")
-            right.part("Good to know", "• 1,000 lookups a day. Today shows how many are used; it turns yellow past 800.\n• Scores are kept for a week for this year's and last year's titles, and a month for older ones, so most titles need no new lookup.\n• Your key stays on this TV. MDBList only gets a title's ID, or its name and year, never your playlist login or what you watch.\n• Remove key switches ratings off and deletes the key.")
-            c.line("Ratings provided by MDBList. IMDb and Rotten Tomatoes scores belong to their owners.", 11.5f, top = 12)
-            val buttons = c.row(c.dp(14))
-            val first = if (onAddKey != null) c.pill(buttons, "Add key now") { c.dialog.dismiss(); onAddKey() } else null
-            val close = c.pill(buttons, "Close") { c.dialog.dismiss() }
-            (first ?: close).let { v -> v.post { v.requestFocus() } }
+            page(false)
         }
     }
 

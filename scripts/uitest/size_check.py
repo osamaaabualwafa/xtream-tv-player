@@ -73,6 +73,30 @@ def settings(name):
     collect(f"{name} Settings")
 
 
+def open_settings():
+    """Home (Tabs layout): up to the top bar, along it to the gear, OK."""
+    home(home_style=3)
+    press(U, U, U, U, U, RT, RT, RT, RT, OK)
+    reach("SettingsActivity")
+
+
+def ratings(name):
+    """Settings > Ratings to the bottom (Your keys, Whole playlist, Library data), then How it works."""
+    open_settings()
+    press(D, D, RT)                   # Ratings, into the first card
+    for _ in range(4):                # down the cards, a few rows at a time
+        press(D, D, D, D)
+        collect(f"{name} Settings Ratings cards")
+    press(RT, RT, RT, L, L, L)        # along the Library data buttons
+    collect(f"{name} Settings Ratings cards")
+    open_settings()
+    press(D, D, RT, D, D, D, OK)      # How it works (after the two key buttons and Refresh)
+    collect(f"{name} Settings How it works")
+    press(OK)                         # its second page
+    collect(f"{name} Settings How it works, page 2")
+    press(BACK)
+
+
 def avatar(name):
     home(home_style=2)
     press(U, RT, OK)
@@ -108,7 +132,7 @@ def series(name):
     collect(f"{name} Series page")
 
 
-STEPS = {"home": home_layouts, "settings": settings, "avatar": avatar, "movies": movies, "series": series}
+STEPS = {"home": home_layouts, "settings": settings, "ratings": ratings, "avatar": avatar, "movies": movies, "series": series}
 
 
 def main():

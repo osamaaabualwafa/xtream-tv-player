@@ -195,6 +195,27 @@
                     android:layout_marginBottom="10dp"
                     android:background="?attr/appAccent" />
 
+                <!-- 16.3: while Left/Right is pressed or held on the timeline, the stretch between where
+                     the video is and where it will jump to, and a faint dot where the video still is. -->
+                <View
+                    android:id="@+id/vc_ahead"
+                    android:layout_width="match_parent"
+                    android:layout_height="4dp"
+                    android:layout_gravity="bottom"
+                    android:layout_marginBottom="10dp"
+                    android:background="#8CFFFFFF"
+                    android:visibility="invisible" />
+
+                <View
+                    android:id="@+id/vc_ghost"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_gravity="bottom"
+                    android:layout_marginBottom="8dp"
+                    android:alpha="0.55"
+                    android:background="@drawable/vc_dot"
+                    android:visibility="invisible" />
+
                 <View
                     android:id="@+id/vc_thumb"
                     android:layout_width="14dp"

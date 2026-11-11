@@ -96,7 +96,9 @@ class T09_StressTest : QaTest() {
         )
         val rnd = java.util.Random(20261104)
         val screens = HashSet<String>()
-        repeat(800) { i ->
+        // 500 keys: each waits for the screen to settle (over a second while a video plays), and 800 no
+        // longer fitted in the test's 12 minutes.
+        repeat(500) { i ->
             val k = keys[rnd.nextInt(keys.size)]
             // Never leave the app: if Back would close it, go Home instead.
             val here = Qa.current()
@@ -108,7 +110,7 @@ class T09_StressTest : QaTest() {
                 screens.add(here.javaClass.simpleName)
                 Qa.key(k, 1, 150)
             }
-            if (i % 200 == 199) Qa.shot("random_$i", "After ${i + 1} random remote keys")
+            if (i % 125 == 124) Qa.shot("random_$i", "After ${i + 1} random remote keys")
         }
         Qa.step("screens visited by random keys: $screens")
         Qa.metric("random_screens_visited", screens.size)

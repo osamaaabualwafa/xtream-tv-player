@@ -28,6 +28,23 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
     private var section: Section? = null
+
+    // Library data: where the backup file goes, and which file to restore.
+    private val createLibrary = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) libraryWork("Backing up library data", false) { _, _ ->
+            val tmp = java.io.File(cacheDir, "library-export.db")
+            try {
+                Library.export(this, tmp)
+                contentResolver.openOutputStream(uri)?.use { out -> tmp.inputStream().use { it.copyTo(out) } } ?: throw java.io.IOException("The file could not be written")
+            } finally {
+                tmp.delete()
+            }
+            "Library data saved"
+        }
+    }
+    private val openLibrary = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) restoreLibrary { tmp -> contentResolver.openInputStream(uri)?.use { input -> tmp.outputStream().use { input.copyTo(it) } } ?: throw java.io.IOException("The file could not be read") }
+    }
     private val glass get() = prefs.themeIndex == Appearance.THEME_GLASS
     /** Glass: rows go into the current card; [cardHost] is where new cards go. */
     private var target: android.view.ViewGroup? = null
@@ -489,38 +506,83 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(dp(10), dp(top), dp(10), dp(8))
         })
         run {
-            heading("Your MDBList key", R.drawable.ic_glass_key)
+            heading("Your keys", R.drawable.ic_glass_key)
             small("Scores show like this:", top = 6)
             (target ?: body).addView(TextView(this).apply {
                 text = RatingBadges.line(context, RatingBadges.Scores("7.8", 92), themeColor(R.attr.appText))
                 textSize = 17f
                 setPadding(dp(10), 0, dp(10), dp(8))
             })
-            linkRow("Key", null, if (Ratings.keyWorks) "●  Valid · ••••${Ratings.keyEnd}" else "●  Not accepted · ••••${Ratings.keyEnd}", "r_key",
+            linkRow("MDBList", "Scores, awards, trailers", if (Ratings.keyWorks) "●  Valid · ••••${Ratings.keyEnd}" else "●  Not accepted · ••••${Ratings.keyEnd}", "r_key",
                 tint = if (Ratings.keyWorks) DiagUi.GREEN else DiagUi.RED, onClick = null)
+            linkRow("TMDB", "Finds titles that have no ID", when {
+                !Tmdb.hasKey -> "Not added"
+                Tmdb.keyWorks -> "●  Valid · ••••${Tmdb.keyEnd}"
+                else -> "●  Not accepted · ••••${Tmdb.keyEnd}"
+            }, "r_tmdb", tint = when {
+                !Tmdb.hasKey -> themeColor(R.attr.appTextSecondary)
+                Tmdb.keyWorks -> DiagUi.GREEN
+                else -> DiagUi.RED
+            }, onClick = null)
             addDivider(target ?: body)
             (target ?: body).addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) })
             // The same round buttons as the Report card in About: icon, then words.
-            startAction("Add or change key", R.drawable.ic_glass_key, "r_add") { RatingsUi.keyWindow(this) { reshow("r_add") } }
+            startAction("Add or change MDBList key", R.drawable.ic_glass_key, "r_add") { RatingsUi.keyWindow(this) { reshow("r_add") } }
+            startAction(if (Tmdb.hasKey) "Add or change TMDB key" else "Add TMDB key", R.drawable.ic_glass_key, "r_add_tmdb") {
+                RatingsUi.keyWindow(this, kind = RatingsUi.TMDB) { reshow("r_add_tmdb") }
+            }
             startAction("Refresh saved scores", R.drawable.ic_glass_refresh, "r_refresh") {
-                Ratings.refreshAll()
-                showToast(this, "Scores will be asked again as titles are shown", android.widget.Toast.LENGTH_SHORT)
+                // Asks first (2026-11-10: pressed to see what it does, and the whole playlist started again from 0).
+                val m = Ratings.matching()
+                val lookups = (m.byId + m.byName + RatingsFill.BATCH - 1) / RatingsFill.BATCH
+                confirm(
+                    "Refresh saved scores?",
+                    "Every saved score is asked again from MDBList" + (if (lookups > 0) ", about $lookups of today's lookups" else "") + ". " +
+                        "Scores stay on screen until the new ones arrive, but the Whole playlist progress starts again from 0.\n\n" +
+                        "Scores already refresh by themselves every week (recent titles) or month (older ones), so this is rarely needed.",
+                    "Refresh",
+                ) {
+                    Ratings.refreshAll()
+                    showToast(this, "Scores are being asked again", android.widget.Toast.LENGTH_SHORT)
+                }
             }
             startAction("How it works", R.drawable.ic_glass_file, "r_help") { RatingsUi.help(this, null) }
-            startAction("Remove key", R.drawable.ic_glass_trash, "r_remove", danger = true) {
-                androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("Remove the key?")
-                    .setMessage("Ratings switch off, and the key and every saved score are deleted from this TV.")
-                    .setPositiveButton("Remove") { _, _ ->
-                        Ratings.removeKey()
-                        Diag.log("ratings", "key removed")
-                        reshow("r_add")
+            // Remove: with both keys, a choice of which; with one, a question about that one.
+            startAction(if (Tmdb.hasKey) "Remove keys" else "Remove key", R.drawable.ic_glass_trash, "r_remove", danger = true) {
+                fun removeMdblist(both: Boolean) = confirm(
+                    if (both) "Remove both keys?" else "Remove the MDBList key?",
+                    if (both) "Ratings switch off, and both keys and every saved score are deleted from this TV."
+                    else "Ratings switch off, and the MDBList key and every saved score are deleted from this TV." + if (Tmdb.hasKey) " The TMDB key stays." else "",
+                    "Remove",
+                ) {
+                    Ratings.removeKey(keepTmdb = !both)
+                    Diag.log("ratings", if (both) "both keys removed" else "MDBList key removed")
+                    reshow("r_add")
+                }
+                fun removeTmdb() = confirm(
+                    "Remove the TMDB key?",
+                    "Titles without an ID are no longer recognised by name. Your saved scores and the MDBList key stay.",
+                    "Remove",
+                ) {
+                    Tmdb.removeKey()
+                    RatingsFill.rebuild()
+                    Diag.log("ratings", "TMDB key removed")
+                    reshow("r_add_tmdb")
+                }
+                if (!Tmdb.hasKey) removeMdblist(both = false) else {
+                    DiagUi.card(this, 520) { c ->
+                        c.title("Which key to remove?", R.drawable.ic_glass_trash, 0xFFF2A7A7.toInt())
+                        c.line("MDBList gives the scores. TMDB recognises titles that have no ID.", 13f)
+                        fun choice(label: String, top: Int, action: (() -> Unit)?) = c.pill(c.row(c.dp(top)), label) { c.dialog.dismiss(); action?.invoke() }
+                        choice("MDBList key", 14) { removeMdblist(both = false) }
+                        choice("TMDB key", 8) { removeTmdb() }
+                        choice("Both keys", 8) { removeMdblist(both = true) }
+                        choice("Cancel", 8, null).let { v -> v.post { v.requestFocus() } }
                     }
-                    .setNegativeButton("Cancel", null)
-                    .show()
+                }
             }
         }
-        small("Your key stays on this TV. MDBList only gets a title's ID, or its name and year.", top = 8)
+        small("Your keys stay on this TV. MDBList and TMDB only get a title's ID, or its name and year.", top = 8)
 
         // The right card: what is shown, matching, today's usage.
         if (right != null) cardHost = right
@@ -552,7 +614,339 @@ class SettingsActivity : AppCompatActivity() {
         }
         cardHost = null
         target = null
+        wholePlaylistCard()
+        target = null
+        libraryCard()
+        target = null
     }
+
+    /**
+     * Settings > Ratings > Library data (agreed 2026-11-10): Back up, Restore, Undo last change and
+     * Clear for what the app has looked up, and what the last restore matched, playlist by playlist.
+     * A playlist that is not on this TV is never named: the file carries no names.
+     */
+    private fun libraryCard() {
+        heading("Library data", R.drawable.ic_glass_download)
+        val host = target ?: body
+        fun n(v: Int) = "%,d".format(v)
+        fun small(text: String) = TextView(this).apply {
+            this.text = text
+            textSize = 12.5f
+            setTextColor(themeColor(R.attr.appTextSecondary))
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            host.addView(this)
+        }
+        val info = small("…")
+        Thread {
+            val (titles, works) = runCatching { Library.sizes() }.getOrDefault(0 to 0)
+            runOnUiThread { info.text = "${n(works)} movies and series with scores are saved on this TV, for ${n(titles)} titles in your playlists. The backup file has no logins, addresses, keys or playlist names." }
+        }.start()
+        Library.lastSummary(this)?.let { s ->
+            val day = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+            val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+            small("Last restore: ${time.format(java.util.Date(s.at))}" + if (s.backupAt > 0) " · from the backup of ${day.format(java.util.Date(s.backupAt))}" else "")
+            val names = prefs.playlists().associate { it.id to it.name }
+            var other = 0
+            s.sections.forEachIndexed { i, sec ->
+                val name = sec.playlist?.let { names[it] }
+                if (name != null) {
+                    fun part(label: String, found: Int, of: Int) = if (of > 0) "$label ${n(found)} of ${n(of)}" else "$label ${n(found)}"
+                    val known = sec.moviesOf + sec.seriesOf > 0
+                    val missing = (sec.moviesOf - sec.movies).coerceAtLeast(0) + (sec.seriesOf - sec.series).coerceAtLeast(0)
+                    linkRow(name, part("Movies", sec.movies, sec.moviesOf) + " · " + part("Series", sec.series, sec.seriesOf) + if (known) " matched · ${n(missing)} not matched" else " matched",
+                        "●  On this TV", "lib_$i", tint = DiagUi.GREEN, onClick = null)
+                } else {
+                    other++
+                    linkRow(if (other == 1) "Another playlist" else "Another playlist $other", "${n(sec.titles)} titles · kept for when you add it", "●  Not on this TV", "lib_$i",
+                        tint = themeColor(R.attr.appTextSecondary), onClick = null)
+                }
+            }
+            linkRow("Scores and details", "${n(s.worksNew)} were new on this TV · ${n(s.worksHad)} were already here", "●  Shared", "lib_works", tint = DiagUi.GREEN, onClick = null)
+        }
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            isBaselineAligned = false
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(10); bottomMargin = dp(10); leftMargin = dp(6); rightMargin = dp(6)
+            }
+        }
+        // The same buttons as the rest of Settings (height, shape, icon then words), four across.
+        fun button(label: String, icon: Int, tag: String, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
+            b.tag = tag
+            b.setOnClickListener { onClick() }
+            b.background = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_settings_action)
+            b.minHeight = dp(46)
+            b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            b.setPadding(dp(16), 0, dp(16), 0)
+            val drawable = androidx.core.content.ContextCompat.getDrawable(this, icon)!!.mutate()
+            drawable.setBounds(0, 0, dp(20), dp(20))
+            if (danger) androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, 0xFFF2A7A7.toInt())
+            b.setCompoundDrawablesRelative(drawable, null, null, null)
+            b.compoundDrawablePadding = dp(12)
+            if (danger) b.setTextColor(0xFFF2A7A7.toInt())
+            b.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4); rightMargin = dp(4) }
+            buttons.addView(b)
+        }
+        button("Back up", R.drawable.ic_glass_download, "lib_backup") { backUpLibrary() }
+        button("Restore", R.drawable.ic_glass_file, "lib_restore") { pickLibrary() }
+        if (Library.hasUndo(this)) button("Undo", R.drawable.ic_glass_refresh, "lib_undo") {
+            confirm("Undo the last change?", "The library data goes back to how it was before the last Restore or Clear.", "Undo") {
+                libraryWork("Putting the library data back", false) { _, _ -> if (Library.undo(this)) "Last change undone" else "Nothing to undo" }
+            }
+        }
+        button("Clear", R.drawable.ic_glass_trash, "lib_clear", danger = true) {
+            confirm("Clear library data?", "Every saved score and detail on this TV is deleted. The fill will look them up again. Playlists, favourites, settings and keys are not touched.", "Clear") {
+                libraryWork("Clearing library data", false) { _, _ -> Library.clear(this); "Library data cleared" }
+            }
+        }
+        host.addView(buttons)
+    }
+
+    /** A question with the highlight on Cancel, so a second press of OK does nothing. */
+    private fun confirm(title: String, message: String, yes: String, onYes: () -> Unit) {
+        val d = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(yes) { _, _ -> onYes() }
+            .setNegativeButton("Cancel", null)
+            .create()
+        d.setOnShowListener { d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.requestFocus() }
+        d.show()
+    }
+
+    private fun backUpLibrary() {
+        if (Library.hasFilePicker(this, android.content.Intent.ACTION_CREATE_DOCUMENT)) {
+            try {
+                createLibrary.launch(Library.FILE_NAME)
+                return
+            } catch (e: android.content.ActivityNotFoundException) {
+                // fall through to the app folder
+            }
+        }
+        // No file picker on this TV: save in the app's own folder.
+        val file = Library.fallbackFile(this)
+        libraryWork("Backing up library data", false) { _, _ ->
+            Library.export(this, file)
+            "Saved to:\n${file.absolutePath}\n\nCopy this file to the other TV, then choose Restore there."
+        }
+    }
+
+    private fun pickLibrary() {
+        if (Library.hasFilePicker(this, android.content.Intent.ACTION_OPEN_DOCUMENT)) {
+            try {
+                openLibrary.launch(arrayOf("*/*"))
+                return
+            } catch (e: android.content.ActivityNotFoundException) {
+                // fall through to the app folder
+            }
+        }
+        val file = Library.fallbackFile(this)
+        if (file.exists()) {
+            restoreLibrary { tmp -> file.copyTo(tmp, overwrite = true) }
+        } else {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("No library data file found")
+                .setMessage("This TV has no file picker. Put the file here, then choose Restore again:\n${file.absolutePath}")
+                .setPositiveButton("OK", null)
+                .show()
+        }
+    }
+
+    /** Restore: the pop-up with its bar while the backup is matched with this TV; the result then stays on the card. */
+    private fun restoreLibrary(fetch: (java.io.File) -> Unit) {
+        libraryWork("Restoring library data", true) { progress, cancelled ->
+            val tmp = java.io.File(cacheDir, "library-import.db")
+            try {
+                progress(1, "Reading the file")
+                fetch(tmp)
+                Library.import(this, tmp, progress, cancelled)
+            } finally {
+                tmp.delete()
+                java.io.File(tmp.path + "-journal").delete()
+            }
+            "Library data restored"
+        }
+    }
+
+    /**
+     * A pop-up with a bar while [work] runs off the screen's thread; then the page is drawn again and
+     * [work]'s message shown. [work] gets (percent, what it is doing) and "was Cancel pressed?".
+     */
+    private fun libraryWork(title: String, canCancel: Boolean, work: ((Int, String) -> Unit, () -> Boolean) -> String) {
+        var cancel = false
+        var bar: android.widget.ProgressBar? = null
+        var label: TextView? = null
+        val card = DiagUi.card(this, 520) { c ->
+            c.title(title, R.drawable.ic_glass_download, c.color(R.attr.appAccent))
+            c.line(if (canCancel) "Matching the backup with this TV's playlists" else "One moment", 13f)
+            bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                isIndeterminate = !canCancel
+                progressTintList = android.content.res.ColorStateList.valueOf(c.color(R.attr.appAccent))
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(c.color(R.attr.appAccent))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, c.dp(6)).apply { topMargin = c.dp(14) }
+            }
+            c.body.addView(bar)
+            label = c.line(" ", 12.5f, top = 8)
+            if (canCancel) {
+                val buttons = c.row(c.dp(14))
+                c.pill(buttons, "Cancel") { cancel = true; label?.text = "Cancelling…" }.let { v -> v.post { v.requestFocus() } }
+            }
+        }
+        card.dialog.setCancelable(false)
+        Thread {
+            val result = runCatching {
+                work({ percent, text -> runOnUiThread { bar?.progress = percent; if (!cancel) label?.text = text } }, { cancel })
+            }
+            runOnUiThread {
+                runCatching { card.dialog.dismiss() }
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val e = result.exceptionOrNull()
+                val message = when {
+                    e is Library.Cancelled -> "Cancelled. Nothing was changed."
+                    e != null -> "It didn't work: ${e.message ?: e.javaClass.simpleName}"
+                    else -> result.getOrNull() ?: ""
+                }
+                if (e != null && e !is Library.Cancelled) Diag.log("ratings", "library data: ${e.javaClass.simpleName}")
+                if (section == Section.RATINGS) reshow("lib_backup")
+                if (message.contains('\n')) {
+                    androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Library data").setMessage(message).setPositiveButton("OK", null).show()
+                } else {
+                    showToast(this, message, android.widget.Toast.LENGTH_LONG)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Settings > Ratings > Whole playlist (work list Section 5, approved 2026-11-10): the fill's two
+     * switches on the left; its progress and what it is doing now on the right, kept up to date while
+     * the page is open. Other themes: the same rows one under the other.
+     */
+    private fun wholePlaylistCard() {
+        heading("Whole playlist", R.drawable.ic_glass_list)
+        val card = target
+        var rightColumn: LinearLayout? = null
+        if (glass && card != null) {
+            val columns = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            fun column(rightMargin: Int) = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { this.rightMargin = rightMargin }
+            }
+            val leftColumn = column(dp(24))
+            rightColumn = column(0)
+            columns.addView(leftColumn)
+            columns.addView(rightColumn)
+            card.addView(columns)
+            target = leftColumn
+        }
+        option("Fill whole playlist", listOf(true to "On", false to "Off"), { Ratings.fillWhole }, { Ratings.fillWhole = it; RatingsFill.rebuild() }, tag = "r_fill")
+        option("Fill during playback", listOf(true to "On", false to "Off"), { Ratings.fillDuringPlayback }, { Ratings.fillDuringPlayback = it }, tag = "r_fill_play")
+        // Approved 2026-11-11: the owner can stop the fill from asking their provider at all.
+        option("Ask the provider for missing IDs", listOf(true to "On", false to "Off"), { Ratings.askProvider }, { Ratings.askProvider = it; RatingsFill.rebuild() }, tag = "r_fill_provider")
+        (target ?: body).findViewWithTag<View>("r_fill_provider")?.let { row ->
+            val title = row.findViewById<TextView>(R.id.title)
+            title.isSingleLine = false
+            title.text = android.text.SpannableStringBuilder("Ask the provider for missing IDs").append("\n").also { b ->
+                val start = b.length
+                b.append("One movie every 5 seconds. Off: TMDB only")
+                b.setSpan(android.text.style.RelativeSizeSpan(0.8f), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                b.setSpan(android.text.style.ForegroundColorSpan(themeColor(R.attr.appTextSecondary)), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            // Two lines: the row grows with its text (the size rule: a minimum height, never a fixed one).
+            row.layoutParams = row.layoutParams.apply { height = LinearLayout.LayoutParams.WRAP_CONTENT }
+            row.minimumHeight = dp(if (glass) 48 else 58)
+            row.setPadding(row.paddingLeft, dp(6), row.paddingRight, dp(6))
+        }
+        if (rightColumn != null) target = rightColumn
+        linkRow("Progress", null, "–", "r_progress", onClick = null)
+        val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            progressTintList = android.content.res.ColorStateList.valueOf(themeColor(R.attr.appAccent))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(themeColor(R.attr.appTextSecondary))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(5)).apply {
+                leftMargin = dp(10); rightMargin = dp(10); bottomMargin = dp(8)
+            }
+        }
+        (target ?: body).addView(bar)
+        linkRow("Status", null, "–", "r_status", tint = DiagUi.GREEN, onClick = null)
+        if (card != null) target = card
+        (target ?: body).addView(TextView(this).apply {
+            text = "Works while the app is open. Scores, cast, director, genre, year and length are saved on this TV."
+            textSize = 12.5f
+            setTextColor(themeColor(R.attr.appTextSecondary))
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        })
+
+        val host = body
+        fun row(tag: String) = host.findViewWithTag<View>(tag)
+        fun setRow(tag: String, name: String, sub: String?, value: String, tint: Int?) {
+            val r = row(tag) ?: return
+            val title = r.findViewById<TextView>(R.id.title)
+            val shown = if (sub == null) name else "$name\n$sub"
+            if (title.text.toString() != shown) {
+                title.text = if (sub == null) name else android.text.SpannableStringBuilder(name).append("\n").also { b ->
+                    val start = b.length
+                    b.append(sub)
+                    b.setSpan(android.text.style.RelativeSizeSpan(0.8f), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    b.setSpan(android.text.style.ForegroundColorSpan(themeColor(R.attr.appTextSecondary)), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+            val v = r.findViewById<TextView>(R.id.subtitle)
+            if (v.text.toString() != value) v.text = value
+            v.setTextColor(tint ?: themeColor(R.attr.appAccent))
+        }
+        fun about(seconds: Long): String = when {
+            seconds < 90 * 60 -> "about ${(seconds / 60).coerceAtLeast(1)} minutes left"
+            seconds < 48 * 3600 -> "about ${(seconds + 1800) / 3600} hours left"
+            else -> "about ${(seconds + 43_200) / 86_400} days left"
+        }
+        val grey = themeColor(R.attr.appTextSecondary)
+        var ticks = 0
+        val update = object : Runnable {
+            override fun run() {
+                if (section != Section.RATINGS || row("r_status") == null) return
+                val p = RatingsFill.progress()
+                setRow("r_progress", "Progress", null, if (p.total == 0) "–" else "${"%,d".format(p.ready)} of ${"%,d".format(p.total)}", null)
+                bar.progress = if (p.total == 0) 0 else (p.ready * 1000L / p.total).toInt()
+                // One line: the dot's colour, the state, and the reason beside it.
+                val (label, tint) = when (p.state) {
+                    RatingsFill.State.OFF -> (if (Ratings.fillWhole) "●  Off · ratings are off" else "●  Off · switched off") to grey
+                    RatingsFill.State.STARTING -> "●  Starting · playlist loading" to grey
+                    RatingsFill.State.FILLING -> "●  Filling · ${about(p.secondsLeft)}" to DiagUi.GREEN
+                    RatingsFill.State.BROWSING -> "●  Paused · remote in use" to grey
+                    RatingsFill.State.PLAYBACK -> "●  Paused · something is playing" to grey
+                    RatingsFill.State.TOMORROW -> "●  Waiting · daily limit reached" to DiagUi.YELLOW
+                    RatingsFill.State.OFFLINE -> "●  Waiting · no internet" to DiagUi.YELLOW
+                    RatingsFill.State.DONE -> "●  Done · ${"%,d".format(p.ready)} titles filled" to DiagUi.GREEN
+                    RatingsFill.State.BAD_KEY -> "●  Stopped · key not accepted" to DiagUi.RED
+                    RatingsFill.State.STOPPED -> "●  Stopped · could not connect" to DiagUi.RED
+                }
+                val sub: String? = null
+                setRow("r_status", "Status", sub, label, tint)
+                // Today's lookups and the matching counts move while the fill runs: kept up to date too.
+                if (ticks++ % 5 == 0) {
+                    Ratings.usage()?.let { u ->
+                        val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(u.resetsAt))
+                        setRow("r_today", "Today", "Resets at $at · scores kept 7 to 30 days", "${"%,d".format(u.used)} of ${"%,d".format(u.limit)}",
+                            if (u.used * 10 >= u.limit * 8) DiagUi.YELLOW else null)
+                    }
+                    val m = Ratings.matching()
+                    if (m.byId + m.byName + m.notFound > 0) setRow("r_tried", "Matching so far", "${m.byId} by ID · ${m.byName} by name · ${m.notFound} not found", "", null)
+                }
+                host.postDelayed(this, 1000)
+            }
+        }
+        host.removeCallbacks(fillTicker)
+        fillTicker = update
+        host.post(update)
+    }
+
+    private var fillTicker: Runnable? = null
 
     /** Get started's round buttons: icon then words, the card's full width. */
     private fun startAction(label: String, icon: Int, tag: String, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->

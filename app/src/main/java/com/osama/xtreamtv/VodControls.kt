@@ -56,6 +56,8 @@ class VodControls(private val root: View, private val host: Host) {
     private val buffered: View = root.findViewById(R.id.vc_buffered)
     private val played: View = root.findViewById(R.id.vc_played)
     private val thumb: View = root.findViewById(R.id.vc_thumb)
+    private val ahead: View = root.findViewById(R.id.vc_ahead)
+    private val ghost: View = root.findViewById(R.id.vc_ghost)
     private val bubble: TextView = root.findViewById(R.id.vc_bubble)
     private val row: View = root.findViewById(R.id.vc_row)
     private val play: ImageView = root.findViewById(R.id.vc_play)
@@ -118,22 +120,53 @@ class VodControls(private val root: View, private val host: Host) {
             if (hasFocus) {
                 showBubble(host.positionMs())
             } else {
+                endScrub()
                 bubble.visibility = View.INVISIBLE
                 meta.alpha = 1f
             }
         }
+        // 16.3: on the timeline a press moves 1 minute and a hold grows the step (1, 2, then 5
+        // minutes, never more than about a twentieth of the video). The marker and the time label
+        // move at once; the video jumps once, on release, to the time shown (a weak TV would
+        // reload the stream for every step otherwise). The normal skip elsewhere keeps Settings' jump.
         timeline.setOnKeyListener { _, keyCode, event ->
-            val delta = when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_RIGHT -> TIMELINE_STEP_MS
-                KeyEvent.KEYCODE_DPAD_LEFT -> -TIMELINE_STEP_MS
-                else -> 0L
+            val sign = when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_RIGHT -> 1
+                KeyEvent.KEYCODE_DPAD_LEFT -> -1
+                else -> 0
             }
-            if (delta == 0L) return@setOnKeyListener false
+            if (sign == 0) return@setOnKeyListener false
+            val p = host.player
+            val duration = p?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }
+            if (p == null || duration == null) {
+                // No known length: the old fixed step, at once.
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    host.seekBy(sign * TIMELINE_STEP_MS)
+                    poke()
+                    refresh()
+                    showBubble(host.positionMs())
+                }
+                return@setOnKeyListener true
+            }
             if (event.action == KeyEvent.ACTION_DOWN) {
-                host.seekBy(delta)
+                val now = android.os.SystemClock.uptimeMillis()
+                // Held: four steps a second, however fast the remote repeats.
+                if (event.repeatCount > 0 && now - scrubStepAt < 250) return@setOnKeyListener true
+                scrubStepAt = now
+                if (scrubTarget < 0) {
+                    scrubFrom = p.currentPosition.coerceIn(0, duration)
+                    scrubTarget = host.positionMs()
+                }
+                scrubTarget = (scrubTarget + sign * scrubStep(event.eventTime - event.downTime, duration)).coerceIn(0, duration - 1_000)
+                poke()
+                showScrub(duration)
+            } else if (event.action == KeyEvent.ACTION_UP && scrubTarget >= 0) {
+                val target = scrubTarget
+                endScrub()
+                host.seekBy(target - host.positionMs())
                 poke()
                 refresh()
-                showBubble(host.positionMs())
+                showBubble(target)
             }
             true
         }
@@ -211,6 +244,7 @@ class VodControls(private val root: View, private val host: Host) {
         root.removeCallbacks(hideRunnable)
         root.removeCallbacks(ticker)
         bubble.visibility = View.INVISIBLE
+        endScrub()
         meta.alpha = 1f
         root.animate().cancel()
         root.animate().alpha(0f).setDuration(FADE_MS).withLayer().withEndAction {
@@ -248,6 +282,56 @@ class VodControls(private val root: View, private val host: Host) {
         root.animate().alpha(1f).setDuration(FADE_MS).withLayer().start()
         root.removeCallbacks(ticker)
         root.post(ticker)
+    }
+
+    // ---- Timeline scrubbing (16.3) ----
+
+    /** Where the video will jump on release; -1 when no press or hold is in progress. */
+    private var scrubTarget = -1L
+    /** Where the video really was when the press or hold began. */
+    private var scrubFrom = 0L
+    private var scrubStepAt = 0L
+
+    /** The step for a key held [heldMs]: 1 min, 2 min from 1.5 s, 5 min from 3 s; smaller for short videos. */
+    private fun scrubStep(heldMs: Long, duration: Long): Long {
+        val tier = when {
+            heldMs < 1_500 -> 60_000L
+            heldMs < 3_000 -> 120_000L
+            else -> 300_000L
+        }
+        val cap = if (duration < 10 * 60_000L) (duration / 10).coerceAtLeast(5_000L) else maxOf(60_000L, duration / 20 / 30_000L * 30_000L)
+        return minOf(tier, cap)
+    }
+
+    /** The marker, the lighter stretch and the label ("1:05:10  ·  +24 min") at the target. */
+    private fun showScrub(duration: Long) {
+        val width = timeline.width
+        if (width <= 0) return
+        val fromF = (scrubFrom.toFloat() / duration).coerceIn(0f, 1f)
+        val toF = (scrubTarget.toFloat() / duration).coerceIn(0f, 1f)
+        thumb.translationX = width * toF - thumb.width / 2f
+        ahead.pivotX = 0f
+        ahead.translationX = width * minOf(fromF, toF)
+        ahead.scaleX = kotlin.math.abs(toF - fromF)
+        ahead.visibility = View.VISIBLE
+        ghost.translationX = width * fromF - ghost.width / 2f
+        ghost.visibility = View.VISIBLE
+        val diff = scrubTarget - scrubFrom
+        val amount = kotlin.math.abs(diff).let { if (it < 60_000) "${it / 1000} s" else "${(it + 30_000) / 60_000} min" }
+        bubble.text = "${formatDuration(scrubTarget)}  ·  ${if (diff >= 0) "+" else "−"}$amount"
+        bubble.visibility = View.VISIBLE
+        meta.alpha = 0f
+        root.removeCallbacks(hideBubble)
+        bubble.post {
+            val x = width * toF
+            bubble.translationX = (x - bubble.width / 2f).coerceIn(-bubble.width / 2f, width - bubble.width / 2f)
+        }
+    }
+
+    private fun endScrub() {
+        scrubTarget = -1
+        ahead.visibility = View.INVISIBLE
+        ghost.visibility = View.INVISIBLE
     }
 
     private fun showBubble(positionMs: Long) {
@@ -296,7 +380,8 @@ class VodControls(private val root: View, private val host: Host) {
             val playedF = (pos.toFloat() / duration).coerceIn(0f, 1f)
             played.scaleX = playedF
             buffered.scaleX = (p.bufferedPosition.toFloat() / duration).coerceIn(0f, 1f)
-            thumb.translationX = width * playedF - thumb.width / 2f
+            // While Left/Right is pressed or held, the marker shows the target (showScrub).
+            if (scrubTarget < 0) thumb.translationX = width * playedF - thumb.width / 2f
         }
         val playing = p.playWhenReady
         if (playing != shownPlaying) {

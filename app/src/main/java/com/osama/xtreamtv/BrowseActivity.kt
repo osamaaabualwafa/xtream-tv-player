@@ -689,6 +689,7 @@ class BrowseActivity : AppCompatActivity() {
 
     private fun selectCategory(category: Category) {
         currentCategory = category
+        RatingsFill.noteCategory(type, category.id)
         // The items are about to change: coming back lands on the first one, not an old row.
         itemsSection.forget()
         // The strip described the old category's item: blank it (keeping its space) until one is highlighted.
