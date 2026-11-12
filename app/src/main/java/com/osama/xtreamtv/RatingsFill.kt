@@ -71,7 +71,8 @@ object RatingsFill {
         if (total == 0 && groupsSent == 0) return null
         return "${state.name.lowercase()} · $ready of $total ready · since the app started: $groupsSent groups ($titlesAsked titles, $titlesFound found) · " +
             "TMDB named $tmdbFound of $tmdbAsked · provider asked $providerAsked · $noId without an id · details added $detailsAdded, $detailsLeft to go" +
-            (if (idleRuns > 0 || idleRun) " · under the screensaver: $idleRuns times, $idleMinutes min, $idleTitles titles" + (if (idleRun) " (working now)" else "") else "") +
+            (if (idleRuns > 0 || idleRun) " · while idle (screensaver or screen off): $idleRuns times, $idleMinutes min, $idleTitles titles" + (if (idleRun) " (working now)" else "") else "") +
+            (if (offMinutes > 0 || screenOff) " · with the screen off: $offMinutes min" + (if (screenOff && idleRun) " (now)" else "") else "") +
             (if (!Ratings.fillWhenIdle) " · keep filling when idle: off" else "")
     }
 
@@ -173,6 +174,10 @@ object RatingsFill {
     // Now: when the screensaver takes the screen from the app, the fill goes on, kept alive by a small
     // service with a notice (FillService). It ends when the screensaver ends, the screen goes off, the
     // app comes back, or there is nothing left to do. Another app in front: never.
+    //
+    // 2026-11-13 (owner: the TV keeps its Wi-Fi with the screen off): the screen going off no longer
+    // stops it. The service keeps the processor and Wi-Fi awake while it works ([FillService]); it
+    // ends when the app is opened, the screen comes back on another app, or nothing is left.
 
     @Volatile private var dreaming = false
     @Volatile private var idleRun = false
@@ -185,6 +190,10 @@ object RatingsFill {
     @Volatile private var idleRuns = 0
     @Volatile private var idleMinutes = 0L
     @Volatile private var idleTitles = 0
+    /** The screen is off (since [screenOffAt]); minutes filled with it off, this session. */
+    @Volatile private var screenOff = false
+    private var screenOffAt = 0L
+    @Volatile private var offMinutes = 0L
 
     /** True while the fill is working under the screensaver. */
     val underScreensaver: Boolean get() = idleRun
@@ -194,6 +203,7 @@ object RatingsFill {
             addAction(android.content.Intent.ACTION_DREAMING_STARTED)
             addAction(android.content.Intent.ACTION_DREAMING_STOPPED)
             addAction(android.content.Intent.ACTION_SCREEN_OFF)
+            addAction(android.content.Intent.ACTION_SCREEN_ON)
         }
         runCatching {
             app.registerReceiver(object : android.content.BroadcastReceiver() {
@@ -219,8 +229,26 @@ object RatingsFill {
             }
             android.content.Intent.ACTION_SCREEN_OFF -> {
                 if (dreamAt != 0L) note("the screen went off ${(SystemClock.elapsedRealtime() - dreamAt) / 60_000} min after the screensaver started")
+                val front = foreground > 0 || dreaming || idleRun || SystemClock.elapsedRealtime() - leftFrontAt < 15_000
                 dreaming = false; dreamAt = 0L
-                endIdleRun("the screen went off")
+                screenOff = true
+                screenOffAt = SystemClock.elapsedRealtime()
+                // The fill goes on with the screen off when this app was the one on screen (or already
+                // filling under the screensaver); another app on screen: it stays stopped.
+                note("screen off, the app was ${if (front) "on screen: filling goes on" else "not on screen"}")
+                if (front && !idleRun) beginIdleRun()
+            }
+            android.content.Intent.ACTION_SCREEN_ON -> {
+                if (screenOff) {
+                    val minutes = (SystemClock.elapsedRealtime() - screenOffAt) / 60_000
+                    if (idleRun) offMinutes += minutes
+                    note("screen on after $minutes min off" + if (idleRun) ", $ready of $total ready" else "")
+                }
+                screenOff = false
+                // The TV woke to its own home or another app (not this one): the fill stops there.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (idleRun && foreground == 0 && !dreaming && !screenOff) endIdleRun("the screen came back on another app")
+                }, 15_000)
             }
         }
     }
@@ -232,12 +260,12 @@ object RatingsFill {
         if (idleRun || !Ratings.isOn || !Ratings.fillWhole || !Ratings.fillWhenIdle || !Ratings.keyWorks) return
         if (state == State.DONE || stopped) return
         // Android may refuse a service started from the background (12 and later): then nothing changes.
-        if (!FillService.start(app)) { note("fill: the TV did not allow filling under the screensaver"); return }
+        if (!FillService.start(app)) { note("fill: the TV did not allow filling while idle"); return }
         idleRunAt = SystemClock.elapsedRealtime()
         idleRunReady = ready
         listsReleased = false
         idleRun = true
-        note("fill: goes on under the screensaver, $ready of $total ready")
+        note("fill: goes on while the TV is idle (${if (screenOff) "screen off" else "screensaver"}), $ready of $total ready")
     }
 
     @Synchronized private fun endIdleRun(why: String) {
@@ -248,7 +276,8 @@ object RatingsFill {
         Thread({ runCatching { Ratings.flush() } }, "ratings-fill-save").start()
         val minutes = (SystemClock.elapsedRealtime() - idleRunAt) / 60_000
         idleRuns++; idleMinutes += minutes; idleTitles += (ready - idleRunReady).coerceAtLeast(0)
-        note("fill: stopped under the screensaver after $minutes min ($why), ${(ready - idleRunReady).coerceAtLeast(0)} more titles ready, $ready of $total")
+        if (screenOff) offMinutes += (SystemClock.elapsedRealtime() - screenOffAt) / 60_000
+        note("fill: stopped after $minutes min idle ($why), ${(ready - idleRunReady).coerceAtLeast(0)} more titles ready, $ready of $total")
     }
 
     /** Android's limit for this kind of background work was reached (6 hours a day on Android 15). */

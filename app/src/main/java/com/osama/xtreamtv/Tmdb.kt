@@ -99,10 +99,12 @@ object Tmdb {
         /** Its name and poster at TMDB (for the Wrong title list). */
         val name: String? = null,
         val poster: String? = null,
+        /** The film series (TMDB collection id), 0 for none. */
+        val coll: Int = 0,
     ) {
         /** For the database. */
         internal fun toDetail() = RatingsDb.Detail(RatingsDb.Detail.OK, id, null, cast?.take(600), director?.take(200), genres?.take(200), year, minutes, "tmdb",
-            plot, keywords, seasons, full, lang, photos)
+            plot, keywords, seasons, full, lang, photos, coll, name)
     }
 
     enum class Outcome { FOUND, NONE, OFFLINE, BLOCKED }
@@ -252,7 +254,8 @@ object Tmdb {
         }
         val title = (o.optString("title").ifBlank { o.optString("name") }).takeIf { it.isNotBlank() && it != "null" }
         return Found(found, y, minutes, names(o.optJSONArray("genres"), 8), names(credits?.optJSONArray("cast"), 10), director, plot, keywords, seasons, full = true, lang = lang, photos = photos,
-            name = title, poster = o.optString("poster_path").takeIf { it.startsWith("/") })
+            name = title, poster = o.optString("poster_path").takeIf { it.startsWith("/") },
+            coll = o.optJSONObject("belongs_to_collection")?.optInt("id") ?: 0)
     }
 
     /**
@@ -329,6 +332,52 @@ object Tmdb {
         }
         return out
     }
+
+    /** One title of TMDB's trending list. */
+    class Trend(val type: ContentType, val id: String, val name: String, val year: String?, val poster: String?, val plot: String?, val genres: String?)
+
+    /**
+     * What is most watched this week (Package 3, Trending): [kind] "all", "movie" or "tv"; two pages
+     * (about 40 titles), TMDB's order. Null when TMDB can't be asked now. TMDB gets only the key.
+     */
+    fun trending(kind: String): List<Trend>? {
+        val k = key ?: return null
+        if (!usable) return null
+        val out = ArrayList<Trend>()
+        for (page in 1..2) {
+            val (code, body) = try { get("/trending/$kind/week", k, "page" to page.toString()) } catch (e: Exception) { return out.ifEmpty { null } }
+            if (code != 200 || body == null) return out.ifEmpty { null }
+            val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: break
+            for (i in 0 until results.length()) {
+                val r = results.optJSONObject(i) ?: continue
+                val media = r.optString("media_type").ifBlank { if (kind == "tv") "tv" else "movie" }
+                val type = when (media) { "movie" -> ContentType.MOVIE; "tv" -> ContentType.SERIES; else -> continue }
+                val id = r.opt("id")?.toString()?.takeIf { it.isNotEmpty() && it != "null" } ?: continue
+                val name = (r.optString("title").ifBlank { r.optString("name") }).takeIf { it.isNotBlank() && it != "null" } ?: continue
+                val year = (r.optString("release_date").ifBlank { r.optString("first_air_date") }).take(4).takeIf { it.length == 4 }
+                val genres = r.optJSONArray("genre_ids")?.let { a -> (0 until a.length()).mapNotNull { GENRE_NAMES[a.optInt(it)] }.take(3).joinToString(", ") }?.ifEmpty { null }
+                out.add(Trend(type, id, name, year, r.optString("poster_path").takeIf { it.startsWith("/") },
+                    r.optString("overview").takeIf { it.isNotBlank() && it != "null" }, genres))
+            }
+        }
+        return out
+    }
+
+    /** A YouTube trailer's id for this TMDB title (official trailers first), or null. */
+    fun trailer(type: ContentType, id: String): String? {
+        val k = key ?: return null
+        if (!usable) return null
+        val kind = if (type == ContentType.MOVIE) "movie" else "tv"
+        val (code, body) = try { get("/$kind/$id/videos", k) } catch (e: Exception) { return null }
+        if (code != 200 || body == null) return null
+        val results = runCatching { JSONObject(body).optJSONArray("results") }.getOrNull() ?: return null
+        val videos = (0 until results.length()).mapNotNull { results.optJSONObject(it) }.filter { it.optString("site") == "YouTube" && it.optString("key").isNotBlank() }
+        return (videos.firstOrNull { it.optString("type") == "Trailer" && it.optBoolean("official") } ?: videos.firstOrNull { it.optString("type") == "Trailer" } ?: videos.firstOrNull())
+            ?.optString("key")
+    }
+
+    /** A poster at card size, from TMDB's picture server. */
+    fun cardPosterUrl(path: String?): String? = path?.takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w342$it" }
 
     /** A person's film list: their photo and every work (our ref, "tmdb/movie/603") with how they took part. */
     class PersonFilms(val photo: String?, val works: List<Pair<String, Int>>)

@@ -24,7 +24,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * they read [Ratings]' copy in memory, so a write never holds a screen up.
  * Never stored here: keys, the server's address, logins, what was watched.
  */
-internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.db", null, 6) {
+internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.db", null, 8) {
 
     override fun onCreate(db: SQLiteDatabase) = create(db)
 
@@ -77,6 +77,66 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
                 .use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getString(1) }
         }
         return out
+    }
+
+    /** What Package 3 compares about a work: ids only (genre, keyword and person numbers), kept in memory. */
+    class WorkFacts(
+        val genres: IntArray, val keywords: IntArray, val directors: IntArray, val cast: IntArray,
+        val lang: String?, val year: Int, val coll: Int, val imdb: Float,
+    )
+
+    /** For [Taste]: "TYPE:id" -> work of [playlist], every work's facts, and how many works have each keyword. */
+    class TasteData(val refOf: Map<String, String>, val works: Map<String, WorkFacts>, val keywordCounts: Map<Int, Int>)
+
+    fun tasteData(playlist: String): TasteData {
+        val db = readableDatabase
+        val refOf = HashMap<String, String>()
+        db.rawQuery("SELECT type, id, ref FROM titles WHERE pl = ? AND ref IS NOT NULL AND ref NOT LIKE 'local/%' AND (how IS NULL OR how != 'WRONG')", arrayOf(playlist))
+            .use { c -> while (c.moveToNext()) refOf["${c.getString(0)}:${c.getString(1)}"] = c.getString(2) }
+        fun lists(sql: String): HashMap<String, ArrayList<Int>> {
+            val m = HashMap<String, ArrayList<Int>>()
+            db.rawQuery(sql, null).use { c -> while (c.moveToNext()) m.getOrPut(c.getString(0)) { ArrayList() }.add(c.getInt(1)) }
+            return m
+        }
+        val genres = lists("SELECT ref, gid FROM work_genres")
+        val keywords = lists("SELECT ref, kid FROM work_keywords")
+        val directors = lists("SELECT ref, pid FROM work_people WHERE role = ${Detail.DIRECTOR} ORDER BY rowid")
+        val cast = lists("SELECT ref, pid FROM work_people WHERE role = ${Detail.ACTOR} ORDER BY rowid")
+        val counts = HashMap<Int, Int>()
+        for (k in keywords.values) for (id in k) counts[id] = (counts[id] ?: 0) + 1
+        val works = HashMap<String, WorkFacts>()
+        db.rawQuery("SELECT ref, lang, year, coll, imdb FROM works WHERE ref NOT LIKE 'local/%'", null).use { c ->
+            while (c.moveToNext()) {
+                val ref = c.getString(0)
+                val g = genres[ref]; val k = keywords[ref]; val d = directors[ref]; val a = cast[ref]
+                if (g == null && k == null && d == null && a == null) continue
+                works[ref] = WorkFacts(
+                    g?.toIntArray() ?: IntArray(0), k?.toIntArray() ?: IntArray(0), d?.toIntArray() ?: IntArray(0),
+                    a?.take(5)?.toIntArray() ?: IntArray(0), c.getString(1)?.takeIf { it.isNotBlank() }, c.getInt(2),
+                    if (c.isNull(3)) 0 else c.getInt(3), c.getString(4)?.toFloatOrNull() ?: 0f,
+                )
+            }
+        }
+        return TasteData(refOf, works, counts)
+    }
+
+    /** Whether TMDB has been asked everything about [ref] (a title's page asks itself when not). */
+    fun isComplete(ref: String): Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM works WHERE ref = ? AND full = 1 AND lang IS NOT NULL AND name IS NOT NULL AND (coll IS NOT NULL OR ref NOT LIKE 'tmdb/movie/%')", arrayOf(ref),
+    ).use { it.moveToFirst() }
+
+    /** A work's TMDB name and original language, as saved. */
+    fun workNameLang(ref: String): Pair<String?, String?> = readableDatabase.rawQuery("SELECT name, lang FROM works WHERE ref = ?", arrayOf(ref))
+        .use { c -> if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() } to c.getString(1) else null to null }
+
+    /** "pl:TYPE:id" -> TMDB's name, for titles whose work isn't Arabic (shown instead of an Arabic provider name). */
+    fun tmdbNames(): HashMap<String, String> {
+        val map = HashMap<String, String>()
+        readableDatabase.rawQuery(
+            "SELECT t.pl, t.type, t.id, w.name FROM titles t JOIN works w ON w.ref = t.ref " +
+                "WHERE w.name IS NOT NULL AND w.name != '' AND (w.lang IS NULL OR w.lang != 'ar') AND (t.how IS NULL OR t.how != 'WRONG')", null,
+        ).use { c -> while (c.moveToNext()) map["${c.getString(0)}:${c.getString(1)}:${c.getString(2)}"] = c.getString(3) }
+        return map
     }
 
     /** Each of [names]' film list from TMDB (ref to role), as saved. */
@@ -149,6 +209,24 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
     private fun addVersion6(db: SQLiteDatabase) {
         db.execSQL("ALTER TABLE titles ADD COLUMN sure INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE titles ADD COLUMN orig_ref TEXT")
+        addVersion7(db)
+    }
+
+    /**
+     * Version 7 (2026-11-13, More like this): the film series a movie belongs to (TMDB's collection
+     * id; 0 = none, NULL = not asked yet). Completed movies are asked once more, for it.
+     */
+    private fun addVersion7(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE works ADD COLUMN coll INTEGER")
+        addVersion8(db)
+    }
+
+    /**
+     * Version 8 (2026-11-13): the title's name at TMDB, shown instead of a provider's Arabic name for
+     * shows that aren't Arabic. Completed works are asked once more, for it.
+     */
+    private fun addVersion8(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE works ADD COLUMN name TEXT")
     }
 
     /**
@@ -160,6 +238,8 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
         if (oldVersion == 3) { addVersion4(db); return }
         if (oldVersion == 4) { addVersion5(db); return }
         if (oldVersion == 5) { addVersion6(db); return }
+        if (oldVersion == 6) { addVersion7(db); return }
+        if (oldVersion == 7) { addVersion8(db); return }
         // Version 1 (never released; the owner's emulator only) kept one flat row per title: moved over.
         if (oldVersion != 1) return
         create(db)
@@ -201,6 +281,10 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
         val lang: String? = null,
         /** Person's name -> their photo's path at TMDB ("/abc.jpg"). */
         val photos: Map<String, String> = emptyMap(),
+        /** The film series it belongs to (TMDB collection id), 0 for none. */
+        val coll: Int = 0,
+        /** Its name at TMDB. */
+        val name: String? = null,
     ) {
         companion object {
             const val OK = 0
@@ -341,7 +425,8 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
     fun fullRefs(): HashSet<String> {
         val set = HashSet<String>()
         // Completed before the original language was kept (version 3): asked once more, for it.
-        readableDatabase.rawQuery("SELECT ref FROM works WHERE full = 1 AND lang IS NOT NULL", null).use { c -> while (c.moveToNext()) set.add(c.getString(0)) }
+        // Movies completed before the film series was kept (version 6): asked once more, for it.
+        readableDatabase.rawQuery("SELECT ref FROM works WHERE full = 1 AND lang IS NOT NULL AND name IS NOT NULL AND (coll IS NOT NULL OR ref NOT LIKE 'tmdb/movie/%')", null).use { c -> while (c.moveToNext()) set.add(c.getString(0)) }
         return set
     }
 
@@ -355,7 +440,7 @@ internal class RatingsDb(context: Context) : SQLiteOpenHelper(context, "titles.d
         for ((season, year) in d.seasons) if (season in 0..200 && year in 1900..2100) {
             db.execSQL("INSERT OR REPLACE INTO work_seasons (ref, season, year) VALUES (?, ?, ?)", arrayOf<Any>(ref, season, year))
         }
-        if (d.full) db.execSQL("UPDATE works SET full = 1 WHERE ref = ?", arrayOf(ref))
+        if (d.full) db.execSQL("UPDATE works SET full = 1, coll = ?, name = ? WHERE ref = ?", arrayOf<Any>(d.coll, d.name?.take(200) ?: "", ref))
         if (!d.lang.isNullOrBlank()) db.execSQL("UPDATE works SET lang = ? WHERE ref = ?", arrayOf(d.lang.take(8), ref))
         for ((name, path) in d.photos) if (path.startsWith("/") && path.length < 80) {
             db.execSQL("UPDATE people SET photo = ? WHERE name = ? AND (photo IS NULL OR photo = '')", arrayOf(path, name))

@@ -232,11 +232,16 @@ class SettingsActivity : AppCompatActivity() {
                     startActivity(android.content.Intent(this, HomeRowsActivity::class.java))
                 }
                 option("Menu button on Home", listOf(0 to "Opens the quick drawer", 1 to "Does nothing"), { prefs.homeMenuButton }, { prefs.homeMenuButton = it })
+                // Package 3 (2026-11-13): how Picked for you and Trending show movies and series, and the reason line.
+                option("Picked for you and Trending", listOf(0 to "One mixed row", 1 to "Movies / Series switch"), { prefs.suggestRowsKind }, { prefs.suggestRowsKind = it })
+                option("Say why a title was picked", listOf(true to "On", false to "Off"), { prefs.pickedWhy }, { prefs.pickedWhy = it })
             }
             Section.BROWSE -> {
                 title.text = "Movies and series"
                 hint.text = "How the screen after opening Movies or Series looks"
                 choiceCards("B", Appearance.BROWSE_NAMES, prefs.browseStyle) { prefs.browseStyle = it }
+                // 2026-11-13: official posters (sharper, original language) for titles matched to TMDB.
+                option("Posters", listOf(false to "From the provider", true to "Official (TMDB) when known"), { prefs.officialPosters }, { prefs.officialPosters = it })
             }
             Section.RATINGS -> {
                 title.text = "Ratings"
@@ -861,7 +866,7 @@ class SettingsActivity : AppCompatActivity() {
         option("Keep filling when the TV is idle", listOf(true to "On", false to "Off"), { Ratings.fillWhenIdle }, { Ratings.fillWhenIdle = it }, tag = "r_fill_idle")
         for ((rowTag, name, sub) in listOf(
             Triple("r_fill_provider", "Ask the provider for missing IDs", "One movie every 5 seconds. Off: TMDB only"),
-            Triple("r_fill_idle", "Keep filling when the TV is idle", "Goes on under the screensaver. Stops when the screen is off"),
+            Triple("r_fill_idle", "Keep filling when the TV is idle", "Goes on under the screensaver and with the screen off. Stops when another app is opened"),
         )) (target ?: body).findViewWithTag<View>(rowTag)?.let { row ->
             val title = row.findViewById<TextView>(R.id.title)
             title.isSingleLine = false
@@ -890,7 +895,7 @@ class SettingsActivity : AppCompatActivity() {
         linkRow("Status", null, "–", "r_status", tint = DiagUi.GREEN, onClick = null)
         if (card != null) target = card
         (target ?: body).addView(TextView(this).apply {
-            text = "Works while the app is open, and under the screensaver. Scores, cast, director, genre, year and length are saved on this TV."
+            text = "Works while the app is open, under the screensaver and with the screen off. Scores, cast, director, genre, year and length are saved on this TV."
             textSize = 12.5f
             setTextColor(themeColor(R.attr.appTextSecondary))
             setPadding(dp(10), dp(8), dp(10), dp(8))

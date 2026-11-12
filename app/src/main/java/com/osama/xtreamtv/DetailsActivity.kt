@@ -93,6 +93,22 @@ class DetailsActivity : AppCompatActivity() {
         posterUrl = item.image
         Appearance.apply(this)
         setContentView(if (item.type == ContentType.SERIES) R.layout.activity_details_series else R.layout.activity_details)
+        // Series: with the highlight on the seasons or episodes, the top part scrolls to its end, so the
+        // buttons sit whole above the season tabs instead of half under them (owner, 2026-11-13).
+        if (item.type == ContentType.SERIES) window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
+            val card = findViewById<View?>(R.id.episodes_card) ?: return@addOnGlobalFocusChangeListener
+            if (now == null || !isInside(now, card)) return@addOnGlobalFocusChangeListener
+            (findViewById<View>(R.id.info).parent as? android.widget.ScrollView)?.let { sv -> sv.post { sv.smoothScrollTo(0, sv.getChildAt(0).height) } }
+        }
+        // Rows that arrive later (names, chips on two rows) make the top part taller: scrolled to its end
+        // again while the highlight is down on the seasons or episodes.
+        if (item.type == ContentType.SERIES) findViewById<View>(R.id.info).addOnLayoutChangeListener { v, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top == oldBottom - oldTop) return@addOnLayoutChangeListener
+            val card = findViewById<View?>(R.id.episodes_card) ?: return@addOnLayoutChangeListener
+            val now = currentFocus ?: return@addOnLayoutChangeListener
+            if (!isInside(now, card)) return@addOnLayoutChangeListener
+            (v.parent as? android.widget.ScrollView)?.let { sv -> sv.post { sv.scrollTo(0, v.height) } }
+        }
 
         poster = findViewById(R.id.poster)
         title = findViewById(R.id.title)
@@ -119,6 +135,7 @@ class DetailsActivity : AppCompatActivity() {
         message = findViewById(R.id.message)
 
         title.text = Versions.shownName(item)
+        completeNow()
         setMeta(emptyList())
         loadPoster(item.image)
         loadVersions()
@@ -236,7 +253,9 @@ class DetailsActivity : AppCompatActivity() {
         if (!isMovie && ::episodeAdapter.isInitialized) episodeAdapter.notifyItemRangeChanged(0, episodeAdapter.itemCount)
     }
 
-    private fun loadPoster(url: String?, fromMdbList: Boolean = false) {
+    private fun loadPoster(given: String?, fromMdbList: Boolean = false) {
+        // Settings > Posters on "Official (TMDB) when known": the official poster for a matched title.
+        val url = if (fromMdbList) given else Ratings.shownPoster(item.copy(image = given), 500)
         if (url.isNullOrBlank()) {
             if (posterUrl == null) {
                 posterMissing = true
@@ -352,7 +371,8 @@ class DetailsActivity : AppCompatActivity() {
                 textSize = 14f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                maxWidth = (320 * density).toInt()
+                // Chips are never shortened (owner, 2026-11-13): they use the page's width and go on
+                // to a second row when they don't fit (big text, a narrow screen).
                 setBackgroundResource(R.drawable.bg_meta_chip)
                 setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), (4 * density).toInt())
                 layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -501,18 +521,25 @@ class DetailsActivity : AppCompatActivity() {
                     val title = r.substringAfter('\t', "")
                     (if (id.isNotEmpty()) viaList[id] ?: viaLookups[id]?.let { byId[it] } else null)
                         ?: title.takeIf { it.isNotEmpty() }?.let { byName[Ratings.nameKey(it)] }
-                }.filter { it.id != item.id }.distinctBy { it.id }.take(12)
+                }.filter { it.id != item.id }.distinctBy { it.id }
             }
-            val similar = fromMdbList.size < 3
-            val found = if (!similar) fromMdbList else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { similarTitles(all, e) }
-            if (BuildConfig.DEBUG) android.util.Log.d("Recos", "${item.name}: ${recs.size} recommended, ${fromMdbList.size} in the playlist" +
-                (if (similar) " · similar instead: ${found.size}" else "") + " · " + found.take(6).map { it.name })
+            // Package 3 (2026-11-13): every title gets points for how alike it is (film series first,
+            // keywords, director, cast, genres, language, year; MDBList's picks get extra), 20 titles,
+            // unwatched first. The old rule stays as a fallback.
+            val watchedMovies = prefs.watchedKeys()
+            val seriesGoing = prefs.continueWatching(ContentType.SERIES).mapNotNull { it.seriesId }.toSet()
+            fun watched(s: StreamItem) = if (s.type == ContentType.MOVIE) "movie_${s.id}" in watchedMovies else s.id in seriesGoing
+            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { Taste.moreLikeThis(this@DetailsActivity, item, all, fromMdbList.mapTo(HashSet()) { it.id }, ::watched) }.onFailure { android.util.Log.w("Recos", "alike failed", it) }.also { r -> if (BuildConfig.DEBUG) android.util.Log.d("Recos", "alike: " + (r.getOrNull()?.size ?: -1)) }
+                    .getOrNull()?.takeIf { it.size >= 3 } ?: fromMdbList.take(20).takeIf { it.size >= 3 } ?: similarTitles(all, e)
+            }
+            if (BuildConfig.DEBUG) android.util.Log.d("Recos", "${item.name}: ${recs.size} recommended, ${fromMdbList.size} in the playlist · ${found.size} shown · " + found.take(6).map { it.name })
             if (found.size < 3) {
                 // Diagnostics: why the row isn't there.
-                Diag.log("ui", "More like this not shown on Details${Diag.title(item.name)}: MDBList recommended ${recs.size}, ${fromMdbList.size} in the playlist, ${found.size} similar in the same category")
+                Diag.log("ui", "More like this not shown on Details${Diag.title(item.name)}: MDBList recommended ${recs.size}, ${fromMdbList.size} in the playlist, ${found.size} alike")
                 return@launch
             }
-            findViewById<TextView>(R.id.recos_title).text = if (similar) "Similar in your playlist" else "More like this"
+            findViewById<TextView>(R.id.recos_title).text = "More like this"
             val view = findViewById<RecyclerView>(R.id.recos)
             val adapter = recosAdapter ?: ItemAdapter(
                 grid = true,
@@ -532,7 +559,7 @@ class DetailsActivity : AppCompatActivity() {
             // The favourite star on cards that are favourites.
             adapter.favorites = prefs.favoriteIds(item.type)
             adapter.submit(found)
-            Diag.ready("Details", if (similar) "Similar in your playlist" else "More like this", openedAt)
+            Diag.ready("Details", "More like this", openedAt)
             if (isMovie) {
                 findViewById<View>(R.id.recos_title).visibility = View.VISIBLE
                 view.visibility = View.VISIBLE
@@ -570,12 +597,19 @@ class DetailsActivity : AppCompatActivity() {
             .sortedWith(compareByDescending<Pair<StreamItem, Double>> { it.second }.thenByDescending { it.first.added })
             .map { it.first }
             .distinctBy { it.id }
-            .take(12)
+            .take(20)
             .toList()
     }
 
     /** Series: Down from the episodes slides the top part away and shows More like this; Up brings it back. */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) keyPressed = true
+        // Nothing highlighted (the emulator's mouse click switched Android to touch mode, or a view went
+        // away): a remote key brings the highlight back to the page's own place, not the first item on screen.
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.keyCode in DPAD_KEYS && currentFocus.let { it == null || !it.isShown }) {
+            focusDefault()
+            return true
+        }
         if (event.action == android.view.KeyEvent.ACTION_DOWN && namesKey(event.keyCode)) return true
         // Movies: Down from the buttons tucks the description and credits away so More like this
         // fits in full; Up brings them back.
@@ -588,6 +622,14 @@ class DetailsActivity : AppCompatActivity() {
                 if ((recosRow.adapter?.itemCount ?: 0) == 0) return super.dispatchKeyEvent(event)
                 plot.visibility = View.GONE
                 credits.visibility = View.GONE
+                // The Director and Cast rows go too, so the posters show in full (owner, 2026-11-13).
+                (buttons.parent as? android.view.ViewGroup)?.findViewWithTag<View>("names_rows")?.visibility = View.GONE
+                // The row keeps the squeezed size it had under the names: it takes a card's full height now.
+                fullHeight(recosRow)?.let { h ->
+                    recosRow.layoutParams = recosRow.layoutParams.apply { height = h }
+                    // Cards made while the row was squeezed are measured again.
+                    for (i in 0 until recosRow.childCount) recosRow.getChildAt(i).requestLayout()
+                }
                 // Still no room (a big interface size): the chips and next-episode line go too.
                 focusFirstCard(recosRow) {
                     findViewById<View>(R.id.meta).let { tuckedMeta = it.visibility == View.VISIBLE; it.visibility = View.GONE }
@@ -598,6 +640,9 @@ class DetailsActivity : AppCompatActivity() {
             if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && recosRow.hasFocus()) {
                 plot.visibility = View.VISIBLE
                 credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
+                (buttons.parent as? android.view.ViewGroup)?.findViewWithTag<View>("names_rows")?.visibility = View.VISIBLE
+                recosRow.layoutParams = recosRow.layoutParams.apply { height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT }
+                for (i in 0 until recosRow.childCount) recosRow.getChildAt(i).requestLayout()
                 if (tuckedMeta) findViewById<View>(R.id.meta).visibility = View.VISIBLE
                 tuckedMeta = false
                 if (tuckedNext) findViewById<View?>(R.id.next_episode)?.visibility = View.VISIBLE
@@ -646,6 +691,18 @@ class DetailsActivity : AppCompatActivity() {
         row.post(attempt)
     }
 
+    /** A row's height with one of its cards shown in full (null before a card is made). */
+    private fun fullHeight(row: RecyclerView): Int? {
+        val card = row.getChildAt(0) ?: return null
+        val w = card.width.takeIf { it > 0 } ?: card.measuredWidth.takeIf { it > 0 } ?: return null
+        card.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val lp = card.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+        return card.measuredHeight + (lp?.topMargin ?: 0) + (lp?.bottomMargin ?: 0) + row.paddingTop + row.paddingBottom
+    }
+
+    private val DPAD_KEYS = setOf(android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN, android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+        android.view.KeyEvent.KEYCODE_DPAD_RIGHT, android.view.KeyEvent.KEYCODE_DPAD_CENTER)
+
     /** The next-episode line was tucked away with the chips (shown again on Up). */
     private var tuckedNext = false
     private var tuckedMeta = false
@@ -690,6 +747,11 @@ class DetailsActivity : AppCompatActivity() {
             // Added while the page settles: the highlight stays where the page put it (Play, or the episode).
             val had = currentFocus
             parent.addView(rows, parent.indexOfChild(buttons))
+            // Nothing pressed yet: the page's own highlight (Play, or the episode), whatever moved it.
+            if (!keyPressed) {
+                rows.post { focusDefault() }
+                return@launch
+            }
             if (focusedName != null) {
                 rows.post {
                     val again = ArrayList<View>().also { rows.findViewsWithText(it, focusedName, View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION) }.firstOrNull()
@@ -707,6 +769,8 @@ class DetailsActivity : AppCompatActivity() {
     }
 
     private var namesJob: kotlinx.coroutines.Job? = null
+    /** A key was pressed on this page (until then, rows that arrive late never take the highlight). */
+    private var keyPressed = false
     private var peopleJob: kotlinx.coroutines.Job? = null
     private var lastCredits: String? = null
     private var listRefsCache: Set<String>? = null
@@ -813,6 +877,43 @@ class DetailsActivity : AppCompatActivity() {
         (lm?.findViewByPosition(at) ?: episodesView).requestFocus()
     }
 
+    /**
+     * The page's own title not completed by the fill yet: TMDB is asked for it now (one request) and
+     * saved like the fill would, then the season years, names and title are drawn again (owner,
+     * 2026-11-13: no season years, Arabic name, short cast on titles the fill hadn't reached).
+     */
+    private fun completeNow() {
+        if (!Tmdb.hasKey) return
+        lifecycleScope.launch {
+            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val pl = prefs.activeId ?: return@withContext null
+                val ref = Taste.refOf(Taste.data(pl), item)?.takeIf { it.startsWith("tmdb/") } ?: return@withContext null
+                if (runCatching { Ratings.db.isComplete(ref) }.getOrDefault(true)) {
+                    // Already complete: its saved TMDB name may still replace an Arabic provider name.
+                    val (name, lang) = runCatching { Ratings.db.workNameLang(ref) }.getOrDefault(null to null)
+                    return@withContext name?.let { Tmdb.Found(ref.substringAfterLast('/'), 0, 0, null, null, null, lang = lang, name = it) }?.copy(full = false)
+                }
+                val f = runCatching { Tmdb.details(item.type, ref) }.getOrNull()?.found ?: return@withContext null
+                runCatching { Ratings.db.putWorkDetail(ref, f.toDetail()) }.getOrNull() ?: return@withContext null
+                Taste.invalidate()
+                Ratings.namesChanged()
+                f
+            } ?: return@launch
+            if (!found.full) { pageTitle(found); return@launch }
+            Diag.log("ratings", "title page completed from TMDB${Diag.title(item.name)}")
+            if (!isMovie) loadSeasonYears()
+            showCredits(lastCredits)
+            pageTitle(found)
+        }
+    }
+
+    /** TMDB's name instead of an Arabic provider name, for a show that isn't Arabic. */
+    private fun pageTitle(found: Tmdb.Found) {
+        val name = found.name ?: return
+        if (found.lang == "ar" || !Versions.hasArabic(title.text.toString()) || Versions.hasArabic(name)) return
+        title.text = Versions.clean(name, found.year.takeIf { it > 0 }?.toString())
+    }
+
     /** Season number -> the year it came out (TMDB, saved by the fill); only seasons TMDB lists. */
     private var seasonYears: Map<Int, Int> = emptyMap()
 
@@ -849,7 +950,7 @@ class DetailsActivity : AppCompatActivity() {
             val saved = showSaved()
             try {
                 val info = api.vodInfo(item.id)
-                info.name?.let { title.text = Versions.clean(it, info.releaseDate ?: item.year) }
+                info.name?.let { title.text = Versions.shownName(item.copy(name = it, year = info.releaseDate ?: item.year)) }
                 // The provider says the picture size: the quality chip needs no playing first.
                 if (info.height > 0) noteQuality(item.id, info.height)
                 if (info.ext != null) ext = info.ext

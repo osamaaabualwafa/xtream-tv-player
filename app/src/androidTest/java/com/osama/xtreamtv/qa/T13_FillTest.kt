@@ -329,13 +329,12 @@ class T13_FillTest : QaTest() {
         assertTrue("The fill stopped once the lists left memory (state ${RatingsFill.state})", groups(asked().first).isNotEmpty())
         assertTrue("No more titles became ready without the lists", RatingsFill.progress().ready > before)
 
-        // The screen goes off: nothing more is asked.
+        // The screen goes off (2026-11-13: the owner's TV keeps its Wi-Fi): the fill goes on.
         RatingsFill.screenEventForTests(android.content.Intent.ACTION_SCREEN_OFF)
-        assertTrue("The fill went on with the screen off", !RatingsFill.underScreensaver)
-        SystemClock.sleep(6000)
+        assertTrue("The fill stopped when the screen went off", RatingsFill.underScreensaver)
         Qa.serverCall("/__mdblog?clear=1")
         SystemClock.sleep(25_000)
-        assertEquals("Groups were asked with the screen off", 0, groups(asked().first).size)
+        assertTrue("Nothing was asked with the screen off (state ${RatingsFill.state})", groups(asked().first).isNotEmpty())
 
         // The app is opened again: the fill goes on from where it was, and nothing was lost.
         val ready = RatingsFill.progress().ready

@@ -40,10 +40,12 @@ class Prefs(context: Context) {
 
     companion object {
         /** Home rows that can be shown, hidden and moved, in their first order. */
-        val HOME_ROWS = listOf("new", "continue", "favorites", "top_movies", "top_series", "channels", "recent_movies", "recent_series")
+        val HOME_ROWS = listOf("new", "continue", "picked", "trending", "favorites", "top_movies", "top_series", "channels", "recent_movies", "recent_series")
         val HOME_ROW_NAMES = mapOf(
             "new" to "New episodes",
             "continue" to "Continue watching",
+            "picked" to "Picked for you",
+            "trending" to "Trending this week",
             "favorites" to "Favorites",
             "top_movies" to "Top rated movies",
             "top_series" to "Top rated series",
@@ -350,7 +352,12 @@ class Prefs(context: Context) {
             // Saved before the split: one "top" row became Top rated movies and Top rated series.
             val raw = global.getString("home_rows", null)?.split(',') ?: emptyList()
             val saved = raw.flatMap { if (it == "top") listOf("top_movies", "top_series") else listOf(it) }.filter { it in HOME_ROWS }.distinct().toMutableList()
-            for (k in HOME_ROWS) if (k !in saved) saved.add(k)
+            // A row added later joins right after the row before it in the first order (Picked for you
+            // and Trending: after Continue watching), or at the end.
+            for ((i, k) in HOME_ROWS.withIndex()) if (k !in saved) {
+                val before = HOME_ROWS.take(i).lastOrNull { it in saved }
+                saved.add(if (before == null) 0 else saved.indexOf(before) + 1, k)
+            }
             return saved
         }
         set(value) = global.edit().putString("home_rows", value.joinToString(",")).apply()
@@ -367,6 +374,40 @@ class Prefs(context: Context) {
     var homeFavoritesKind: String
         get() = global.getString("home_fav_kind", "MOVIE") ?: "MOVIE"
         set(value) = global.edit().putString("home_fav_kind", value).apply()
+
+    /** Settings > Posters: the official (TMDB) poster for titles that are matched, instead of the provider's. */
+    var officialPosters: Boolean
+        get() = global.getBoolean("official_posters", false)
+        set(value) = global.edit().putBoolean("official_posters", value).apply()
+
+    /** Picked for You and Trending (Package 3): 0 one mixed row, 1 one row with a Movies / Series switch. */
+    var suggestRowsKind: Int
+        get() = global.getInt("suggest_rows_kind", 0)
+        set(value) = global.edit().putInt("suggest_rows_kind", value).apply()
+
+    /** The switch's choice in Picked for You ("MOVIE" / "SERIES"). */
+    var pickedKind: String
+        get() = global.getString("picked_kind", "MOVIE") ?: "MOVIE"
+        set(value) = global.edit().putString("picked_kind", value).apply()
+
+    /** The switch's choice in Trending ("MOVIE" / "SERIES"). */
+    var trendingKind: String
+        get() = global.getString("trending_kind", "MOVIE") ?: "MOVIE"
+        set(value) = global.edit().putString("trending_kind", value).apply()
+
+    /** Picked for You says why a title was picked (on the highlighted card). */
+    var pickedWhy: Boolean
+        get() = global.getBoolean("picked_why", true)
+        set(value) = global.edit().putBoolean("picked_why", value).apply()
+
+    /** "TYPE:id" the owner said "Not interested" to in Picked for You (this playlist). */
+    fun notInterested(): Set<String> = HashSet(sp.getStringSet("not_interested", emptySet()) ?: emptySet())
+
+    fun addNotInterested(key: String) {
+        val set = notInterested().toMutableSet()
+        set.add(key)
+        sp.edit().putStringSet("not_interested", set).apply()
+    }
 
     /** Home's "Recently added" rows (Settings > Home layout): 1 shown, 0 hidden. Both off: no section. */
     var homeRecentMovies: Int
@@ -1049,7 +1090,7 @@ class ItemAdapter(
      * link is dead (known only for titles whose scores are saved).
      */
     private fun loadPoster(holder: VH, item: StreamItem) {
-        val own = item.image?.takeIf { it.isNotBlank() }
+        val own = Ratings.shownPoster(item)
         val url = own ?: Ratings.posterFor(item)
         holder.image.load(url) {
             // Short fade over a still placeholder: a moving shimmer on every card still loading,
@@ -1077,7 +1118,7 @@ class ItemAdapter(
         val h = holder.image.height
         if (w <= 0 || h <= 0) return
         val ahead = if (grid) 12 else 8
-        val url = items.getOrNull(position + ahead)?.image ?: return
+        val url = items.getOrNull(position + ahead)?.let { Ratings.shownPoster(it) } ?: return
         if (url.isBlank() || !prefetched.add(url)) return
         val context = holder.image.context
         coil.Coil.imageLoader(context).enqueue(

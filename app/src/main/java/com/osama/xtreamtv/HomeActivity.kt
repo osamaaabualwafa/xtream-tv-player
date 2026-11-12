@@ -59,6 +59,8 @@ class HomeActivity : AppCompatActivity() {
         "channels" to (R.id.row_channels_title to R.id.row_channels),
         "recent_movies" to (R.id.row_recent_title to R.id.row_recent),
         "recent_series" to (R.id.row_recent_series_title to R.id.row_recent_series),
+        "picked" to (R.id.row_picked_title to R.id.row_picked),
+        "trending" to (R.id.row_trending_title to R.id.row_trending),
     )
     private lateinit var newAdapter: ItemAdapter
     /** V1: background follows the highlighted poster (null when off). */
@@ -135,6 +137,7 @@ class HomeActivity : AppCompatActivity() {
         hideBottomOfHome()
         pinPageEdges()
         setupFavoritesSwitch()
+        addSuggestionRows()
         applyRowOrder()
         setupFocusMap()
         // Rebuilt in another layout: the restored highlight may sit on a view this layout hides.
@@ -168,6 +171,12 @@ class HomeActivity : AppCompatActivity() {
         newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
         topRatedAdapter = row(R.id.row_top_rated, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
         topSeriesAdapter = row(R.id.row_top_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        pickedAdapter = row(R.id.row_picked, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) },
+            onLongClick = { _, item -> askNotInterested(item) }, onFocus = ::showPickedWhy)
+        trendingAdapter = row(R.id.row_trending, R.layout.item_poster_row, { _, item ->
+            if (Trending.isPlaceholder(item)) trendingEntries[item.id]?.let { showTrendInfo(it) } else startActivity(DetailsActivity.intent(this, item))
+        }, onLongClick = null, onFocus = ::showTrendLine, onBindExtra = { vh, item -> markTrending(vh, item) })
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, now -> clearSuggestionLines(now) }
         backdrop = FocusBackdrop.attach(this)
         setupFeatured()
 
@@ -231,6 +240,7 @@ class HomeActivity : AppCompatActivity() {
             if (featuredItems.size > 1) b.postDelayed(rotateFeatured, 7_000)
         }
         loadLocalRows()
+        loadSuggestions()
         // Back after a while (the TV slept, another app): saved lists older than three hours are
         // checked with the server behind the screen, and the rows take the newer ones when they differ.
         resumedNow = true
@@ -258,7 +268,7 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.homeRowOrder.joinToString(",")}|${prefs.homeRowHidden.sorted().joinToString(",")}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
+    private fun lookKey() = "${prefs.homeStyle}/${prefs.themeIndex}/${prefs.glassScene}/${prefs.glassStyle}/${prefs.focusStyle}/${prefs.movingBackground}/${prefs.paletteIndex}/${prefs.accentIndex}/${prefs.backgroundStyle}/${prefs.textSize}/${prefs.uiSize}/${prefs.backdropFollows}/${prefs.featuredBanner}/${prefs.suggestRowsKind}/${prefs.officialPosters}/${prefs.homeRowOrder.joinToString(",")}|${prefs.homeRowHidden.sorted().joinToString(",")}/${prefs.activeId?.let { prefs.avatar(it) + prefs.avatarColor(it) }}"
 
     /** Where the highlight was when Home was left: a row's title (row, "TYPE:id", place), or a button. */
     private var leftOn: Triple<Int, String?, Int>? = null
@@ -529,9 +539,10 @@ class HomeActivity : AppCompatActivity() {
             val list = ids.toList().mapNotNull { findViewById<View?>(it) }
             return { list }
         }
-        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_channels, R.id.row_favorites, R.id.row_top_rated, R.id.row_top_series, R.id.row_recent, R.id.row_recent_series)
+        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_picked, R.id.row_trending, R.id.row_channels, R.id.row_favorites, R.id.row_top_rated, R.id.row_top_series, R.id.row_recent, R.id.row_recent_series)
             .map { focusMap.section(roots = views(it)) }
             .plus(listOfNotNull(favSwitch?.let { s -> focusMap.section(roots = { listOf(s) }) }))
+            .plus(listOfNotNull(pickedSwitch, trendingSwitch).map { s -> focusMap.section(roots = { listOf(s) }) })
         val featured = focusMap.section(ownsSideKeys = true, roots = views(R.id.featured))
         val stack = ArrayList(rows + featured)
         if (prefs.homeStyle == Appearance.HOME_SIDE_MENU) {
@@ -566,10 +577,11 @@ class HomeActivity : AppCompatActivity() {
         onClick: (Int, StreamItem) -> Unit,
         onLongClick: ((Int, StreamItem) -> Unit)? = null,
         onBindExtra: ((ItemAdapter.VH, StreamItem) -> Unit)? = null,
+        onFocus: ((StreamItem) -> Unit)? = null,
     ): ItemAdapter {
         val adapter = ItemAdapter(
             grid = layout == R.layout.item_poster_row, onClick = onClick, onLongClick = onLongClick, layout = layout,
-            onFocusItem = { item -> if (item.type != ContentType.LIVE) backdrop?.show(item.image) },
+            onFocusItem = { item -> if (item.type != ContentType.LIVE) backdrop?.show(item.image); onFocus?.invoke(item) },
             onBindExtra = onBindExtra,
         )
         findViewById<RecyclerView>(viewId).apply {
@@ -729,6 +741,7 @@ class HomeActivity : AppCompatActivity() {
         loadRecentlyAdded()
         loadNewEpisodes()
         loadTopRated()
+        loadSuggestions()
         prepareSections()
     }
 
@@ -936,7 +949,268 @@ class HomeActivity : AppCompatActivity() {
         recentRow(ContentType.SERIES, "recent_series" !in prefs.homeRowHidden, R.id.row_recent_series, R.id.row_recent_series_title, recentSeriesAdapter)
     }
 
-    /** Top rated movies and Top rated series (1.1E): IMDb 7.5 and up from saved scores; 6 titles at least. */
+    // ---- Package 3 (approved 2026-11-13): Picked for you and Trending this week ----
+
+    private lateinit var pickedAdapter: ItemAdapter
+    private lateinit var trendingAdapter: ItemAdapter
+    /** The rows' title boxes: name, the line for the highlighted card, and (when chosen) a Movies / Series switch. */
+    private var pickedLine: TextView? = null
+    private var trendingLine: TextView? = null
+    private var pickedName: TextView? = null
+    private var pickedSwitch: LinearLayout? = null
+    private var trendingSwitch: LinearLayout? = null
+    /** "TYPE:id" -> why it was picked. */
+    private var pickedBecause: Map<String, String?> = emptyMap()
+    /** Card id -> its trending entry (titles in the playlist by their own id, the others "tmdb:…"). */
+    private var trendingEntries: Map<String, Trending.Entry> = emptyMap()
+    private var suggestJob: kotlinx.coroutines.Job? = null
+
+    /** The two rows, made like Continue watching's and placed right after it (Arrange rows can move them). */
+    private fun addSuggestionRows() {
+        val continueTitle = findViewById<TextView>(R.id.row_continue_title)
+        val continueRow = findViewById<RecyclerView>(R.id.row_continue)
+        val parent = continueRow.parent as? android.view.ViewGroup ?: return
+        val d = resources.displayMetrics.density
+        var at = parent.indexOfChild(continueRow) + 1
+        for ((titleId, rowId) in listOf(R.id.row_picked_title to R.id.row_picked, R.id.row_trending_title to R.id.row_trending)) {
+            val box = LinearLayout(this).apply {
+                id = titleId
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(continueTitle.layoutParams as android.view.ViewGroup.MarginLayoutParams)
+            }
+            val name = TextView(this).apply {
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, continueTitle.textSize)
+                setTextColor(continueTitle.textColors)
+                typeface = continueTitle.typeface
+                isAllCaps = continueTitle.isAllCaps
+                letterSpacing = continueTitle.letterSpacing
+                text = if (rowId == R.id.row_picked) "Picked for you" else "Trending this week"
+            }
+            box.addView(name, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            if (prefs.suggestRowsKind == 1) {
+                val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+                for ((kind, label) in listOf("MOVIE" to "Movies", "SERIES" to "Series")) chips.addView(TextView(this).apply {
+                    tag = kind
+                    text = label
+                    textSize = 14f
+                    isFocusable = true
+                    isClickable = true
+                    setBackgroundResource(R.drawable.bg_glass_chip_cat)
+                    setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
+                    setPadding((14 * d).toInt(), (5 * d).toInt(), (14 * d).toInt(), (5 * d).toInt())
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (12 * d).toInt() }
+                    setOnFocusChangeListener { v, has ->
+                        if (!has) return@setOnFocusChangeListener
+                        val picked = rowId == R.id.row_picked
+                        if ((if (picked) prefs.pickedKind else prefs.trendingKind) == kind) return@setOnFocusChangeListener
+                        if (picked) prefs.pickedKind = kind else prefs.trendingKind = kind
+                        v.post { loadSuggestions() }
+                    }
+                    setOnClickListener {
+                        val row = this@HomeActivity.findViewById<RecyclerView>(rowId)
+                        (row.layoutManager?.findViewByPosition(0) ?: row.getChildAt(0))?.requestFocus()
+                    }
+                })
+                box.addView(chips)
+                if (rowId == R.id.row_picked) pickedSwitch = chips else trendingSwitch = chips
+            }
+            val line = TextView(this).apply {
+                textSize = 14f
+                setTextColor(themeColor(R.attr.appTextSecondary))
+                setPadding((14 * d).toInt(), 0, 0, 0)
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            box.addView(line, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            if (rowId == R.id.row_picked) { pickedLine = line; pickedName = name } else trendingLine = line
+            val row = RecyclerView(this).apply {
+                id = rowId
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(continueRow.layoutParams as android.view.ViewGroup.MarginLayoutParams)
+                setPadding(continueRow.paddingLeft, continueRow.paddingTop, continueRow.paddingRight, continueRow.paddingBottom)
+                FocusBox.usePadding(this)
+            }
+            parent.addView(box, at++)
+            parent.addView(row, at++)
+        }
+    }
+
+    /** Fills both rows: Picked for you from what was watched, Trending from TMDB's week (saved for a day). */
+    private fun loadSuggestions() {
+        if (!::pickedAdapter.isInitialized) return
+        suggestJob?.cancel()
+        suggestJob = lifecycleScope.launch {
+            try {
+                val drawn = listsSeen
+                val movies = allStreams(ContentType.MOVIE).await()
+                val series = allStreams(ContentType.SERIES).await()
+                if (drawn != listsSeen) return@launch
+                val mixed = prefs.suggestRowsKind == 0
+                for ((box, kind) in listOf(pickedSwitch to prefs.pickedKind, trendingSwitch to prefs.trendingKind)) box?.let { b ->
+                    for (i in 0 until b.childCount) b.getChildAt(i).isActivated = b.getChildAt(i).tag == kind
+                }
+                if ("picked" !in prefs.homeRowHidden) {
+                    val kind = if (mixed) null else ContentType.valueOf(prefs.pickedKind)
+                    val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Taste.picked(this@HomeActivity, movies, series, kind) }
+                    pickedBecause = picks.list.associate { "${it.item.type.name}:${it.item.id}" to it.because }
+                    pickedName?.text = if (picks.personal) "Picked for you" else "Top picks for you"
+                    showRow(R.id.row_picked, R.id.row_picked_title, pickedAdapter, picks.list.map { it.item })
+                } else showRow(R.id.row_picked, R.id.row_picked_title, pickedAdapter, emptyList())
+                if ("trending" !in prefs.homeRowHidden && Tmdb.hasKey) {
+                    val kind = if (mixed) "all" else if (prefs.trendingKind == "SERIES") "tv" else "movie"
+                    val cards = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val list = Trending.list(this@HomeActivity, kind)
+                        val d = prefs.activeId?.let { Taste.data(it) }
+                        // The playlist's titles by work (the first copy of each).
+                        val wanted = list.map { e -> "tmdb/${if (e.trend.type == ContentType.MOVIE) "movie" else "show"}/${e.trend.id}" }.toHashSet()
+                        val firsts = (movies + series).filter { s -> Taste.refOf(d, s)?.let { it in wanted } == true }.distinctBy { Taste.refOf(d, it) }
+                        val byRef = Taste.cards(this@HomeActivity, firsts, movies + series, d).associateBy { Taste.refOf(d, it)!! }
+                        list.map { e -> (byRef["tmdb/${if (e.trend.type == ContentType.MOVIE) "movie" else "show"}/${e.trend.id}"] ?: Trending.placeholder(e)) to e }
+                    }
+                    trendingEntries = cards.associate { it.first.id to it.second }
+                    showRow(R.id.row_trending, R.id.row_trending_title, trendingAdapter, cards.map { it.first })
+                } else showRow(R.id.row_trending, R.id.row_trending_title, trendingAdapter, emptyList())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The rows just stay as they were.
+            }
+        }
+    }
+
+    /** On the highlighted card of Picked for you: why it is there (Settings can turn this off). */
+    private fun showPickedWhy(item: StreamItem) {
+        val why = pickedBecause["${item.type.name}:${item.id}"]
+        pickedLine?.text = if (prefs.pickedWhy && why != null) "·  $why" else ""
+    }
+
+    /** On the highlighted card of Trending: its place this week, and whether the playlist has it. */
+    private fun showTrendLine(item: StreamItem) {
+        val e = trendingEntries[item.id] ?: return
+        val missing = Trending.isPlaceholder(item)
+        val text = android.text.SpannableStringBuilder("·  #${e.rank} this week   ·   ")
+        val start = text.length
+        text.append(if (missing) "✕ Not in your playlist" else "✓ In your playlist")
+        text.setSpan(android.text.style.ForegroundColorSpan(if (missing) 0xFFFF8A80.toInt() else 0xFF7EE2B8.toInt()), start, text.length, 0)
+        trendingLine?.text = text
+    }
+
+    /** Leaving a row: its line empties. */
+    private fun clearSuggestionLines(now: View?) {
+        fun inside(id: Int): Boolean {
+            var v: View? = now
+            while (v != null) { if (v.id == id) return true; v = v.parent as? View }
+            return false
+        }
+        if (!inside(R.id.row_picked)) pickedLine?.text = ""
+        if (!inside(R.id.row_trending)) trendingLine?.text = ""
+    }
+
+    /** A green tick on titles the playlist has, a red cross on the others (this row only). */
+    private fun markTrending(vh: ItemAdapter.VH, item: StreamItem) {
+        val frame = vh.image.parent as? android.widget.FrameLayout ?: return
+        val d = resources.displayMetrics.density
+        val mark = frame.findViewWithTag<TextView>("trend_mark") ?: TextView(this).also { t ->
+            t.tag = "trend_mark"
+            t.gravity = android.view.Gravity.CENTER
+            t.textSize = 14f
+            t.setTypeface(t.typeface, android.graphics.Typeface.BOLD)
+            frame.addView(t, android.widget.FrameLayout.LayoutParams((26 * d).toInt(), (26 * d).toInt(), android.view.Gravity.TOP or android.view.Gravity.START).apply {
+                leftMargin = (5 * d).toInt(); topMargin = (5 * d).toInt()
+            })
+        }
+        // Glass (owner, 2026-11-13): a frosted dark disc with a thin coloured ring and a coloured mark,
+        // like the app's glass chips, instead of a flat solid dot.
+        val missing = Trending.isPlaceholder(item)
+        val tone = if (missing) 0xFFFF8A80.toInt() else 0xFF7EE2B8.toInt()
+        mark.text = if (missing) "✕" else "✓"
+        mark.setTextColor(tone)
+        mark.setShadowLayer(4 * d, 0f, 0f, 0x99000000.toInt())
+        mark.background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            colors = intArrayOf(0xCC2A3340.toInt(), 0xB30E1218.toInt())
+            gradientType = android.graphics.drawable.GradientDrawable.LINEAR_GRADIENT
+            orientation = android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM
+            setStroke((1.5f * d).toInt().coerceAtLeast(1), (tone and 0x00FFFFFF) or 0xCC000000.toInt())
+        }
+        mark.elevation = 3 * d
+        mark.visibility = View.VISIBLE
+    }
+
+    /** Hold OK in Picked for you: "Not interested" takes it away, and alike titles get fewer points. */
+    private fun askNotInterested(item: StreamItem) {
+        AlertDialog.Builder(this)
+            .setTitle(Versions.shownName(item))
+            .setItems(arrayOf("Not interested")) { _, _ ->
+                prefs.addNotInterested("${item.type.name}:${item.id}")
+                Taste.forget()
+                showToast(this, "Picked for you will show fewer titles like this", Toast.LENGTH_SHORT)
+                loadSuggestions()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** A trending title the playlist doesn't have: poster, story, scores and its trailer; it can't play. */
+    private fun showTrendInfo(e: Trending.Entry) {
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
+        val root = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(24), dp(24), dp(24), dp(20)) }
+        val poster = android.widget.ImageView(this).apply { scaleType = android.widget.ImageView.ScaleType.CENTER_CROP }
+        root.addView(poster, LinearLayout.LayoutParams(dp(160), dp(240)))
+        Tmdb.cardPosterUrl(e.trend.poster)?.let { poster.load(it) { crossfade(false) } }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, 0, 0) }
+        root.addView(col, LinearLayout.LayoutParams(dp(460), LinearLayout.LayoutParams.WRAP_CONTENT))
+        col.addView(TextView(this).apply { text = "✕  Not in your playlist yet"; textSize = 14f; setTextColor(0xFFE24B4A.toInt()) })
+        col.addView(TextView(this).apply {
+            text = e.trend.name; textSize = 22f; setTextColor(themeColor(R.attr.appText))
+            setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, dp(6), 0, dp(4))
+        })
+        col.addView(TextView(this).apply {
+            text = listOfNotNull(e.trend.year, e.trend.genres, if (e.trend.type == ContentType.SERIES) "Series" else "Movie", "#${e.rank} this week").joinToString("   ·   ")
+            textSize = 14f; setTextColor(themeColor(R.attr.appTextSecondary))
+        })
+        if (e.imdb != null || e.tomatoes != null) col.addView(TextView(this).apply {
+            textSize = 14f; setPadding(0, dp(8), 0, 0)
+            text = RatingBadges.line(this@HomeActivity, RatingBadges.Scores(e.imdb, e.tomatoes), themeColor(R.attr.appText))
+        })
+        e.trend.plot?.let { plot ->
+            col.addView(TextView(this).apply {
+                text = plot; textSize = 15f; maxLines = 6; ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(themeColor(R.attr.appText)); setPadding(0, dp(10), 0, dp(14))
+            })
+        }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        col.addView(buttons)
+        val dialog = android.app.Dialog(this)
+        fun button(label: String, action: () -> Unit) = TextView(this).apply {
+            text = label; textSize = 16f; isFocusable = true; isClickable = true; gravity = android.view.Gravity.CENTER
+            setBackgroundResource(R.drawable.bg_glass_choice)
+            setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
+            setPadding(dp(22), dp(10), dp(22), dp(10))
+            setOnClickListener { action() }
+            buttons.addView(this, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(12) })
+        }
+        val trailer = button("Trailer") {
+            lifecycleScope.launch {
+                val key = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Tmdb.trailer(e.trend.type, e.trend.id) }.getOrNull() }
+                val link = key?.let { "https://www.youtube.com/watch?v=$it" } ?: e.trailer
+                if (link == null) { showToast(this@HomeActivity, "No trailer for this title", Toast.LENGTH_SHORT); return@launch }
+                val intents = listOfNotNull(key?.let { Intent(Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:$it")) }, Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)))
+                if (intents.none { runCatching { startActivity(it) }.isSuccess }) showToast(this@HomeActivity, "Install YouTube to watch trailers", Toast.LENGTH_LONG)
+            }
+        }
+        button("Close") { dialog.dismiss() }
+        dialog.setContentView(root)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.bg_panel)
+        dialog.setOnShowListener { trailer.requestFocus() }
+        dialog.show()
+        Diag.log("ui", "trending info page opened (not in the playlist)${Diag.title(e.trend.name)}")
+    }
+
+    /** Top rated movies and Top rated series (1.1E): IMDb 7.5 and up from saved scores; 6 titles at least, 100 at most. */
     private fun loadTopRated() {
         if (!::topSeriesAdapter.isInitialized) return
         topRow(ContentType.MOVIE, "top_movies", R.id.row_top_rated, R.id.row_top_rated_title, topRatedAdapter)
@@ -953,7 +1227,11 @@ class HomeActivity : AppCompatActivity() {
                 val drawn = listsSeen
                 val all = allStreams(type).await()
                 if (drawn != listsSeen) return@launch
-                val top = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all, 20) }
+                // Up to 100 (owner, 2026-11-13); copies of one film (HD, 4K, dubbed) take one place.
+                val top = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val d = prefs.activeId?.let { Taste.data(it) }
+                    Taste.cards(this@HomeActivity, Ratings.topRated(all, 400).distinctBy { Taste.sameKey(d, it) }.take(100), all, d)
+                }
                 adapter.favorites = prefs.favoriteIds(type)
                 showRow(rowId, titleId, adapter, if (top.size >= 6) top else emptyList())
             } catch (e: CancellationException) {

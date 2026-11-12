@@ -257,6 +257,26 @@ object Ratings {
         runCatching { saver.submit { }.get() }
     }
 
+    /** "pl:TYPE:id" -> TMDB's name (titles that aren't Arabic); read in the background, refreshed now and then. */
+    @Volatile private var tmdbNameMap: Map<String, String> = emptyMap()
+    @Volatile private var tmdbNamesAt = 0L
+
+    /**
+     * TMDB's name for a title whose provider name is Arabic but which isn't an Arabic show (owner,
+     * 2026-11-13); null when not known. Never reads the database on the caller's thread.
+     */
+    fun tmdbName(type: ContentType, id: String): String? {
+        val now = System.currentTimeMillis()
+        if (now - tmdbNamesAt > 5 * 60_000L) {
+            tmdbNamesAt = now
+            Thread { runCatching { db.tmdbNames() }.getOrNull()?.let { tmdbNameMap = it } }.start()
+        }
+        return tmdbNameMap[cacheKey(type, id)]
+    }
+
+    /** A title's page completed itself: the names are read again soon. */
+    fun namesChanged() { tmdbNamesAt = 0L }
+
     /** The database changed underneath (a restore, a clear, an undo): memory is read again from it. */
     internal fun reload() {
         val fresh = runCatching { db.loadRatings() }.getOrElse { return }
@@ -413,6 +433,9 @@ object Ratings {
     }
 
     private fun entry(type: ContentType, id: String) = synchronized(cache) { cache[cacheKey(type, id)] }
+
+    /** The title's official poster (TMDB's picture, as the scores service gives it), or null. */
+    fun officialPoster(type: ContentType, id: String): String? = entry(type, id)?.poster?.takeIf { it.startsWith("http") }
 
     /** The title's year as the scores service knows it (for clean names when the provider gives none). */
     fun knownYear(type: ContentType, id: String): Int? = entry(type, id)?.year?.takeIf { it > 0 }
@@ -579,6 +602,17 @@ object Ratings {
             entry(item.type, item.ratingId ?: item.id)?.let { !it.posterChecked && it.how != How.WRONG && it.ref?.startsWith("tmdb/") == true } == true
 
     /** MDBList's poster for a title whose own picture is missing or doesn't load; null when not known. */
+    /**
+     * The picture a card or page shows: with Settings > Posters on "Official (TMDB) when known", the
+     * official poster for matched titles (at [width] pixels when it is a TMDB picture); else the provider's.
+     */
+    fun shownPoster(item: StreamItem, width: Int = 342): String? {
+        val own = item.image?.takeIf { it.isNotBlank() }
+        if (item.type == ContentType.LIVE || !Prefs(app).officialPosters) return own
+        val official = posterFor(item)?.replace(Regex("/t/p/(original|w[0-9]+)/"), "/t/p/w$width/")
+        return official ?: own
+    }
+
     fun posterFor(item: StreamItem): String? {
         if (!active || item.type == ContentType.LIVE) return null
         val id = item.ratingId ?: item.id
@@ -1146,6 +1180,30 @@ object Ratings {
         }
         s = s.replace(RX_SPACES, " ").trim(' ', '-', '|', ':')
         return (if (s.isEmpty()) first else s) to year
+    }
+
+    /**
+     * Trending titles that are not in the playlist (Package 3): IMDb, Tomatoes and the trailer for
+     * these TMDB ids, in one batch request per kind. Nothing is saved to the notebook. Off the main thread.
+     */
+    fun scoresForTmdb(type: ContentType, tmdbIds: List<String>): Map<String, Entry> {
+        val k = key ?: return emptyMap()
+        if (!active || tmdbIds.isEmpty()) return emptyMap()
+        val kind = mediaType(type)
+        val numbers = tmdbIds.mapNotNull { it.toLongOrNull() }.take(RatingsFill.BATCH)
+        val body = JSONObject().put("ids", JSONArray(numbers)).toString()
+        val (code, text) = runCatching { request("/tmdb/$kind", k, body) }.getOrDefault(-1 to null)
+        if (code != 200 || text == null) return emptyMap()
+        val answers = runCatching { JSONArray(text) }.getOrNull() ?: return emptyMap()
+        val out = HashMap<String, Entry>()
+        for (i in 0 until answers.length()) {
+            val media = answers.optJSONObject(i) ?: continue
+            val idsObj = media.optJSONObject("ids")
+            val tmdb = listOf(idsObj?.opt("tmdb"), idsObj?.opt("tmdbid"), media.opt("tmdb_id"), media.opt("tmdbid"))
+                .firstNotNullOfOrNull { v -> v?.toString()?.takeIf { it.isNotEmpty() && it != "null" && it != "0" } } ?: continue
+            out[tmdb] = entryFrom(media, How.ID, "tmdb/$kind/$tmdb")
+        }
+        return out
     }
 
     private fun entryFrom(media: JSONObject, how: How, ref: String): Entry {

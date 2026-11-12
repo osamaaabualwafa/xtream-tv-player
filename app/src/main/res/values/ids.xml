@@ -5,4 +5,9 @@
     <item name="focus_box" type="id" />
     <!-- FocusMap: a list of choices; entering it lands on the selected one. -->
     <item name="focus_choices" type="id" />
+    <!-- Home rows made in code (Package 3): Picked for you and Trending this week. -->
+    <item name="row_picked_title" type="id" />
+    <item name="row_picked" type="id" />
+    <item name="row_trending_title" type="id" />
+    <item name="row_trending" type="id" />
 </resources>

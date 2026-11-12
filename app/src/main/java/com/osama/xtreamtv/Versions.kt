@@ -80,8 +80,15 @@ object Versions {
     }
 
     /** For cards: movies and series only (live channels keep their names). */
-    fun shownName(item: StreamItem): String = if (item.type == ContentType.LIVE) item.name
-        else clean(item.name, item.year ?: runCatching { Ratings.knownYear(item.type, item.ratingId ?: item.id)?.toString() }.getOrNull())
+    fun shownName(item: StreamItem): String {
+        if (item.type == ContentType.LIVE) return item.name
+        val year = item.year ?: runCatching { Ratings.knownYear(item.type, item.ratingId ?: item.id)?.toString() }.getOrNull()
+        // An Arabic provider name for a show that isn't Arabic: TMDB's name (owner, 2026-11-13).
+        if (hasArabic(item.name)) runCatching { Ratings.tmdbName(item.type, item.ratingId ?: item.id) }.getOrNull()?.let { return clean(it, year) }
+        return clean(item.name, year)
+    }
+
+    fun hasArabic(s: String) = s.any { it in '\u0600'..'\u06FF' }
 
     // ---- What this TV can play ----
 
@@ -161,9 +168,22 @@ object Versions {
             val same = ref?.let { byRef[it] }
             if (same == null || same.size < 2) { out.add(i); continue }
             if (!placed.add(ref)) continue
-            out.add(best(same.map(::copy), learned)?.item ?: i)
+            out.add(represent(same, learned) ?: i)
         }
         return out
+    }
+
+    /**
+     * The card for copies of one title: the best copy; when the copies are in different languages
+     * (original and dubbed), it shows the official poster instead of the provider's (owner, 2026-11-13:
+     * a dubbed copy's poster is in another language).
+     */
+    fun represent(copies: List<StreamItem>, learned: Map<String, Int>): StreamItem? {
+        val list = copies.map(::copy)
+        val chosen = best(list, learned)?.item ?: return null
+        if (list.map { it.lang }.distinct().size < 2) return chosen
+        val official = copies.firstNotNullOfOrNull { runCatching { Ratings.officialPoster(it.type, it.ratingId ?: it.id) }.getOrNull() }
+        return if (official != null) chosen.copy(image = official) else chosen
     }
 
     // ---- Languages, for the title page and the player ----

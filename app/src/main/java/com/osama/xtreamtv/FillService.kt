@@ -22,7 +22,31 @@ class FillService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Kept while filling with the screen off: the processor and Wi-Fi stay awake (owner, 2026-11-13). */
+    private var wake: android.os.PowerManager.WakeLock? = null
+    private var wifi: android.net.wifi.WifiManager.WifiLock? = null
+
+    @Suppress("DEPRECATION")
+    private fun holdAwake() {
+        runCatching {
+            if (wake == null) wake = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+                .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "XtreamTV:fill").apply { setReferenceCounted(false); acquire(12 * 3600_000L) }
+        }
+        runCatching {
+            if (wifi == null) wifi = (applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager)
+                .createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "XtreamTV:fill").apply { setReferenceCounted(false); acquire() }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { wake?.takeIf { it.isHeld }?.release() }
+        runCatching { wifi?.takeIf { it.isHeld }?.release() }
+        wake = null; wifi = null
+        super.onDestroy()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        holdAwake()
         try {
             val notice = notice()
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTICE_ID, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -48,7 +72,7 @@ class FillService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             if (manager.getNotificationChannel(CHANNEL) == null) {
                 manager.createNotificationChannel(NotificationChannel(CHANNEL, "Ratings fill", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Shown while ratings are filled under the screensaver"
+                    description = "Shown while ratings are filled with the TV idle"
                     setShowBadge(false)
                 })
             }
@@ -56,7 +80,7 @@ class FillService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_glass_star)
             .setContentTitle("Xtream TV is filling ratings")
-            .setContentText("It stops when the screen goes off or the app is opened")
+            .setContentText("It stops when the app or another app is opened")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
