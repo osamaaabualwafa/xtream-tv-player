@@ -118,9 +118,10 @@ class DetailsActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         message = findViewById(R.id.message)
 
-        title.text = item.name
+        title.text = Versions.shownName(item)
         setMeta(emptyList())
         loadPoster(item.image)
+        loadVersions()
 
         buttons.visibility = View.VISIBLE
         favoriteButton.setOnClickListener {
@@ -214,6 +215,8 @@ class DetailsActivity : AppCompatActivity() {
             area.post {
                 when {
                     credits.visibility != View.GONE -> credits.visibility = View.GONE
+                    // The names keep to one line each before the description gives way.
+                    trimNames() -> Unit
                     plot.visibility != View.GONE && plot.maxLines > 1 -> plot.maxLines = 1
                     plot.visibility != View.GONE -> plot.visibility = View.GONE
                 }
@@ -281,6 +284,50 @@ class DetailsActivity : AppCompatActivity() {
     private fun validYear(text: String?) = text?.take(4)?.takeIf { Regex("(19|20)\\d{2}").matches(it) }
     private var scores: RatingBadges.Scores? = null
 
+    // ---- Versions (package 2, item 2): information only; the choice is made in the player ----
+
+    /** The title's copies in other qualities and languages (itself only when there are none). */
+    private var copies: Versions.CopySet? = null
+    /** Chips after year, length and genre: the best quality this TV can play, then each language. */
+    private var versionChips: List<String> = emptyList()
+
+    /** A copy's real height, from the provider's details: saved, and the chips follow. */
+    private fun noteQuality(id: String, height: Int) {
+        Versions.noteHeight(this, item.type, id, height)
+        val set = copies ?: return
+        val learned = HashMap(set.learned).apply { put("${item.type.name}:$id", height) }
+        copies = Versions.CopySet(set.copies, set.original, learned)
+        showVersionChips()
+    }
+
+    private fun showVersionChips() {
+        val set = copies ?: return
+        val best = set.copies.map { Versions.height(it, set.learned) }.filter { Versions.playable(it) }.maxOrNull() ?: 0
+        val langs = Versions.order(set.copies, set.learned).map { it.lang }.distinct()
+        versionChips = listOfNotNull(Versions.qualityLabel(best)) + langs.map { Versions.languageLabel(it, set.original) }
+        setMeta(metaValues)
+    }
+
+    private fun loadVersions() {
+        lifecycleScope.launch {
+            val set = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Versions.of(this@DetailsActivity, api, item) }.getOrNull() }
+                ?: return@launch
+            // A height the page already learned from the provider while this loaded is kept.
+            copies = copies?.let { old -> Versions.CopySet(set.copies, set.original, set.learned + old.learned) } ?: set
+            showVersionChips()
+        }
+    }
+
+    /**
+     * The copy Play starts: this one when it is being watched; otherwise the best copy (its original
+     * language first, then the highest quality this TV can play).
+     */
+    private fun playCopy(): StreamItem {
+        if (prefs.position(movieKey()) > 0) return item
+        val set = copies ?: return item
+        return Versions.best(set.copies, set.learned)?.item ?: item
+    }
+
     /** Rating, year, length, genre as glass chips; real IMDb / Rotten Tomatoes scores first when known (1.1E). */
     private fun setMeta(values: List<String>) {
         metaValues = values
@@ -297,7 +344,7 @@ class DetailsActivity : AppCompatActivity() {
                     .apply { rightMargin = (8 * density).toInt(); bottomMargin = (6 * density).toInt() }
             })
         }
-        for (v in values.filter { it.isNotBlank() }) {
+        for (v in (values + versionChips).filter { it.isNotBlank() }) {
             meta.addView(TextView(this).apply {
                 text = v
                 // Glass: the rating stands out in the live colour.
@@ -328,8 +375,7 @@ class DetailsActivity : AppCompatActivity() {
             originalName?.takeIf { it != name })
         // More like this needs the whole list and its name index: get them ready meanwhile.
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val all = Session.streamCache["${item.type.name}:__all__"] ?: runCatching { api.streams(item.type, null) }.getOrNull()
-                ?.also { Session.streamCache["${item.type.name}:__all__"] = it }
+            val all = runCatching { Session.all(api, item.type) }.getOrNull()
             all?.let { Ratings.nameIndex(it) }
         }
         lifecycleScope.launch {
@@ -343,20 +389,44 @@ class DetailsActivity : AppCompatActivity() {
                 if (Ratings.needsTrailer(item.type, item.id)) Ratings.lookup(title, onScreen = true, fresh = true)
                 Ratings.trailer(item.type, item.id)?.let { showTrailer(it); buttons.post { alignButtons() } }
             }
+            // "Wrong title?" only where the match is not sure (package 2, item 5): by name, or by TMDB
+            // without its poster. Everywhere else the red button's Mark a problem offers the same window.
             val wrong = findViewById<Button?>(R.id.wrong_scores) ?: return@launch
-            wrong.visibility = if (found != null && Ratings.how(item.type, item.id).let { it == Ratings.How.NAME || it == Ratings.How.TMDB }) View.VISIBLE else View.GONE
-            wrong.setOnClickListener {
-                Ratings.markWrong(item.type, item.id)
-                scores = null
-                setMeta(metaValues)
-                if (wrong.hasFocus()) favoriteButton.requestFocus()
-                wrong.visibility = View.GONE
-                buttons.post { alignButtons() }
-                showToast(this@DetailsActivity, "Scores removed. This title won't be matched again.", Toast.LENGTH_SHORT)
-            }
+            val unsure = found != null && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Ratings.notSure(item.type, item.id) }
+            wrong.text = "Wrong title?"
+            wrong.visibility = if (unsure) View.VISIBLE else View.GONE
+            wrong.setOnClickListener { openWrongTitle() }
             buttons.post { alignButtons() }
             if (found != null || Ratings.how(item.type, item.id) == Ratings.How.ID) showExtras() else showSimilarOnly()
         }
+    }
+
+    /** This title has scores: its match can be corrected (the red button offers it too). */
+    fun canCorrectTitle(): Boolean = Ratings.isOn && scores != null
+
+    /** "Which title is this?": the owner's choice replaces the match; None removes the scores. */
+    fun openWrongTitle() {
+        WrongTitleUi.show(this, lifecycleScope, item.type, item.id, title.text.toString(), onChosen = { ref ->
+            lifecycleScope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    Ratings.chooseMatch(item.type, item.id, ref)
+                    // Its cast, story, genres and season years come with it.
+                    Tmdb.details(item.type, ref).found?.let { f -> runCatching { Ratings.db.putWorkDetail(ref, f.toDetail()) } }
+                }
+                showToast(this@DetailsActivity, "Title changed. Its scores and details follow.", Toast.LENGTH_SHORT)
+                // The page again, with the chosen title's scores and details.
+                startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION))
+                finish()
+                overridePendingTransition(0, 0)
+            }
+        }, onNone = {
+            Ratings.markWrong(item.type, item.id)
+            scores = null
+            setMeta(metaValues)
+            findViewById<Button?>(R.id.wrong_scores)?.let { w -> if (w.hasFocus()) favoriteButton.requestFocus(); w.visibility = View.GONE }
+            buttons.post { alignButtons() }
+            showToast(this@DetailsActivity, "Scores removed. This title won't be matched again.", Toast.LENGTH_SHORT)
+        })
     }
 
     /**
@@ -417,7 +487,7 @@ class DetailsActivity : AppCompatActivity() {
         val recs = e.recs
         lifecycleScope.launch {
             val all = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                Session.streamCache["${item.type.name}:__all__"] ?: runCatching { api.streams(item.type, null) }.getOrNull() ?: emptyList()
+                runCatching { Session.all(api, item.type) }.getOrNull() ?: emptyList()
             }
             val fromMdbList = if (recs.isEmpty()) emptyList() else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val byId = all.associateBy { it.id }
@@ -506,6 +576,7 @@ class DetailsActivity : AppCompatActivity() {
 
     /** Series: Down from the episodes slides the top part away and shows More like this; Up brings it back. */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && namesKey(event.keyCode)) return true
         // Movies: Down from the buttons tucks the description and credits away so More like this
         // fits in full; Up brings them back.
         val recosRow = findViewById<RecyclerView?>(R.id.recos)
@@ -579,11 +650,187 @@ class DetailsActivity : AppCompatActivity() {
     private var tuckedNext = false
     private var tuckedMeta = false
 
-    private fun showCredits(text: String?) {
-        findViewById<TextView>(R.id.credits).apply {
-            this.text = text
-            visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
+    /**
+     * The director and cast (package 2, item 3): rows of names above the buttons; people with two or
+     * more titles in the playlist are buttons with a photo that open their page. [text] is
+     * "Director: …\nCast: …" as the page has it; the saved names (with photos) are used when known.
+     */
+    private fun showCredits(text: String?, asked: Boolean = false) {
+        lastCredits = text
+        if (!asked) peopleJob?.cancel()
+        findViewById<TextView>(R.id.credits).visibility = View.GONE
+        val lines = text?.lines().orEmpty()
+        fun list(prefix: String) = lines.firstOrNull { it.startsWith(prefix) }?.removePrefix(prefix)
+            ?.split(',')?.map { it.trim() }?.filter { it.length >= 2 }.orEmpty()
+        val givenDirectors = list("Director: ")
+        val givenCast = list("Cast: ")
+        namesJob?.cancel()
+        namesJob = lifecycleScope.launch {
+            val pl = prefs.activeId ?: return@launch
+            val listRefs = providerRefs()
+            val (directors, cast) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val saved = runCatching { Ratings.db.peopleOf(Ratings.keyOf(item.type, item.id)) }.getOrDefault(emptyList())
+                val d = saved.filter { it.role == RatingsDb.Detail.DIRECTOR }.map { it.name to it.photo }.ifEmpty { givenDirectors.map { it to null } }
+                val c = saved.filter { it.role == RatingsDb.Detail.ACTOR }.map { it.name to it.photo }.ifEmpty { givenCast.map { it to null } }
+                val counts = runCatching { Ratings.db.titleCounts(pl, (d + c).map { it.first }, listRefs) }.getOrDefault(emptyMap())
+                // A photo TMDB gave with the person's film list, for names the title's own list had none for.
+                val photos = runCatching { Ratings.db.personPhotos((d + c).filter { it.second == null }.map { it.first }) }.getOrDefault(emptyMap())
+                fun name(p: Pair<String, String?>) = NamesUi.Name(p.first, p.second ?: photos[p.first], counts[p.first] ?: 0)
+                d.map(::name) to c.take(10).map(::name)
+            }
+            val parent = buttons.parent as? android.view.ViewGroup ?: return@launch
+            // The name highlighted in the old rows gets the highlight back in the new ones.
+            val focusedName = parent.findViewWithTag<View>("names_rows")?.let { old -> currentFocus?.takeIf { isInside(it, old) }?.contentDescription?.toString() }
+            parent.findViewWithTag<View>("names_rows")?.let { parent.removeView(it) }
+            if (!asked) askPeople(pl, (directors + cast).filter { it.count < 2 }.map { it.text })
+            if (directors.isEmpty() && cast.isEmpty()) return@launch
+            val rows = NamesUi.rows(this@DetailsActivity, if (isMovie) "Director" else "Created by", directors, cast) { name ->
+                startActivity(PersonActivity.intent(this@DetailsActivity, name))
+            }
+            // Added while the page settles: the highlight stays where the page put it (Play, or the episode).
+            val had = currentFocus
+            parent.addView(rows, parent.indexOfChild(buttons))
+            if (focusedName != null) {
+                rows.post {
+                    val again = ArrayList<View>().also { rows.findViewsWithText(it, focusedName, View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION) }.firstOrNull()
+                    (again ?: if (playButton.isShown) playButton else null)?.requestFocus() ?: focusDefault()
+                }
+                return@launch
+            }
+            rows.post {
+                val now = currentFocus
+                // The page's own highlight (not the scrolling area, nor a name it just landed on) stays.
+                val real = had != null && had.isAttachedToWindow && had.isShown && had !is android.widget.ScrollView && !isInside(had, rows)
+                if (now == null || now is android.widget.ScrollView || isInside(now, rows)) { if (real) had!!.requestFocus() else focusDefault() }
+            }
         }
+    }
+
+    private var namesJob: kotlinx.coroutines.Job? = null
+    private var peopleJob: kotlinx.coroutines.Job? = null
+    private var lastCredits: String? = null
+    private var listRefsCache: Set<String>? = null
+
+    /** The provider's own TMDB ids for this kind of title ("tmdb/movie/603"), for titles the notebook hasn't reached yet. */
+    private suspend fun providerRefs(): Set<String> = listRefsCache ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val kind = if (item.type == ContentType.MOVIE) "movie" else "show"
+        val all = runCatching { Session.all(api, item.type) }.getOrDefault(emptyList())
+        all.mapNotNullTo(HashSet()) { s -> s.tmdb?.trim()?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) && it != "0" }?.let { "tmdb/$kind/$it" } }
+    }.also { if (it.isNotEmpty()) listRefsCache = it }
+
+    /**
+     * Names that can't be pressed yet because the notebook knows fewer than two of their titles:
+     * TMDB is asked for each one's film list (once a month at most), one person at a time, and the
+     * rows are drawn again when someone turns out to have two or more (owner, 2026-11-12).
+     */
+    private fun askPeople(pl: String, names: List<String>) {
+        if (names.isEmpty() || !Tmdb.hasKey) return
+        peopleJob?.cancel()
+        peopleJob = lifecycleScope.launch {
+            val listRefs = providerRefs()
+            val todo = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val asked = runCatching { Ratings.db.personAsked(names) }.getOrDefault(emptySet())
+                names.distinct().filter { it !in asked }
+            }
+            if (todo.isEmpty()) return@launch
+            var gained = 0
+            for (name in todo) {
+                val films = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Tmdb.personFilms(name) }.getOrNull() } ?: break
+                val now = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { Ratings.db.savePersonWorks(name, films.photo, films.works); Ratings.db.titleCounts(pl, listOf(name), listRefs)[name] ?: 0 }.getOrDefault(0)
+                }
+                Diag.log("names", "TMDB film list · ${films.works.size} works · $now in the playlist${Diag.title(name)}")
+                if (now >= 2) gained++
+            }
+            if (gained > 0) showCredits(lastCredits, asked = true)
+        }
+    }
+
+    /**
+     * Up and Down between the buttons and the names rows go row by row, to the first name you can
+     * press in the next row (Android's nearest-guess skipped a row whose only button sat far right).
+     * Rows with nothing to press are passed over.
+     */
+    private fun namesKey(keyCode: Int): Boolean {
+        val side = keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+        if (!side && keyCode != android.view.KeyEvent.KEYCODE_DPAD_UP && keyCode != android.view.KeyEvent.KEYCODE_DPAD_DOWN) return false
+        val rows = (buttons.parent as? android.view.ViewGroup)?.findViewWithTag<android.view.ViewGroup>("names_rows") ?: return false
+        val f = currentFocus ?: return false
+        val lines = (0 until rows.childCount).map { rows.getChildAt(it) }
+        // Each row (Director, Cast) is one group: Left and Right go name by name in reading order,
+        // also across the row's second line, and stop at its ends; they never leave the row
+        // (owner, 2026-11-12: Left from a name jumped to More like this and the last name was unreachable).
+        if (side) {
+            val line = lines.firstOrNull { isInside(f, it) } ?: return false
+            val flow = (line as? android.view.ViewGroup)?.getChildAt(1) as? android.view.ViewGroup ?: return true
+            val names = (0 until flow.childCount).map { flow.getChildAt(it) }.filter { it.isFocusable && it.isShown }
+            val i = names.indexOfFirst { it === f || isInside(f, it) }
+            if (i < 0) return true
+            names.getOrNull(if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) i + 1 else i - 1)?.requestFocus()
+            return true
+        }
+        fun firstButton(line: View): View? = ((line as? android.view.ViewGroup)?.getChildAt(1) as? android.view.ViewGroup)?.let { flow ->
+            (0 until flow.childCount).map { flow.getChildAt(it) }.firstOrNull { it.isFocusable && it.isShown }
+        }
+        val pressable = lines.filter { firstButton(it) != null }
+        if (pressable.isEmpty()) return false
+        val up = keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
+        val inButtons = isInside(f, buttons)
+        val at = pressable.indexOfFirst { isInside(f, it) }
+        val target: View? = when {
+            inButtons && up -> firstButton(pressable.last())
+            at >= 0 && up -> pressable.getOrNull(at - 1)?.let(::firstButton) ?: return true
+            at >= 0 && !up -> pressable.getOrNull(at + 1)?.let(::firstButton)
+                ?: (buttons as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).map { g.getChildAt(it) }.firstOrNull { it.isFocusable && it.isShown } }
+            else -> null
+        }
+        target ?: return false
+        target.requestFocus()
+        return true
+    }
+
+    /** A names row on more than one line loses its last name (plain names first). True when one went. */
+    private fun trimNames(): Boolean {
+        val rows = (buttons.parent as? android.view.ViewGroup)?.findViewWithTag<android.view.ViewGroup>("names_rows") ?: return false
+        for (r in (rows.childCount - 1) downTo 0) {
+            val flow = (rows.getChildAt(r) as? android.view.ViewGroup)?.getChildAt(1) as? FlowRow ?: continue
+            if (flow.childCount < 2) continue
+            val first = flow.getChildAt(0)
+            if (flow.height <= first.height * 3 / 2 + first.paddingTop) continue
+            val plain = (flow.childCount - 1 downTo 0).firstOrNull { !flow.getChildAt(it).isFocusable } ?: (flow.childCount - 1)
+            if (flow.getChildAt(plain).hasFocus()) continue
+            flow.removeViewAt(plain)
+            return true
+        }
+        return false
+    }
+
+    /** Where the page puts the highlight: Play (or Resume) on a movie, the episode being watched on a series. */
+    private fun focusDefault() {
+        if (isMovie) { (if (resumeButton.isShown) resumeButton else playButton).requestFocus(); return }
+        val lm = episodesView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
+        val at = lm?.findFirstVisibleItemPosition()?.takeIf { it >= 0 } ?: 0
+        (lm?.findViewByPosition(at) ?: episodesView).requestFocus()
+    }
+
+    /** Season number -> the year it came out (TMDB, saved by the fill); only seasons TMDB lists. */
+    private var seasonYears: Map<Int, Int> = emptyMap()
+
+    private fun loadSeasonYears() {
+        lifecycleScope.launch {
+            val map = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { Ratings.db.seasonYears(Ratings.keyOf(item.type, item.id)) }.getOrDefault(emptyMap())
+            }
+            if (map.isEmpty()) return@launch
+            seasonYears = map
+            if (::seasonAdapter.isInitialized) seasonAdapter.notifyItemRangeChanged(0, seasonAdapter.itemCount)
+        }
+    }
+
+    private fun isInside(v: View, box: View): Boolean {
+        var p: View? = v
+        while (p != null) { if (p === box) return true; p = p.parent as? View }
+        return false
     }
 
     // ---- Movies ----
@@ -599,21 +846,26 @@ class DetailsActivity : AppCompatActivity() {
 
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
+            val saved = showSaved()
             try {
                 val info = api.vodInfo(item.id)
-                info.name?.let { title.text = it }
+                info.name?.let { title.text = Versions.clean(it, info.releaseDate ?: item.year) }
+                // The provider says the picture size: the quality chip needs no playing first.
+                if (info.height > 0) noteQuality(item.id, info.height)
                 if (info.ext != null) ext = info.ext
+                // What the provider leaves empty keeps what the TV has saved.
+                val genre = info.genre?.takeIf { it.isNotBlank() } ?: saved?.genres
                 setMeta(listOfNotNull(
-                    validYear(info.releaseDate),
-                    info.duration?.takeIf { parseLength(it)?.let { ms -> ms > 0 } ?: true }?.let { durationText(it) },
-                    info.genre?.takeIf { it.isNotBlank() },
+                    validYear(info.releaseDate) ?: saved?.year?.takeIf { it > 0 }?.toString(),
+                    info.duration?.takeIf { parseLength(it)?.let { ms -> ms > 0 } ?: true }?.let { durationText(it) } ?: saved?.minutes?.let(::minutesText),
+                    genre,
                 ))
-                pageGenre = info.genre
+                pageGenre = genre
                 Diag.ready("Details", "page", openedAt)
-                plot.text = info.plot
+                plot.text = info.plot?.takeIf { it.isNotBlank() } ?: saved?.plot
                 showCredits(listOfNotNull(
-                    info.director?.let { "Director: $it" },
-                    info.cast?.let { "Cast: $it" },
+                    (info.director?.takeIf { it.isNotBlank() } ?: saved?.director)?.let { "Director: $it" },
+                    (info.cast?.takeIf { it.isNotBlank() } ?: saved?.cast)?.let { "Cast: $it" },
                 ).joinToString("\n").ifEmpty { null })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
@@ -621,11 +873,35 @@ class DetailsActivity : AppCompatActivity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                plot.text = "Details unavailable."
+                // The provider did not answer: the page keeps what the TV has saved, and its scores.
+                plot.text = saved?.plot ?: if (saved == null) "Details unavailable." else "The story is not available right now."
+                if (saved != null) showScores(null, null, saved.year.takeIf { it > 0 }?.toString(), item.image, item.name)
             }
             progress.visibility = View.GONE
         }
     }
+
+    /**
+     * Year, length, genre, director and cast the TV already has for this title (saved by the ratings
+     * fill or an earlier visit), shown at once, before the provider answers. The provider's answer
+     * then adds the story and the trailer. Returns what was shown, or null when nothing is saved.
+     */
+    private suspend fun showSaved(): RatingsDb.Saved? {
+        val key = Ratings.keyOf(item.type, item.id)
+        val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Ratings.db.saved(key) }.getOrNull() } ?: return null
+        setMeta(listOfNotNull(saved.year.takeIf { it > 0 }?.toString(), minutesText(saved.minutes), saved.genres))
+        pageGenre = saved.genres
+        saved.plot?.let { plot.text = it }
+        showCredits(listOfNotNull(
+            saved.director?.takeIf { item.type == ContentType.MOVIE }?.let { "Director: $it" },
+            saved.cast?.let { "Cast: $it" },
+        ).joinToString("\n").ifEmpty { null })
+        Diag.ready("Details", "saved details", openedAt)
+        return saved
+    }
+
+    private fun minutesText(minutes: Int): String? =
+        if (minutes <= 0) null else if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 
     private fun updateResumeButton() {
         val pos = prefs.position(movieKey())
@@ -641,8 +917,12 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun playMovie(startMs: Long) {
         val name = title.text.toString()
-        val entry = WatchEntry(movieKey(), ContentType.MOVIE, item.id, ext, name, null, posterUrl)
-        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(item.id, ext), name, movieKey(), startMs, entry, askResume = false))
+        // Play from the start: the best copy (Resume keeps the copy being watched).
+        val copy = if (startMs == 0L) playCopy() else item
+        val copyExt = if (copy.id == item.id) ext else copy.ext
+        val key = "movie_${copy.id}"
+        val entry = WatchEntry(key, ContentType.MOVIE, copy.id, copyExt, name, null, posterUrl)
+        startActivity(PlayerActivity.vodIntent(this, api.movieUrl(copy.id, copyExt), name, key, startMs, entry, askResume = false))
     }
 
     // ---- Series ----
@@ -650,22 +930,24 @@ class DetailsActivity : AppCompatActivity() {
     private fun setupSeries() {
         playButton.visibility = View.GONE
         findViewById<View>(R.id.episodes_card).visibility = View.VISIBLE
+        loadSeasonYears()
 
         seasonAdapter = TextAdapter(
             R.layout.item_category_chip,
             bind = { vh, season ->
-                // Many seasons: short, smaller tabs so they all fit on one line.
-                val many = seasons.size > 6
+                // Always the full name, with the year it came out when known (package 2, item 4, approved
+                // 2026-11-12: "Season 1 · 2025"); many seasons scroll sideways rather than shrinking to "S1".
+                val year = seasonYears[season]
                 vh.title.text = when {
                     season == 0 -> "Extras"
-                    many -> "S$season"
+                    year != null -> "Season $season · $year"
                     else -> "Season $season"
                 }
                 vh.subtitle?.text = ""
-                vh.title.textSize = if (many) 15f else 16f
+                vh.title.textSize = 16f
                 val d = resources.displayMetrics.density
-                vh.itemView.setPadding(((if (many) 14 else 18) * d).toInt(), 0, ((if (many) 14 else 18) * d).toInt(), 0)
-                (vh.itemView.layoutParams as android.view.ViewGroup.MarginLayoutParams).rightMargin = ((if (many) 6 else 10) * d).toInt()
+                vh.itemView.setPadding((18 * d).toInt(), 0, (18 * d).toInt(), 0)
+                (vh.itemView.layoutParams as android.view.ViewGroup.MarginLayoutParams).rightMargin = (10 * d).toInt()
             },
             onClick = { index, season -> showSeason(index, season) },
         )
@@ -701,20 +983,23 @@ class DetailsActivity : AppCompatActivity() {
 
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
+            val saved = showSaved()
             try {
                 val info = api.seriesInfo(item.id)
+                val genre = info.genre?.takeIf { it.isNotBlank() } ?: saved?.genres
                 setMeta(listOfNotNull(
-                    validYear(info.releaseDate),
-                    info.genre?.takeIf { it.isNotBlank() },
+                    validYear(info.releaseDate) ?: saved?.year?.takeIf { it > 0 }?.toString(),
+                    genre,
                 ))
-                pageGenre = info.genre
+                pageGenre = genre
                 Diag.ready("Details", "page", openedAt)
-                plot.text = info.plot
-                showCredits(info.cast?.let { "Cast: $it" })
+                plot.text = info.plot?.takeIf { it.isNotBlank() } ?: saved?.plot
+                showCredits((info.cast?.takeIf { it.isNotBlank() } ?: saved?.cast)?.let { "Cast: $it" })
                 showTrailer(info.trailer)
                 loadPoster(info.cover)
                 showScores(info.tmdb, info.imdb, info.releaseDate, info.cover, item.name)
                 seasons = info.seasons
+                info.seasons.values.flatten().firstOrNull { it.height > 0 }?.let { noteQuality(item.id, it.height) }
                 if (seasons.isEmpty()) {
                     showMessage("No episodes available.")
                 } else {

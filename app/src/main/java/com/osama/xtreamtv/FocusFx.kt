@@ -363,7 +363,12 @@ private object FocusAudit {
         return ((maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05)).toFloat()
     }
 
-    private fun rectOf(v: View): android.graphics.Rect = android.graphics.Rect().also { v.getGlobalVisibleRect(it) }
+    /**
+     * Where a view is on screen; empty when no part of it is. (Android leaves numbers in the
+     * rectangle for a view that is not visible at all: posters waiting below the grid were reported
+     * as lying on the category list, 329 times on the TV by 2026-11-12, with nothing wrong on screen.)
+     */
+    private fun rectOf(v: View): android.graphics.Rect = android.graphics.Rect().also { if (!v.getGlobalVisibleRect(it)) it.setEmpty() }
 
     private fun isInside(child: View, parent: View): Boolean {
         var p = child.parent as? View

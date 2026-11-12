@@ -324,6 +324,14 @@
                     android:contentDescription="Audio and subtitles"
                     android:src="@drawable/ic_vc_subtitles" />
 
+                <!-- Versions (package 2): only when the title has more than one copy. -->
+                <ImageView
+                    android:id="@+id/vc_versions"
+                    style="@style/VcCircle"
+                    android:contentDescription="Versions"
+                    android:src="@drawable/ic_vc_versions"
+                    android:visibility="gone" />
+
                 <ImageView
                     android:id="@+id/vc_settings"
                     style="@style/VcCircle"

@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -95,6 +96,8 @@ data class VodInfo(
     val imdb: String? = null,
     /** The original title ("o_name"), when the panel gives it. */
     val originalName: String? = null,
+    /** The picture's height, when the panel says it ("video": {"height": 1080}); 0 otherwise. */
+    val height: Int = 0,
 )
 
 data class Episode(
@@ -107,6 +110,8 @@ data class Episode(
     val duration: String?,
     /** The episode's own still (wide), when the provider has one. */
     val image: String? = null,
+    /** The picture's height, when the panel says it; 0 otherwise. */
+    val height: Int = 0,
 )
 
 data class SeriesInfo(
@@ -228,9 +233,21 @@ suspend fun probeStream(start: String): StreamProbe? = withContext(Dispatchers.I
 class XtreamApi(val account: Account, private val cacheDir: File? = null) {
 
     companion object {
-        private const val LIST_CACHE_MS = 12 * 60 * 60 * 1000L
+        /**
+         * A saved list younger than this is used as it is. An older one is still shown at once, and a
+         * newer copy is fetched behind it; when that copy differs, [onListChanged] says so and the
+         * screens take it (TV, 2026-11-12: a list fetched "for next time" left a new episode unseen
+         * for a day).
+         */
+        private const val LIST_CACHE_MS = 3 * 60 * 60 * 1000L
         /** Lists being refreshed in the background (cache file names). */
         private val refreshing = HashSet<String>()
+        /** One background refresh at a time: two big answers held together are heavy for a small TV. */
+        private val refreshLock = kotlinx.coroutines.sync.Mutex()
+        /** After a failed refresh (the internet is often not ready when the TV wakes): wait, then try again. */
+        private val RETRY_AFTER_MS = longArrayOf(15_000, 45_000, 120_000)
+        /** A saved list was replaced by a different one from the server: (api, action). Any thread. */
+        @Volatile var onListChanged: ((XtreamApi, String) -> Unit)? = null
         private val backgroundScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
         private val CACHED_ACTIONS = setOf(
             "get_live_categories", "get_vod_categories", "get_series_categories",
@@ -368,6 +385,7 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             tmdb = info.tmdbId("tmdb_id", "tmdb") ?: data.tmdbId("tmdb_id", "tmdb") ?: info.backdropTmdb("movie"),
             imdb = info.imdbId("imdb_id", "imdb") ?: data.imdbId("imdb_id", "imdb"),
             originalName = info.str("o_name"),
+            height = info.optJSONObject("video")?.optInt("height") ?: 0,
         )
     }
 
@@ -384,7 +402,8 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             val epInfo = o.optJSONObject("info")
             val title = o.str("title") ?: (if (number != null) "Episode $number" else "Episode")
             val still = epInfo?.str("movie_image")?.takeIf { it.startsWith("http") }
-            val ep = Episode(id, title, season, number, o.str("container_extension") ?: "mp4", epInfo?.str("plot"), epInfo?.str("duration"), still)
+            val ep = Episode(id, title, season, number, o.str("container_extension") ?: "mp4", epInfo?.str("plot"), epInfo?.str("duration"), still,
+                epInfo?.optJSONObject("video")?.optInt("height") ?: 0)
             seasons.getOrPut(season) { ArrayList() }.add(ep)
         }
 
@@ -504,7 +523,7 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             cacheFile!!.readText()
         } else if (cacheFile != null && cacheFile.exists()) {
             // Old list: show it straight away and fetch the new one in the background for next time.
-            refreshInBackground(url.toString(), cacheFile)
+            refreshInBackground(url.toString(), cacheFile, action ?: "")
             cacheFile.readText()
         } else {
             try {
@@ -525,18 +544,56 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
         }
     }
 
-    private fun refreshInBackground(url: String, file: File) {
+    /**
+     * The app is back after a while with its lists still in memory: fetch a newer copy of each saved
+     * whole list that is older than [LIST_CACHE_MS]. Nothing on screen waits for this.
+     */
+    fun refreshOldLists() {
+        val dir = listCacheDir() ?: return
+        backgroundScope.launch {
+            for (action in listOf("get_series", "get_vod_streams", "get_live_streams", "get_series_categories", "get_vod_categories", "get_live_categories")) {
+                val file = File(dir, md5("action=$action") + ".json")
+                if (!file.exists() || System.currentTimeMillis() - file.lastModified() < LIST_CACHE_MS) continue
+                refreshInBackground("$base/player_api.php?username=$user&password=$pass&action=$action", file, action)
+            }
+        }
+    }
+
+    private fun refreshInBackground(url: String, file: File, action: String) {
         synchronized(refreshing) { if (!refreshing.add(file.name)) return }
         backgroundScope.launch {
             try {
-                val body = httpGet(url)
-                if (body.isNotBlank()) {
-                    val tmp = File(file.parentFile, file.name + ".tmp")
-                    tmp.writeText(body)
-                    tmp.renameTo(file)
+                for (attempt in 0..RETRY_AFTER_MS.size) {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    try {
+                        val changed = refreshLock.withLock {
+                            val body = httpGet(url)
+                            if (body.isBlank()) return@withLock false
+                            val differs = runCatching { file.readText() != body }.getOrDefault(true)
+                            if (differs) {
+                                val tmp = File(file.parentFile, file.name + ".tmp")
+                                tmp.writeText(body)
+                                tmp.renameTo(file)
+                            } else {
+                                // The same list: it counts as fresh again.
+                                file.setLastModified(System.currentTimeMillis())
+                            }
+                            differs
+                        }
+                        val secs = "%.1f".format(java.util.Locale.US, (android.os.SystemClock.elapsedRealtime() - started) / 1000.0)
+                        Diag.log("lists", "$action checked behind the screen · ${if (changed) "newer list saved" else "no change"} · $secs s")
+                        if (changed) onListChanged?.invoke(this@XtreamApi, action)
+                        break
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Keep the old list. The address is never logged: the kind of failure only.
+                        val wait = RETRY_AFTER_MS.getOrNull(attempt)
+                        Diag.log("lists", "$action could not be checked (${e.javaClass.simpleName})" + if (wait != null) ", trying again in ${wait / 1000} s" else ", left for later")
+                        if (wait == null) break
+                        kotlinx.coroutines.delay(wait)
+                    }
                 }
-            } catch (e: Exception) {
-                // Keep the old list; try again next time.
             } finally {
                 synchronized(refreshing) { refreshing.remove(file.name) }
             }

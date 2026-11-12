@@ -85,7 +85,7 @@ object Library {
             for (p in Prefs(context).playlists()) {
                 val fp = fingerprint(p)
                 x.execSQL("UPDATE OR REPLACE titles SET pl = ? WHERE pl = ?", arrayOf(fp, p.id))
-                for (t in listOf("titles", "works", "work_people", "work_genres")) {
+                for (t in listOf("titles", "works", "work_people", "work_genres", "work_keywords", "work_seasons")) {
                     x.execSQL("UPDATE OR IGNORE $t SET ref = replace(ref, ?, ?) WHERE ref LIKE ?", arrayOf("local/${p.id}/", "local/$fp/", "local/${p.id}/%"))
                 }
             }
@@ -161,16 +161,38 @@ object Library {
                     onProgress(percent, label)
                 }
                 step(6, "Scores and details")
+                // A file made before stories, keywords and season years were saved has none of them.
+                val newer = count(db, "SELECT COUNT(*) FROM b.sqlite_master WHERE type = 'table' AND name = 'work_keywords'") > 0
                 val inBackup = count(db, "SELECT COUNT(*) FROM b.works WHERE ref NOT LIKE 'local/%'")
                 worksHad = count(db, "SELECT COUNT(*) FROM b.works bw JOIN works w ON w.ref = bw.ref WHERE bw.ref NOT LIKE 'local/%'")
                 worksNew = inBackup - worksHad
                 // Where both have a title, the newer scores win; a year or length this TV lacks is filled in.
+                // (This TV's own story and "asked TMDB" mark stay with the row.)
                 db.execSQL(
-                    "INSERT OR REPLACE INTO works ($cols) SELECT bw.ref, bw.imdb, bw.rt, bw.at, CASE WHEN bw.year > 0 THEN bw.year ELSE w.year END, " +
-                        "CASE WHEN bw.minutes > 0 THEN bw.minutes ELSE w.minutes END, bw.trailer, bw.trailer_ok, bw.award, bw.award_ok, bw.poster, bw.poster_ok " +
+                    "INSERT OR REPLACE INTO works ($cols, plot, full) SELECT bw.ref, bw.imdb, bw.rt, bw.at, CASE WHEN bw.year > 0 THEN bw.year ELSE w.year END, " +
+                        "CASE WHEN bw.minutes > 0 THEN bw.minutes ELSE w.minutes END, bw.trailer, bw.trailer_ok, bw.award, bw.award_ok, bw.poster, bw.poster_ok, w.plot, w.full " +
                         "FROM b.works bw JOIN works w ON w.ref = bw.ref WHERE bw.at > w.at",
                 )
                 db.execSQL("INSERT OR IGNORE INTO works ($cols) SELECT $cols FROM b.works")
+                if (newer) {
+                    db.execSQL("UPDATE works SET plot = (SELECT bw.plot FROM b.works bw WHERE bw.ref = works.ref) WHERE (plot IS NULL OR plot = '') AND ref IN (SELECT ref FROM b.works WHERE plot IS NOT NULL AND plot != '')")
+                    db.execSQL("UPDATE works SET full = 1 WHERE full = 0 AND ref IN (SELECT ref FROM b.works WHERE full = 1)")
+                    db.execSQL("INSERT OR IGNORE INTO keywords (name) SELECT name FROM b.keywords")
+                    db.execSQL(
+                        "INSERT OR IGNORE INTO work_keywords (ref, kid) SELECT bl.ref, k.kid FROM b.work_keywords bl " +
+                            "JOIN b.keywords bk ON bk.kid = bl.kid JOIN keywords k ON k.name = bk.name",
+                    )
+                    db.execSQL("INSERT OR IGNORE INTO work_seasons (ref, season, year) SELECT ref, season, year FROM b.work_seasons")
+                }
+                // Version 4 files also say the language each work was made in.
+                // Version 5 files carry people's photos; version 6, which matches are sure and the owner's own choices.
+                if (runCatching { db.rawQuery("SELECT photo FROM b.people LIMIT 1", null).use { true } }.getOrDefault(false)) {
+                    db.execSQL("UPDATE people SET photo = (SELECT bp.photo FROM b.people bp WHERE bp.name = people.name) WHERE (photo IS NULL OR photo = '') AND name IN (SELECT name FROM b.people WHERE photo IS NOT NULL AND photo != '')")
+                }
+                val hasLang = runCatching { db.rawQuery("SELECT lang FROM b.works LIMIT 1", null).use { true } }.getOrDefault(false)
+                if (hasLang) {
+                    db.execSQL("UPDATE works SET lang = (SELECT bw.lang FROM b.works bw WHERE bw.ref = works.ref) WHERE (lang IS NULL OR lang = '') AND ref IN (SELECT ref FROM b.works WHERE lang IS NOT NULL AND lang != '')")
+                }
                 db.execSQL("UPDATE works SET year = (SELECT bw.year FROM b.works bw WHERE bw.ref = works.ref) WHERE year = 0 AND ref IN (SELECT ref FROM b.works WHERE year > 0)")
                 db.execSQL("UPDATE works SET minutes = (SELECT bw.minutes FROM b.works bw WHERE bw.ref = works.ref) WHERE minutes = 0 AND ref IN (SELECT ref FROM b.works WHERE minutes > 0)")
                 step(22, "Cast and directors")
@@ -264,7 +286,7 @@ object Library {
         val db = Ratings.db.writableDatabase
         db.beginTransaction()
         try {
-            for (t in listOf("titles", "works", "people", "work_people", "genres", "work_genres", "playlists")) db.execSQL("DELETE FROM $t")
+            for (t in listOf("titles", "works", "people", "work_people", "genres", "work_genres", "keywords", "work_keywords", "work_seasons", "playlists", "person_works", "person_asked")) db.execSQL("DELETE FROM $t")
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

@@ -627,9 +627,10 @@ object Diag {
                         lastKeyId = id
                         // A held OK on a card: did anything happen (a message, a question, another screen)?
                         if ((event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER) && event.repeatCount == 1) watchLongPress(activity)
-                        // Mark shortcuts: the red button, or INFO / Menu held down (some TVs keep Menu for themselves).
+                        // Mark shortcuts: the red button, or Menu held down (some TVs keep Menu for themselves).
+                        // Holding INFO no longer marks (owner, 2026-11-12): in Movies and Series it opens the filter.
                         val markKey = (event.keyCode == KeyEvent.KEYCODE_PROG_RED && event.repeatCount == 0) ||
-                            ((event.keyCode == KeyEvent.KEYCODE_INFO || event.keyCode == KeyEvent.KEYCODE_MENU) && event.repeatCount == 1)
+                            (event.keyCode == KeyEvent.KEYCODE_MENU && event.repeatCount == 1)
                         if (markKey) {
                             DiagUi.mark(if (event.keyCode == KeyEvent.KEYCODE_PROG_RED) "the red button" else "a long press on ${keyName(event.keyCode)}", activity)
                             return true
@@ -678,7 +679,7 @@ object Diag {
             movedAlone = 0
             if (!enabled) return
             // Back on a screen: is the highlight where it was when the screen was left?
-            leftPlace.remove(activity.javaClass.name)?.let { expected ->
+            leftPlace.remove(activity)?.let { expected ->
                 val back = resumedAt
                 activity.window.decorView.postDelayed({
                     if (activity.isFinishing || !activity.hasWindowFocus() || lastKeyAt > back) return@postDelayed
@@ -736,7 +737,9 @@ object Diag {
         }
 
         override fun onActivityPaused(activity: Activity) {
-            activity.currentFocus?.let { leftPlace[activity.javaClass.name] = place(it) }
+            // Nothing highlighted when leaving: an older place must not be expected on return.
+            val focus = activity.currentFocus
+            if (focus != null && !activity.isFinishing) leftPlace[activity] = place(focus) else leftPlace.remove(activity)
             flushSmallText(screen)
             remember()
             frames = null
@@ -827,7 +830,12 @@ object Diag {
     @Volatile private var resumedAt = 0L
     private var movedAlone = 0
     /** Where the highlight was when each screen was left. */
-    private val leftPlace = HashMap<String, String>()
+    /**
+     * Per screen as it stands, not per kind of screen: another title's page, or Settings opened anew,
+     * is a different screen and starts where it starts (TV, 2026-11-12: 10 false "came back on another
+     * item", every one a newly opened page compared with the last page of its kind).
+     */
+    private val leftPlace = java.util.WeakHashMap<Activity, String>()
 
     /**
      * Where the highlight is, in words: "row_favorites, item 2" (plus the title when titles are
@@ -890,7 +898,16 @@ object Diag {
         Thread {
             var stalledSince = 0L
             while (true) {
+                val slept = SystemClock.elapsedRealtime()
                 runCatching { Thread.sleep(1000) }
+                // The TV slept, or Android paused the whole app in the background: this thread stood
+                // still too. That is not the screen failing to answer (TV, 2026-11-12: a night's sleep
+                // was reported as an 11-hour freeze). Start counting again.
+                if (SystemClock.elapsedRealtime() - slept > 4000 || started == 0) {
+                    beat = SystemClock.elapsedRealtime()
+                    stalledSince = 0L
+                    continue
+                }
                 main.post { beat = SystemClock.elapsedRealtime() }
                 val gap = SystemClock.elapsedRealtime() - beat
                 if (gap > 5000 && stalledSince == 0L) stalledSince = beat

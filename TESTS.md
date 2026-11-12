@@ -50,8 +50,9 @@ When the owner says "push", they choose: no tests, `quick`, `push`, `player` or 
 | scrolling | Holding Down through Movies and Series: frames, stutters, picture times | 1.1D | `scroll_perf.py` |
 | episodes | Holding Right along a 300-episode row: frames, stutters, how far it got | 1.1F | `episode_perf.py` |
 
-During the build: `scripts/check_focus.py` (focus growth only in FocusFx.kt) and the report-cleaning
-unit test (`app/src/test`, no addresses or logins in diagnostics reports).
+During the build: `scripts/check_focus.py` (focus growth only in FocusFx.kt) and the unit tests in
+`app/src/test`: report cleaning (no addresses or logins in diagnostics reports) and clean titles
+(the release year goes, a number that is part of the name stays).
 
 ## Rules for the checks
 

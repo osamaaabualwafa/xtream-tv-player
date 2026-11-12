@@ -70,6 +70,15 @@
                 android:text="TV guide"
                 android:visibility="gone" />
 
+            <!-- Filter (package 2): just left of Sort, the same step as between Sort and Search. -->
+            <TextView
+                android:id="@+id/filter_button"
+                style="@style/GlassPill"
+                android:layout_height="46dp"
+                android:layout_marginRight="0dp"
+                android:text="Filter"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/sort_button"
                 style="@style/GlassPill"

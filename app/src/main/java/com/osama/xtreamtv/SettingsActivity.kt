@@ -670,14 +670,13 @@ class SettingsActivity : AppCompatActivity() {
             }
             linkRow("Scores and details", "${n(s.worksNew)} were new on this TV · ${n(s.worksHad)} were already here", "●  Shared", "lib_works", tint = DiagUi.GREEN, onClick = null)
         }
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            isBaselineAligned = false
+        // One row when they fit, a second only when needed (the biggest sizes broke "Restore" in two).
+        val buttons = FlowRow(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = dp(10); bottomMargin = dp(10); leftMargin = dp(6); rightMargin = dp(6)
             }
         }
-        // The same buttons as the rest of Settings (height, shape, icon then words), four across.
+        // The same buttons as the rest of Settings (height, shape, icon then words).
         fun button(label: String, icon: Int, tag: String, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
             b.tag = tag
             b.setOnClickListener { onClick() }
@@ -691,7 +690,10 @@ class SettingsActivity : AppCompatActivity() {
             b.setCompoundDrawablesRelative(drawable, null, null, null)
             b.compoundDrawablePadding = dp(12)
             if (danger) b.setTextColor(0xFFF2A7A7.toInt())
-            b.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4); rightMargin = dp(4) }
+            b.minWidth = dp(150)
+            b.layoutParams = android.view.ViewGroup.MarginLayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = dp(4); rightMargin = dp(4); topMargin = dp(4); bottomMargin = dp(4)
+            }
             buttons.addView(b)
         }
         button("Back up", R.drawable.ic_glass_download, "lib_backup") { backUpLibrary() }
@@ -855,12 +857,17 @@ class SettingsActivity : AppCompatActivity() {
         option("Fill during playback", listOf(true to "On", false to "Off"), { Ratings.fillDuringPlayback }, { Ratings.fillDuringPlayback = it }, tag = "r_fill_play")
         // Approved 2026-11-11: the owner can stop the fill from asking their provider at all.
         option("Ask the provider for missing IDs", listOf(true to "On", false to "Off"), { Ratings.askProvider }, { Ratings.askProvider = it; RatingsFill.rebuild() }, tag = "r_fill_provider")
-        (target ?: body).findViewWithTag<View>("r_fill_provider")?.let { row ->
+        // Approved 2026-11-12 (mock-up): the fill goes on under the screensaver unless this is off.
+        option("Keep filling when the TV is idle", listOf(true to "On", false to "Off"), { Ratings.fillWhenIdle }, { Ratings.fillWhenIdle = it }, tag = "r_fill_idle")
+        for ((rowTag, name, sub) in listOf(
+            Triple("r_fill_provider", "Ask the provider for missing IDs", "One movie every 5 seconds. Off: TMDB only"),
+            Triple("r_fill_idle", "Keep filling when the TV is idle", "Goes on under the screensaver. Stops when the screen is off"),
+        )) (target ?: body).findViewWithTag<View>(rowTag)?.let { row ->
             val title = row.findViewById<TextView>(R.id.title)
             title.isSingleLine = false
-            title.text = android.text.SpannableStringBuilder("Ask the provider for missing IDs").append("\n").also { b ->
+            title.text = android.text.SpannableStringBuilder(name).append("\n").also { b ->
                 val start = b.length
-                b.append("One movie every 5 seconds. Off: TMDB only")
+                b.append(sub)
                 b.setSpan(android.text.style.RelativeSizeSpan(0.8f), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 b.setSpan(android.text.style.ForegroundColorSpan(themeColor(R.attr.appTextSecondary)), start, b.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
@@ -883,7 +890,7 @@ class SettingsActivity : AppCompatActivity() {
         linkRow("Status", null, "–", "r_status", tint = DiagUi.GREEN, onClick = null)
         if (card != null) target = card
         (target ?: body).addView(TextView(this).apply {
-            text = "Works while the app is open. Scores, cast, director, genre, year and length are saved on this TV."
+            text = "Works while the app is open, and under the screensaver. Scores, cast, director, genre, year and length are saved on this TV."
             textSize = 12.5f
             setTextColor(themeColor(R.attr.appTextSecondary))
             setPadding(dp(10), dp(8), dp(10), dp(8))
@@ -927,6 +934,7 @@ class SettingsActivity : AppCompatActivity() {
                     RatingsFill.State.FILLING -> "●  Filling · ${about(p.secondsLeft)}" to DiagUi.GREEN
                     RatingsFill.State.REFRESHING -> "●  Refreshing scores · ${about(p.secondsLeft)}" to DiagUi.GREEN
                     RatingsFill.State.IDS_ONLY -> "●  Daily limit reached · still finding IDs" to DiagUi.YELLOW
+                    RatingsFill.State.DETAILS -> "●  Adding cast and genres · ${"%,d".format(p.detailsLeft)} left" to DiagUi.GREEN
                     RatingsFill.State.BROWSING -> "●  Paused · remote in use" to grey
                     RatingsFill.State.PLAYBACK -> "●  Paused · something is playing" to grey
                     RatingsFill.State.TOMORROW -> "●  Waiting · daily limit reached" to DiagUi.YELLOW

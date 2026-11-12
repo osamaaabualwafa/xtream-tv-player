@@ -351,8 +351,20 @@ object DiagUi {
 
     /** Saves the moment (and a picture of the screen when allowed), then asks what kind of problem it was. */
     fun mark(from: String, activity: Activity, extra: String = "") {
+        // On a title's page with scores: "Wrong title" (package 2, item 5) is offered too, even with
+        // Diagnostics off (then it is the only choice, and nothing is recorded).
+        val page = (activity as? DetailsActivity)?.takeIf { it.canCorrectTitle() }
         if (!Diag.enabled) {
-            showToast(activity, "Turn Diagnostics on first (Settings › About)", Toast.LENGTH_SHORT)
+            if (page == null) {
+                showToast(activity, "Turn Diagnostics on first (Settings › About)", Toast.LENGTH_SHORT)
+                return
+            }
+            card(activity) { c ->
+                c.title("What went wrong?", R.drawable.ic_glass_flag, c.color(R.attr.appAccent))
+                c.line("Press Back to close.", 13f)
+                val b = c.pill(c.row(c.dp(12)), "Wrong title · choose the right one") { c.dialog.dismiss(); page.openWrongTitle() }
+                b.post { b.requestFocus() }
+            }
             return
         }
         val at = Diag.mark(from, activity, extra)
@@ -369,6 +381,11 @@ object DiagUi {
                     }
                     if (first == null) first = b
                 }
+            }
+            if (page != null) c.pill(c.row(c.dp(12)), "Wrong title · choose the right one") {
+                Diag.log("MARK", "type: Wrong title (for the mark at $at)")
+                c.dialog.dismiss()
+                page.openWrongTitle()
             }
             first?.let { f -> f.post { f.requestFocus() } }
         }

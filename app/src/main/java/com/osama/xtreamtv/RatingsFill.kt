@@ -19,7 +19,8 @@ import java.io.IOException
  *   cast, director, genre, year and length).
  * - Pace: a step every 5 s while the app is idle (no key for 10 s); nothing while the owner is
  *   browsing; a step every 30 s during steady playback (or none, by the setting); nothing while a
- *   video buffers or starts; nothing in the background.
+ *   video buffers or starts. In the background it goes on only under the TV's screensaver (see
+ *   "Under the screensaver" below), never with the screen off or another app in front.
  * - Any error is logged (counts only) and tried again later; it never reaches the app.
  * - [RESERVE] lookups a day are left for browsing.
  *
@@ -48,9 +49,16 @@ object RatingsFill {
         REFRESHING,
         /** The day's lookups are used, but ids are still being found for tomorrow. */
         IDS_ONLY,
+        /** Every score is in; cast, director, genres, the story and keywords are being added (TMDB). */
+        DETAILS,
     }
 
-    private class Job(val type: ContentType, val id: String, val ref: String?, val year: String?, val rank: Long, val refresh: Boolean = false)
+    /**
+     * A title waiting. One with no id also carries its name and poster address (the same texts the
+     * list holds, not copies), so TMDB can be asked after the big lists have left memory.
+     */
+    private class Job(val type: ContentType, val id: String, val ref: String?, val year: String?, val rank: Long, val refresh: Boolean = false,
+        val name: String? = null, val image: String? = null)
 
     // This session, for the diagnostics report's summary (counts only).
     @Volatile private var groupsSent = 0
@@ -62,7 +70,9 @@ object RatingsFill {
     fun summaryLine(): String? {
         if (total == 0 && groupsSent == 0) return null
         return "${state.name.lowercase()} · $ready of $total ready · since the app started: $groupsSent groups ($titlesAsked titles, $titlesFound found) · " +
-            "TMDB named $tmdbFound of $tmdbAsked · provider asked $providerAsked · $noId without an id"
+            "TMDB named $tmdbFound of $tmdbAsked · provider asked $providerAsked · $noId without an id · details added $detailsAdded, $detailsLeft to go" +
+            (if (idleRuns > 0 || idleRun) " · under the screensaver: $idleRuns times, $idleMinutes min, $idleTitles titles" + (if (idleRun) " (working now)" else "") else "") +
+            (if (!Ratings.fillWhenIdle) " · keep filling when idle: off" else "")
     }
 
     private lateinit var app: Application
@@ -83,6 +93,16 @@ object RatingsFill {
     private val refQueue = ArrayList<Job>()
     /** Movies TMDB didn't recognise: their details are asked from the provider, one every 5 s. */
     private val providerQueue = ArrayDeque<Job>()
+    /**
+     * Titles whose id is known but whose work has no cast, genres, story or keywords yet (the scores
+     * come from MDBList with nothing else): TMDB is asked once per work, by its id.
+     */
+    private val detailQueue = ArrayDeque<Job>()
+    /** Works TMDB has been asked everything about (from the database, kept up to date here). */
+    private var fullRefs = HashSet<String>()
+    @Volatile private var detailsLeft = 0
+    private var detailTurn = false
+    @Volatile private var detailsAdded = 0
     private var lastProviderAt = 0L
     private var tmdbAsked = 0
     private var tmdbFound = 0
@@ -92,7 +112,9 @@ object RatingsFill {
     @Volatile private var tmdbSpentMs = 0L
     private var builtFor: String? = null
     private var builtAt = 0L
-    private var builtLists: List<Any?> = emptyList()
+    /** Which lists the queue was made from: their identity and size, not the lists (they must be free to leave memory). */
+    private var builtLists: List<Long> = emptyList()
+    private fun mark(list: List<StreamItem>?): Long = if (list == null) -1L else System.identityHashCode(list).toLong() * 100_000L + list.size
     @Volatile private var stale = true
 
     // Progress, for Settings.
@@ -121,12 +143,21 @@ object RatingsFill {
 
     fun init(application: Application) {
         app = application
+        watchScreen()
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 foreground++
+                endIdleRun("the app is on screen again")
                 if (thread == null) start()
             }
-            override fun onActivityStopped(activity: Activity) { foreground = (foreground - 1).coerceAtLeast(0) }
+            override fun onActivityStopped(activity: Activity) {
+                foreground = (foreground - 1).coerceAtLeast(0)
+                if (foreground == 0) {
+                    leftFrontAt = SystemClock.elapsedRealtime()
+                    // The screensaver took the screen from the app: the fill may go on under it.
+                    if (dreaming) beginIdleRun()
+                }
+            }
             override fun onActivityCreated(activity: Activity, state: Bundle?) {}
             override fun onActivityResumed(activity: Activity) {}
             override fun onActivityPaused(activity: Activity) {}
@@ -134,6 +165,97 @@ object RatingsFill {
             override fun onActivityDestroyed(activity: Activity) {}
         })
     }
+
+    // ---- Under the screensaver (approved 2026-11-12) ----
+    //
+    // The TV's first night (2026-11-11): the screensaver came on 5 minutes after the last key, Android
+    // put the app in the background, and the fill stood still for 20 hours with 22,000 titles to go.
+    // Now: when the screensaver takes the screen from the app, the fill goes on, kept alive by a small
+    // service with a notice (FillService). It ends when the screensaver ends, the screen goes off, the
+    // app comes back, or there is nothing left to do. Another app in front: never.
+
+    @Volatile private var dreaming = false
+    @Volatile private var idleRun = false
+    @Volatile private var leftFrontAt = 0L
+    private var idleRunAt = 0L
+    private var idleRunReady = 0
+    private var listsReleased = false
+    private var dreamAt = 0L
+    // This session, for the report's summary.
+    @Volatile private var idleRuns = 0
+    @Volatile private var idleMinutes = 0L
+    @Volatile private var idleTitles = 0
+
+    /** True while the fill is working under the screensaver. */
+    val underScreensaver: Boolean get() = idleRun
+
+    private fun watchScreen() {
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_DREAMING_STARTED)
+            addAction(android.content.Intent.ACTION_DREAMING_STOPPED)
+            addAction(android.content.Intent.ACTION_SCREEN_OFF)
+        }
+        runCatching {
+            app.registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) = screenEvent(intent.action)
+            }, filter)
+        }
+    }
+
+    private fun screenEvent(action: String?) {
+        when (action) {
+            android.content.Intent.ACTION_DREAMING_STARTED -> {
+                // Only when this app was the one on screen (it is stopped a moment before or after).
+                val front = foreground > 0 || SystemClock.elapsedRealtime() - leftFrontAt < 15_000
+                dreaming = front
+                dreamAt = SystemClock.elapsedRealtime()
+                note("screensaver started, the app was ${if (front) "on screen" else "not on screen"}")
+                if (front && foreground == 0) beginIdleRun()
+            }
+            android.content.Intent.ACTION_DREAMING_STOPPED -> {
+                if (dreamAt != 0L) note("screensaver ended after ${(SystemClock.elapsedRealtime() - dreamAt) / 60_000} min")
+                dreaming = false; dreamAt = 0L
+                endIdleRun("the screensaver ended")
+            }
+            android.content.Intent.ACTION_SCREEN_OFF -> {
+                if (dreamAt != 0L) note("the screen went off ${(SystemClock.elapsedRealtime() - dreamAt) / 60_000} min after the screensaver started")
+                dreaming = false; dreamAt = 0L
+                endIdleRun("the screen went off")
+            }
+        }
+    }
+
+    /** The automatic checks stand in for the TV's screensaver and its screen going off. Test builds only. */
+    internal fun screenEventForTests(action: String) { if (BuildConfig.DEBUG) screenEvent(action) }
+
+    @Synchronized private fun beginIdleRun() {
+        if (idleRun || !Ratings.isOn || !Ratings.fillWhole || !Ratings.fillWhenIdle || !Ratings.keyWorks) return
+        if (state == State.DONE || stopped) return
+        // Android may refuse a service started from the background (12 and later): then nothing changes.
+        if (!FillService.start(app)) { note("fill: the TV did not allow filling under the screensaver"); return }
+        idleRunAt = SystemClock.elapsedRealtime()
+        idleRunReady = ready
+        listsReleased = false
+        idleRun = true
+        note("fill: goes on under the screensaver, $ready of $total ready")
+    }
+
+    @Synchronized private fun endIdleRun(why: String) {
+        if (!idleRun) return
+        idleRun = false
+        FillService.stop(app)
+        // What was found is written to the database now, off the screen's thread.
+        Thread({ runCatching { Ratings.flush() } }, "ratings-fill-save").start()
+        val minutes = (SystemClock.elapsedRealtime() - idleRunAt) / 60_000
+        idleRuns++; idleMinutes += minutes; idleTitles += (ready - idleRunReady).coerceAtLeast(0)
+        note("fill: stopped under the screensaver after $minutes min ($why), ${(ready - idleRunReady).coerceAtLeast(0)} more titles ready, $ready of $total")
+    }
+
+    /** Android's limit for this kind of background work was reached (6 hours a day on Android 15). */
+    internal fun serviceTimedOut() = endIdleRun("Android's daily limit for background work")
+
+    /** The TV would not show the notice the service needs. */
+    internal fun serviceRefused() = endIdleRun("the TV did not allow it")
 
     @Synchronized private fun start() {
         if (thread != null) return
@@ -196,7 +318,7 @@ object RatingsFill {
 
     // ---- For Settings ----
 
-    class Progress(val state: State, val ready: Int, val total: Int, val noId: Int, val secondsLeft: Long, val needsTomorrow: Boolean)
+    class Progress(val state: State, val ready: Int, val total: Int, val noId: Int, val secondsLeft: Long, val needsTomorrow: Boolean, val detailsLeft: Int = 0)
 
     fun progress(): Progress {
         val batches = (refsLeft + idsLeft + BATCH - 1) / BATCH
@@ -205,39 +327,59 @@ object RatingsFill {
         // the provider (one every 5 s). Before 30 titles have been tried, half is assumed.
         val toProvider = if (tmdbTried >= 30) tmdbPassedOn.toDouble() / tmdbTried else 0.5
         val perQuick = (TMDB_STEP_MS + if (tmdbTried > 0) tmdbSpentMs / tmdbTried else 1000L) / 1000.0
-        val seconds = (quick * perQuick + (idsLeft - quick + quick * toProvider) * (IDLE_STEP_MS / 1000) + batches * (IDLE_STEP_MS / 1000)).toLong()
+        val details = if (Tmdb.usable) detailsLeft else 0
+        val seconds = (quick * perQuick + details * (TMDB_STEP_MS + 500) / 1000.0 + (idsLeft - quick + quick * toProvider) * (IDLE_STEP_MS / 1000) + batches * (IDLE_STEP_MS / 1000)).toLong()
         val allowance = (Ratings.left() - RESERVE).coerceAtLeast(0)
-        return Progress(state, ready, total, noId, seconds, batches > allowance)
+        return Progress(state, ready, total, noId, seconds, batches > allowance, details)
     }
 
     // ---- The worker ----
 
     private fun tick() {
-        if (foreground == 0) return
-        if (!Ratings.isOn || !Ratings.fillWhole) { state = State.OFF; return }
-        if (!Ratings.keyWorks) { state = State.BAD_KEY; return }
+        val background = foreground == 0
+        if (background && !idleRun) return
+        if (!Ratings.isOn || !Ratings.fillWhole) { state = State.OFF; endIdleRun("the fill is switched off"); return }
+        if (!Ratings.keyWorks) { state = State.BAD_KEY; endIdleRun("the key was not accepted"); return }
+        if (background && !Ratings.fillWhenIdle) { endIdleRun("switched off in Settings"); return }
         val now = SystemClock.uptimeMillis()
-        if (now - Diag.lastKeyAt < IDLE_AFTER_KEY_MS) { if (state != State.DONE) state = State.BROWSING; return }
+        if (!background && now - Diag.lastKeyAt < IDLE_AFTER_KEY_MS) { if (state != State.DONE) state = State.BROWSING; return }
         if (playerOpen) {
             if (!Ratings.fillDuringPlayback && (playing || buffering)) { state = State.PLAYBACK; return }
             if (buffering || (playing && now - steadySince < STEADY_MS)) { state = State.PLAYBACK; return }
         }
-        val quick = !playing && Tmdb.usable && idQueue.isNotEmpty()
+        val quick = !playing && Tmdb.usable && (idQueue.isNotEmpty() || detailQueue.isNotEmpty())
         if (now - lastStepAt < (if (playing) PLAYING_STEP_MS else if (quick) TMDB_STEP_MS else IDLE_STEP_MS)) return
-        if (stopped) { state = State.STOPPED; return }
+        if (stopped) { state = State.STOPPED; endIdleRun("too many failed requests"); return }
         if (now < retryAt) { state = State.OFFLINE; return }
 
         val pl = Prefs(app).activeId ?: return
         val lists = listOf(ContentType.MOVIE, ContentType.SERIES).map { Session.streamCache["${it.name}:__all__"] }
+        val marks = lists.map(::mark)
+        val none = lists.all { it == null }
+        // The lists are not in memory (under the screensaver, or just back from it) and the queue made
+        // from them is still good: it is worked on as it is. The queue carries what it needs.
+        val keep = none && !stale && builtFor == pl
         // New lists (another playlist, a reload with new titles): the queue is made again.
-        if (stale || builtFor != pl || lists.indices.any { lists[it] !== builtLists.getOrNull(it) } || now - builtAt > 6 * 60 * 60 * 1000L) {
-            if (lists.all { it == null }) { state = State.STARTING; lastStepAt = now; return }
+        if (!keep && (stale || builtFor != pl || marks != builtLists || now - builtAt > 6 * 60 * 60 * 1000L)) {
+            if (none) {
+                state = State.STARTING; lastStepAt = now
+                endIdleRun("the lists were not in memory")
+                return
+            }
             build(pl, lists)
-            builtLists = lists
+            builtLists = marks
             lastStepAt = now
             return
         }
-        if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty()) { state = State.DONE; return }
+        val detailsWait = detailQueue.isNotEmpty() && Tmdb.hasKey && Tmdb.keyWorks
+        if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty() && !detailsWait) { state = State.DONE; endIdleRun("everything is filled"); return }
+        // Under the screensaver for half a minute with the queue ready: the big lists leave memory.
+        // They are read again from the TV's own copy when the app comes back.
+        if (background && !listsReleased && SystemClock.elapsedRealtime() - idleRunAt > 30_000) {
+            listsReleased = true
+            Session.streamCache.clear()
+            note("fill: the big lists left memory, the queue keeps ${idQueue.size + providerQueue.size + refQueue.size} titles")
+        }
 
         val noIdsLeft = idQueue.isEmpty() && providerQueue.isEmpty()
         val batchDue = refQueue.isNotEmpty() && now - lastBatchAt >= IDLE_STEP_MS && (refQueue.size >= BATCH || noIdsLeft || now - lastBatchAt > 10 * 60 * 1000L)
@@ -247,7 +389,12 @@ object RatingsFill {
             if (stale) return
             when {
                 batchDue && canAsk -> batchStep(pl)
-                idQueue.isNotEmpty() && Tmdb.usable -> tmdbStep(pl)
+                // Finding ids and completing titles that already have one take turns with TMDB: the
+                // titles with scores are the ones on screen, and should not wait for thousands of others.
+                idQueue.isNotEmpty() && Tmdb.usable -> {
+                    detailTurn = !detailTurn
+                    if (detailTurn && detailQueue.isNotEmpty()) detailStep() else tmdbStep(pl)
+                }
                 !noIdsLeft && !Ratings.askProvider -> {
                     // "Ask the provider for missing IDs" is off: these titles are left to their own pages
                     // (nothing is saved about them, so they are tried again when the switch goes back on).
@@ -259,12 +406,17 @@ object RatingsFill {
                     return
                 }
                 !noIdsLeft -> {
-                    // The provider is asked no more than once every 5 s (30 s during playback).
-                    if (now - lastProviderAt < (if (playing) PLAYING_STEP_MS else IDLE_STEP_MS)) return
-                    lastProviderAt = now
-                    idStep(pl)
+                    // The provider is asked no more than once every 5 s (30 s during playback). Between
+                    // two of its turns, TMDB completes the titles whose id is already known.
+                    if (now - lastProviderAt < (if (playing) PLAYING_STEP_MS else IDLE_STEP_MS)) {
+                        if (!playing && detailQueue.isNotEmpty() && Tmdb.usable) detailStep() else return
+                    } else {
+                        lastProviderAt = now
+                        idStep(pl)
+                    }
                 }
-                !canAsk -> { state = State.TOMORROW; lastStepAt = now; return }
+                detailQueue.isNotEmpty() && Tmdb.usable -> detailStep()
+                !canAsk && refQueue.isNotEmpty() -> { state = State.TOMORROW; lastStepAt = now; endIdleRun("today's lookups are used"); return }
                 else -> return
             }
         }
@@ -275,8 +427,11 @@ object RatingsFill {
 
     /** The queue: type, id, reference and year only, never whole titles; in the owner's order. */
     private fun build(pl: String, lists: List<List<StreamItem>?>) {
-        idQueue.clear(); refQueue.clear(); providerQueue.clear()
+        idQueue.clear(); refQueue.clear(); providerQueue.clear(); detailQueue.clear()
         val tmdb = Tmdb.hasKey && Tmdb.keyWorks
+        fullRefs = if (tmdb) runCatching { Ratings.db.fullRefs() }.getOrDefault(HashSet()) else HashSet()
+        val wanted = HashSet<String>()
+        val more = ArrayList<Job>()
         val prefs = Prefs(app)
         // A playlist added after a library restore: the titles kept for it are used now.
         if (adopted.add(pl)) prefs.activePlaylist?.let { p -> synchronized(gate) { runCatching { Library.adoptKept(app, p) } } }
@@ -303,9 +458,8 @@ object RatingsFill {
             val details = runCatching { Ratings.db.detailIds(pl, type) }.getOrDefault(HashMap())
             for (item in list) {
                 val (saved, savedRef, answered) = Ratings.fillState("$pl:${type.name}:${item.id}")
-                if (saved == 2) { all++; done++; continue }
                 val d = details[item.id]
-                if (d?.first == RatingsDb.Detail.BAD_ID) continue
+                if (saved != 2 && d?.first == RatingsDb.Detail.BAD_ID) continue
                 val ref = savedRef ?: item.tmdb?.let { "tmdb/$kind/$it" } ?: d?.second
                 val key = "${type.name}:${item.id}"
                 val tier = when {
@@ -315,6 +469,9 @@ object RatingsFill {
                 }
                 // Newest first inside each group (Home's "recently added" rows come from there).
                 val rank = tier * 100_000_000_000L + (99_999_999_999L - item.added.coerceIn(0, 99_999_999_999L))
+                // Its id is known and TMDB has not been asked about it yet: once per work, whatever its scores.
+                if (tmdb && ref != null && ref !in fullRefs && wanted.add(ref)) more.add(Job(type, item.id, ref, null, rank))
+                if (saved == 2) { all++; done++; continue }
                 val same = if (ref != null) Ratings.sameTitle(known, type, ref, if (saved == 0) item.year else null) else null
                 when {
                     same != null -> { all++; done++; reused["$pl:${type.name}:${item.id}"] = same }
@@ -322,18 +479,19 @@ object RatingsFill {
                     ref != null -> { all++; if (saved == 1 && answered) done++; refs.add(Job(type, item.id, ref, item.year, rank, refresh = saved == 1 && answered)) }
                     // Asked before, no id; or (without a TMDB key) a series with no id in the list: left to its page.
                     d != null || (type != ContentType.MOVIE && !tmdb) -> none++
-                    else -> { all++; ids.add(Job(type, item.id, null, item.year, rank)) }
+                    else -> { all++; ids.add(Job(type, item.id, null, item.year, rank, name = item.name, image = item.image)) }
                 }
             }
         }
-        ids.sortBy { it.rank }; refs.sortBy { it.rank }
+        ids.sortBy { it.rank }; refs.sortBy { it.rank }; more.sortBy { it.rank }
+        detailQueue.addAll(more); detailsLeft = more.size
         Ratings.adopt(reused)
         if (reused.isNotEmpty()) note("fill: ${reused.size} titles reused answers already saved")
         idQueue.addAll(ids); refQueue.addAll(refs)
         total = all; ready = done; noId = none; idsLeft = ids.size; refsLeft = refs.size; quickLeft = if (tmdb) ids.size else 0
         builtFor = pl; builtAt = SystemClock.uptimeMillis(); stale = false
-        state = if (ids.isEmpty() && refs.isEmpty()) State.DONE else State.FILLING
-        note("fill: queue made, $done of $all ready, ${refs.size} with an id waiting, ${ids.size} ids to find, $none without an id")
+        state = if (ids.isEmpty() && refs.isEmpty() && more.isEmpty()) State.DONE else State.FILLING
+        note("fill: queue made, $done of $all ready, ${refs.size} with an id waiting, ${ids.size} ids to find, $none without an id, ${more.size} to complete with details")
         if (BuildConfig.DEBUG) android.util.Log.d("RatingsFill", "database (titles, works, people, genres): " + Ratings.dbCountsForTests())
     }
 
@@ -369,7 +527,34 @@ object RatingsFill {
         refsLeft = refQueue.size
         Ratings.announce(r.changed)
         note("fill: group of ${taken.size}: ${r.found} found")
-        if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty()) { state = State.DONE; note("fill: done, $ready of $total ready") }
+        if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty()) {
+            if (detailQueue.isEmpty()) state = State.DONE
+            note("fill: scores done, $ready of $total ready" + if (detailQueue.isEmpty()) "" else ", ${detailQueue.size} titles' details still to add")
+        }
+    }
+
+    /** One work completed from TMDB by its id: cast, director, genres, length, the story, keywords, season years. */
+    private fun detailStep() {
+        val job = detailQueue.removeFirst()
+        val ref = job.ref!!
+        if (ref in fullRefs) { detailsLeft = detailQueue.size; return }
+        state = if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty()) State.DETAILS else State.FILLING
+        val r = Tmdb.details(job.type, ref)
+        when (r.outcome) {
+            Tmdb.Outcome.OFFLINE -> { detailQueue.addFirst(job); failed(); return }
+            Tmdb.Outcome.BLOCKED -> { detailQueue.addFirst(job); return }
+            // TMDB does not have it: marked as asked, so it is not asked on every start.
+            Tmdb.Outcome.NONE -> runCatching { Ratings.db.putWorkDetail(ref, RatingsDb.Detail(RatingsDb.Detail.OK, null, null, null, null, null, 0, 0, "tmdb", full = true)) }
+            Tmdb.Outcome.FOUND -> runCatching { Ratings.db.putWorkDetail(ref, r.found!!.toDetail()) }
+        }
+        fails = 0
+        fullRefs.add(ref)
+        detailsLeft = detailQueue.size
+        if (++detailsAdded % 200 == 0) note("fill: details added for $detailsAdded titles, ${detailQueue.size} to go")
+        if (detailQueue.isEmpty()) {
+            note("fill: details complete, $detailsAdded titles this time")
+            if (idQueue.isEmpty() && refQueue.isEmpty() && providerQueue.isEmpty()) state = State.DONE
+        }
     }
 
     /**
@@ -378,31 +563,40 @@ object RatingsFill {
      * movie goes to the provider's queue; a series is left to its page, as before.
      */
     private fun tmdbStep(pl: String) {
-        val job = idQueue.removeFirst()
-        val item = Session.streamCache["${job.type.name}:__all__"]?.firstOrNull { it.id == job.id }
-        if (item == null) { total--; counts(); return }
+        fun notRecognised(job: Job) {
+            if (job.type == ContentType.MOVIE && Ratings.askProvider) providerQueue.add(job)
+            else if (job.type == ContentType.MOVIE) { total--; noId++ }
+            else {
+                runCatching { Ratings.db.putDetail("$pl:${job.type.name}:${job.id}", RatingsDb.Detail(RatingsDb.Detail.NO_ID, null, null, null, null, null, 0, 0, "tmdb")) }
+                total--; noId++
+            }
+        }
+        // Nothing TMDB could accept (no year, not one of its posters): straight to the provider, with
+        // no request and no waiting. (One a turn took hours for a playlist of 20,000 such movies.)
+        var job = idQueue.removeFirst()
+        var passed = 0
+        while (job.name == null || !Tmdb.canTry(job.name!!, job.year, job.image)) {
+            if (job.name == null) total-- else notRecognised(job)
+            job = (if (++passed < 3000) idQueue.removeFirstOrNull() else null) ?: run { counts(); return }
+        }
+        val name = job.name!!
         state = State.FILLING
         val startedAt = SystemClock.uptimeMillis()
-        // Nothing TMDB could accept (no year, not one of its posters): straight to the provider.
-        val r = if (Tmdb.canTry(item.name, item.year, item.image)) Tmdb.lookup(job.type, item.name, item.year, item.image) else Tmdb.Result(Tmdb.Outcome.NONE)
+        val r = Tmdb.lookup(job.type, name, job.year, job.image)
         when (r.outcome) {
             Tmdb.Outcome.OFFLINE -> { idQueue.addFirst(job); failed(); return }
             Tmdb.Outcome.BLOCKED -> { idQueue.addFirst(job); return }
             Tmdb.Outcome.NONE -> {
                 if (job.type == ContentType.MOVIE && Ratings.askProvider) tmdbPassedOn++
-                if (job.type == ContentType.MOVIE && Ratings.askProvider) providerQueue.add(job)
-                else if (job.type == ContentType.MOVIE) { total--; noId++ }
-                else {
-                    runCatching { Ratings.db.putDetail("$pl:${job.type.name}:${job.id}", RatingsDb.Detail(RatingsDb.Detail.NO_ID, null, null, null, null, null, 0, 0, "tmdb")) }
-                    total--; noId++
-                }
+                notRecognised(job)
             }
             Tmdb.Outcome.FOUND -> {
                 val f = r.found!!
                 tmdbFound++
                 val key = "$pl:${job.type.name}:${job.id}"
-                runCatching { Ratings.db.putDetail(key, RatingsDb.Detail(RatingsDb.Detail.OK, f.id, null, f.cast?.take(600), f.director?.take(200), f.genres?.take(200), f.year, f.minutes, "tmdb")) }
+                runCatching { Ratings.db.putDetail(key, f.toDetail()); if (f.sure) Ratings.db.markSure(key) }
                 val ref = "tmdb/${if (job.type == ContentType.MOVIE) "movie" else "show"}/${f.id}"
+                if (f.full) fullRefs.add(ref)
                 Ratings.noteTmdb(key, ref)
                 gotRef(pl, job, ref, job.year ?: f.year.takeIf { it > 0 }?.toString())
             }
@@ -431,6 +625,11 @@ object RatingsFill {
             ready++
         } else {
             refQueue.add(Job(job.type, job.id, ref, year, job.rank))
+        }
+        // Found through the provider (an id, little else): TMDB completes it.
+        if (Tmdb.hasKey && Tmdb.keyWorks && ref !in fullRefs && detailQueue.none { it.ref == ref }) {
+            detailQueue.addFirst(Job(job.type, job.id, ref, null, job.rank))
+            detailsLeft = detailQueue.size
         }
     }
 

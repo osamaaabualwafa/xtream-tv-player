@@ -28,6 +28,8 @@ class VodControls(private val root: View, private val host: Host) {
         fun openEpisodes()
         fun openTracks()
         fun openSettings()
+        /** The title's other copies (quality and language). */
+        fun openVersions() {}
         /** Controls went away: give focus back to the video. */
         fun onControlsHidden()
         /** A toolbar button was pressed (close an open panel first). */
@@ -109,6 +111,7 @@ class VodControls(private val root: View, private val host: Host) {
         episodesButton.setOnClickListener { host.openEpisodes() }
         root.findViewById<View>(R.id.vc_tracks).setOnClickListener { host.openTracks() }
         root.findViewById<View>(R.id.vc_settings).setOnClickListener { host.openSettings() }
+        root.findViewById<View>(R.id.vc_versions).setOnClickListener { host.openVersions() }
 
         val rowGroup = row as android.view.ViewGroup
 
@@ -350,6 +353,14 @@ class VodControls(private val root: View, private val host: Host) {
 
     private var shownPlaying: Boolean? = null
 
+    /** The copy's language, shown before the quality under the title; null when there is only one copy. */
+    var language: String? = null
+
+    /** The Versions button shows only for titles with more than one copy. */
+    fun showVersions(show: Boolean) {
+        root.findViewById<View>(R.id.vc_versions).visibility = if (show) View.VISIBLE else View.GONE
+    }
+
     /**
      * Clock, quality, times, timeline and the play/pause icon. Runs twice a second over the
      * video, so it only touches views whose content changed and never triggers a layout pass
@@ -358,7 +369,8 @@ class VodControls(private val root: View, private val host: Host) {
     fun refresh() {
         setIfChanged(clock, CLOCK.format(Date()))
         val p = host.player ?: return
-        val q = qualityLabel(p.videoSize.height)
+        // "English · 1080p" when the title has copies in other languages; the quality alone otherwise.
+        val q = listOfNotNull(language, qualityLabel(p.videoSize.height).ifEmpty { null }).joinToString(" · ")
         setIfChanged(quality, q)
         val qVisibility = if (q.isEmpty()) View.GONE else View.VISIBLE
         if (quality.visibility != qVisibility) quality.visibility = qVisibility

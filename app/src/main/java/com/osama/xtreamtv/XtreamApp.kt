@@ -12,6 +12,8 @@ class XtreamApp : Application(), ImageLoaderFactory {
         super.onCreate()
         Diag.init(this)
         Ratings.init(this)
+        // A newer list fetched behind the screen reaches the screens that show it.
+        XtreamApi.onListChanged = Session::listChanged
         // The TV is short of memory (2026-11-07: Android closed the app on a TV warning 5 times a minute):
         // let go of what can be made again. In the background, the downloaded lists go too (they are
         // read again from the server when needed); never while a screen shows them.
@@ -40,6 +42,18 @@ class XtreamApp : Application(), ImageLoaderFactory {
             idCoverageForTests()
             ratingsSampleForTests()
             fieldsProbeForTests()
+            // Test builds: stand in for the TV's screensaver and its screen going off (the emulator's own
+            // screensaver cannot be started from outside).
+            //   adb shell am broadcast -a com.osama.xtreamtv.debug.SCREEN --es event dream|wake|off
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    RatingsFill.screenEventForTests(when (intent.getStringExtra("event")) {
+                        "dream" -> android.content.Intent.ACTION_DREAMING_STARTED
+                        "wake" -> android.content.Intent.ACTION_DREAMING_STOPPED
+                        else -> android.content.Intent.ACTION_SCREEN_OFF
+                    })
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.SCREEN"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
             // Test builds: open a title's page by its exact name (active playlist), no key route needed.
             //   adb shell am broadcast -a com.osama.xtreamtv.debug.OPEN --es name "I'm Game" --es type MOVIE
             registerReceiver(object : android.content.BroadcastReceiver() {
@@ -87,6 +101,38 @@ class XtreamApp : Application(), ImageLoaderFactory {
                     }
                 }
             }, android.content.IntentFilter("com.osama.xtreamtv.debug.EPCHECK"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
+            // Test builds: why a series does or doesn't show "NEW" (dates only, no addresses). Logs "NewCheck".
+            //   adb shell am broadcast -a com.osama.xtreamtv.debug.NEWCHECK --es name "Dexter"
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    val name = intent.getStringExtra("name") ?: return
+                    val api = Session.api(context) ?: return
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val tag = "NewCheck"
+                        val prefs = Prefs(context)
+                        fun day(seconds: Long) = if (seconds <= 0) "none" else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(seconds * 1000))
+                        val all = runCatching { api.streams(ContentType.SERIES, null) }.getOrElse { emptyList() }
+                        val hits = all.filter { it.name.contains(name, ignoreCase = true) }
+                        android.util.Log.d(tag, "${hits.size} series with that name; followed series in all: ${prefs.followedSeriesIds().size}")
+                        for (s in hits.take(4)) {
+                            val raw = runCatching { api.debugRaw("action" to "get_series_info", "series_id" to s.id) }.getOrNull() as? org.json.JSONObject
+                            var newest = 0L; var newestCode = "-"; var count = 0
+                            val eps = raw?.opt("episodes")
+                            fun each(a: org.json.JSONArray) { for (i in 0 until a.length()) { val e = a.optJSONObject(i) ?: continue; count++
+                                val added = e.optString("added").toLongOrNull() ?: 0L
+                                if (added > newest) { newest = added; newestCode = "S" + e.optString("season") + " E" + e.optString("episode_num") } } }
+                            if (eps is org.json.JSONObject) for (k in eps.keys()) (eps.opt(k) as? org.json.JSONArray)?.let { each(it) }
+                            if (eps is org.json.JSONArray) for (i in 0 until eps.length()) (eps.opt(i) as? org.json.JSONArray)?.let { each(it) }
+                            val infoModified = raw?.optJSONObject("info")?.optString("last_modified")?.toLongOrNull() ?: 0L
+                            val seen = prefs.seriesSeen(s.id)
+                            android.util.Log.d(tag, "series ${hits.indexOf(s) + 1}: followed here ${s.id in prefs.followedSeriesIds()} (favourite ${s.id in prefs.favoriteIds(ContentType.SERIES)}) · " +
+                                "list says changed ${day(s.added)} · its page says changed ${day(infoModified)} · $count episodes, newest $newestCode added ${day(newest)} · " +
+                                "last opened here ${seen?.let { day(it) } ?: "never"} · would show NEW here: ${seen != null && s.added > seen}")
+                        }
+                        android.util.Log.d(tag, "done")
+                    }
+                }
+            }, android.content.IntentFilter("com.osama.xtreamtv.debug.NEWCHECK"), if (android.os.Build.VERSION.SDK_INT >= 33) android.content.Context.RECEIVER_EXPORTED else 0)
             // Test builds: adb shell am broadcast -a com.osama.xtreamtv.debug.ARRANGE (opens Arrange Home rows).
             registerReceiver(object : android.content.BroadcastReceiver() {
                 override fun onReceive(context: android.content.Context, intent: android.content.Intent) {

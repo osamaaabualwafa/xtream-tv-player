@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.dispose
 import coil.load
+import kotlinx.coroutines.async
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -424,6 +425,9 @@ class Prefs(context: Context) {
 
     fun isWatched(key: String): Boolean = sp.getStringSet("watched", emptySet())?.contains(key) == true
 
+    /** Every key marked watched (for the filter's "Not watched yet": one read for a whole list). */
+    fun watchedKeys(): Set<String> = HashSet(sp.getStringSet("watched", emptySet()) ?: emptySet())
+
     fun setWatched(key: String, watched: Boolean) {
         val set = HashSet(sp.getStringSet("watched", emptySet()) ?: emptySet())
         if (watched) set.add(key) else set.remove(key)
@@ -630,15 +634,76 @@ object Session {
      * list sorted into every category, all in the background, so opening it is instant.
      */
     suspend fun prepare(api: XtreamApi, type: ContentType) {
-        val allKey = "${type.name}:__all__"
         if (categoryCache[type] == null) categoryCache[type] = api.categories(type)
-        val all = streamCache[allKey] ?: api.streams(type, null).also { streamCache[allKey] = it }
+        val all = all(api, type)
         val byCategory = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val lists = HashMap<String, ArrayList<StreamItem>>()
             for (item in all) for (id in item.categoryIds) lists.getOrPut(id) { ArrayList() }.add(item)
             lists
         }
         for ((id, list) in byCategory) streamCache.getOrPut("${type.name}:$id") { list }
+    }
+
+    // ---- One read of each whole list, shared by every screen that asks ----
+
+    private val loading = HashMap<String, kotlinx.coroutines.Deferred<List<StreamItem>>>()
+    private val loadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    /**
+     * The whole list of one type. Screens asking at the same moment wait for the same read: Home's
+     * tile count and the quiet preparing of Movies each read the 21,000-movie list on the TV, 8 s
+     * apiece (2026-11-12). One more try when the first fails: big lists sometimes do.
+     */
+    suspend fun all(api: XtreamApi, type: ContentType): List<StreamItem> {
+        val key = "${type.name}:__all__"
+        streamCache[key]?.let { return it }
+        val job = synchronized(loading) {
+            loading[key]?.takeIf { it.isActive } ?: loadScope.async {
+                val version = typeVersion.get(type.ordinal)
+                val list = try {
+                    api.streams(type, null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    api.streams(type, null)
+                }
+                // Another playlist was chosen meanwhile: its lists must not be mixed with these.
+                // Or a newer copy of this list arrived while this one was being read: that one is kept.
+                if (this@Session.api === api && typeVersion.get(type.ordinal) == version) streamCache[key] = list
+                list
+            }.also { loading[key] = it }
+        }
+        return job.await()
+    }
+
+    // ---- A newer list arrived from the server behind the screen ----
+
+    /** Goes up each time a saved list was replaced by a newer one. */
+    @Volatile var listsVersion = 0
+        private set
+    /** Screens that show lists and want the newer ones (called on the main thread). */
+    val listWatchers = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val typeVersion = java.util.concurrent.atomic.AtomicIntegerArray(ContentType.values().size)
+
+    /** From [XtreamApi.onListChanged], on any thread. */
+    fun listChanged(from: XtreamApi, action: String) {
+        val type = when (action) {
+            "get_live_streams", "get_live_categories" -> ContentType.LIVE
+            "get_vod_streams", "get_vod_categories" -> ContentType.MOVIE
+            "get_series", "get_series_categories" -> ContentType.SERIES
+            else -> return
+        }
+        mainHandler.post {
+            if (from !== api) return@post
+            // The old copy goes first, then the new one is read: never two big lists together.
+            typeVersion.incrementAndGet(type.ordinal)
+            synchronized(loading) { loading.remove("${type.name}:__all__") }
+            streamCache.keys.removeAll { it.startsWith("${type.name}:") }
+            categoryCache.remove(type)
+            listsVersion++
+            for (w in listWatchers) w()
+        }
     }
 
     fun api(context: Context): XtreamApi? {
@@ -658,6 +723,7 @@ object Session {
         userInfo = null
         zapList = emptyList()
         seriesQueue = null
+        synchronized(loading) { loading.clear() }
         streamCache.clear()
         categoryCache.clear()
     }
@@ -1051,7 +1117,8 @@ class ItemAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
-        holder.title.text = item.name
+        // Movies and series: the name without quality and language words (copies are one card).
+        holder.title.text = Versions.shownName(item)
         val badge = holder.ratingBadge
         if (badge != null) {
             // The provider's own ★ rating is no longer shown (1.1E: only real IMDb / Rotten Tomatoes scores).

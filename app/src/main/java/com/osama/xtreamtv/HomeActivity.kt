@@ -231,7 +231,12 @@ class HomeActivity : AppCompatActivity() {
             if (featuredItems.size > 1) b.postDelayed(rotateFeatured, 7_000)
         }
         loadLocalRows()
-        loadNewEpisodes()
+        // Back after a while (the TV slept, another app): saved lists older than three hours are
+        // checked with the server behind the screen, and the rows take the newer ones when they differ.
+        resumedNow = true
+        Session.listWatchers.add(listsChanged)
+        api.refreshOldLists()
+        if (listsSeen != Session.listsVersion) takeNewLists() else loadNewEpisodes()
         refreshStars()
         prepareSections()
         // Scores found while away (a title's page, pre-fill) show on the cards already there.
@@ -306,12 +311,23 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onPause() {
         rememberHighlight()
+        resumedNow = false
+        Session.listWatchers.remove(listsChanged)
         super.onPause()
         prefillJob?.cancel()
         window.decorView.removeCallbacks(prefillCheck)
         MiniPlayerBar.detach(this)
         findViewById<View?>(R.id.featured)?.removeCallbacks(rotateFeatured)
         if (::clock.isInitialized) clock.removeCallbacks(clockTicker)
+    }
+
+    /**
+     * Off screen: this screen lets go of the big lists (its rows keep the few titles they show), so
+     * they can leave memory while the fill works under the screensaver. They are read again on return.
+     */
+    override fun onStop() {
+        super.onStop()
+        allLists.clear()
     }
 
     private var playlistsAction: View.OnClickListener? = null
@@ -379,7 +395,7 @@ class HomeActivity : AppCompatActivity() {
         val open = drawer?.visibility == View.VISIBLE
         val key = event.keyCode
         // INFO, a short press: the quick drawer (this TV keeps the Menu button for itself).
-        // Held down, INFO marks a problem instead (see Diag), so act on release and only when short.
+        // Acts on release and only when short: holding INFO does nothing here (problems are marked with the red button).
         if (key == android.view.KeyEvent.KEYCODE_INFO) {
             if (event.action == android.view.KeyEvent.ACTION_UP && event.eventTime - event.downTime < 500) {
                 if (open) closeDrawer() else openDrawer()
@@ -689,20 +705,31 @@ class HomeActivity : AppCompatActivity() {
      */
     private fun allStreams(type: ContentType): Deferred<List<StreamItem>> {
         allLists[type]?.let { if (!it.isCancelled) return it } // a failed download is tried again
-        val key = "${type.name}:__all__"
-        return lifecycleScope.async {
-            Session.streamCache[key] ?: run {
-                // One retry: big lists sometimes fail on the first try.
-                val list = try {
-                    api.streams(type, null)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    api.streams(type, null)
-                }
-                list.also { Session.streamCache[key] = it }
-            }
-        }.also { allLists[type] = it }
+        // Session.all: the quiet preparing of the sections waits for this same read instead of making its own.
+        return lifecycleScope.async { Session.all(api, type) }.also { allLists[type] = it }
+    }
+
+    // ---- A newer list arrived from the server while the app was open ----
+
+    /** The lists' version this screen last drew. */
+    private var listsSeen = Session.listsVersion
+    private val listsChanged: () -> Unit = { if (resumedNow) takeNewLists() }
+    private var resumedNow = false
+
+    /**
+     * Draw the rows again from the newer lists: counts, banner, New episodes, Recently added, Top rated.
+     * The highlight stays where it is (rows keep it on the same title when their content changes).
+     */
+    private fun takeNewLists() {
+        if (listsSeen == Session.listsVersion || !::continueAdapter.isInitialized) return
+        listsSeen = Session.listsVersion
+        allLists.clear()
+        loadCounts()
+        loadFeatured()
+        loadRecentlyAdded()
+        loadNewEpisodes()
+        loadTopRated()
+        prepareSections()
     }
 
     /** H1 only: the last thing watched, big, with a Resume button. */
@@ -736,13 +763,15 @@ class HomeActivity : AppCompatActivity() {
             val countView = findViewById<TextView>(id)
             countView.text = "Loading…"
             lifecycleScope.launch {
-                countView.text = try {
+                val drawn = listsSeen
+                val label = try {
                     countLabel(type, allStreams(type).await().size)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     ""
                 }
+                if (drawn == listsSeen) countView.text = label
             }
         }
     }
@@ -769,10 +798,18 @@ class HomeActivity : AppCompatActivity() {
             }
             true
         }
+        loadFeatured()
+    }
+
+    private fun loadFeatured() {
+        val banner = findViewById<View?>(R.id.featured) ?: return
+        if (!prefs.featuredBanner) return
         lifecycleScope.launch {
             try {
+                val drawn = listsSeen
                 val movies = allStreams(ContentType.MOVIE).await().filter { it.added > 0 }.sortedByDescending { it.added }.take(5)
                 val series = allStreams(ContentType.SERIES).await()
+                if (drawn != listsSeen) return@launch
                 val newIds = prefs.newEpisodeSeries(series)
                 val fresh = series.filter { it.id in newIds }.take(3)
                 featuredItems = fresh.map { "New episodes" to it } + movies.map { "Recently added" to it }
@@ -867,12 +904,19 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private var newEpisodesLogged = ""
+
     private fun loadNewEpisodes() {
         lifecycleScope.launch {
             try {
+                val drawn = listsSeen
                 val all = allStreams(ContentType.SERIES).await()
+                if (drawn != listsSeen) return@launch
                 val ids = prefs.newEpisodeSeries(all)
                 val items = all.filter { it.id in ids }.sortedByDescending { it.added }
+                // For the report: counts only, never a title.
+                val line = "new episodes: ${ids.size} of ${prefs.followedSeriesIds().size} followed series changed since last opened"
+                if (line != newEpisodesLogged) { newEpisodesLogged = line; Diag.log("lists", line) }
                 newAdapter.newIds = ids
                 newAdapter.favorites = prefs.favoriteIds(ContentType.SERIES)
                 favoritesAdapter.newIds = ids
@@ -906,7 +950,9 @@ class HomeActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             try {
+                val drawn = listsSeen
                 val all = allStreams(type).await()
+                if (drawn != listsSeen) return@launch
                 val top = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Ratings.topRated(all, 20) }
                 adapter.favorites = prefs.favoriteIds(type)
                 showRow(rowId, titleId, adapter, if (top.size >= 6) top else emptyList())
@@ -926,7 +972,9 @@ class HomeActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 // Series: newest by when the provider last changed them (a new episode moves one up).
+                val drawn = listsSeen
                 val all = allStreams(type).await()
+                if (drawn != listsSeen) return@launch
                 val recent = all.filter { it.added > 0 }.sortedByDescending { it.added }.take(25)
                 adapter.favorites = prefs.favoriteIds(type)
                 showRow(rowId, titleId, adapter, recent)

@@ -62,7 +62,9 @@ class T04_MoviesTest : QaTest() {
         Qa.shot("movie_playing", "Movie playing")
         // Resume and Continue watching only keep a movie after 30 s of watching (shorter visits are
         // dropped, by design): most of that is watched here, the rest after the jump below.
-        SystemClock.sleep(20_000)
+        // 16 s here, not more: the 45 s test movie counts as finished in its last 5% (after 0:42), and
+        // the full run of 2026-11-11 left at 0:43, so Resume started from the beginning, as designed.
+        SystemClock.sleep(16_000)
 
         Qa.step("OK shows the controls")
         Qa.ok()

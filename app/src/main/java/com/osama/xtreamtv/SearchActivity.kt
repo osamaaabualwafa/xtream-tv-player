@@ -10,6 +10,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
+import coil.load
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -44,6 +45,14 @@ class SearchActivity : AppCompatActivity() {
     /** Results per section, and the section shown (null = All). */
     private var found: Map<ContentType, List<StreamItem>> = emptyMap()
     private var section: ContentType? = null
+
+    // ---- People (package 2, item 6, approved 2026-11-12): after Movies and Series, always ----
+    private var people: List<RatingsDb.FoundPerson> = emptyList()
+    /** The People tab is chosen (instead of a section of titles). */
+    private var peopleTab = false
+    private var peopleChip: TextView? = null
+    private var peopleTitle: TextView? = null
+    private var peopleBox: FlowRow? = null
     private val prefs by lazy { Prefs(this) }
     private lateinit var sections: View
     private lateinit var chips: View
@@ -239,7 +248,8 @@ class SearchActivity : AppCompatActivity() {
         channelList = ItemAdapter(grid = false, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite)
         posterGrid = ItemAdapter(grid = true, onClick = { _, item -> open(item) }, onLongClick = ::toggleFavorite)
         listOf(R.id.chip_all to null, R.id.chip_live to ContentType.LIVE, R.id.chip_movies to ContentType.MOVIE, R.id.chip_series to ContentType.SERIES)
-            .forEach { (id, type) -> findViewById<View>(id).setOnClickListener { showSection(type) } }
+            .forEach { (id, type) -> findViewById<View>(id).setOnClickListener { peopleTab = false; showSection(type) } }
+        setupPeople()
 
         query.doAfterTextChanged { scheduleSearch() }
         // Debug builds: a word left in files/debug_search.txt is searched for once (the test tool
@@ -275,10 +285,7 @@ class SearchActivity : AppCompatActivity() {
                 // coroutineScope: one list failing lands in the catch below, instead of closing the app.
                 val parts = kotlinx.coroutines.coroutineScope {
                     ContentType.values().map { type ->
-                        async {
-                            val key = "${type.name}:__all__"
-                            Session.streamCache[key] ?: api.streams(type, null).also { Session.streamCache[key] = it }
-                        }
+                        async { Session.all(api, type) }
                     }.map { it.await() }
                 }
                 library = parts.flatten()
@@ -311,11 +318,18 @@ class SearchActivity : AppCompatActivity() {
                     .sortedBy { !it.name.startsWith(text, ignoreCase = true) }
                     .groupBy { it.type }
             }
+            // Actors and directors whose name has a word starting with the text (from the notebook, on the TV).
+            people = withContext(Dispatchers.IO) {
+                val pl = prefs.activeId
+                if (pl == null) emptyList() else runCatching { Ratings.db.searchPeople(pl, text, 200) }.getOrDefault(emptyList())
+            }
             val total = found.values.sumOf { it.size }
-            status.text = if (total == 0) "No results for \"$text\"." else "$total results for \"$text\"."
-            Diag.log("search", "${text.length} letters · $total results${Diag.title(text)}")
+            val who = if (people.isEmpty()) "" else " and ${people.size} ${if (people.size == 1) "person" else "people"}"
+            status.text = if (total == 0 && people.isEmpty()) "No results for \"$text\"." else "$total ${if (total == 1) "title" else "titles"}$who for \"$text\"."
+            Diag.log("search", "${text.length} letters · $total results · ${people.size} people${Diag.title(text)}")
             // The chosen section has no results this time: back to All.
             if (section != null && found[section].isNullOrEmpty()) section = null
+            if (peopleTab && people.isEmpty()) peopleTab = false
             showResults()
         }
     }
@@ -338,7 +352,9 @@ class SearchActivity : AppCompatActivity() {
 
     private fun showResults() {
         val total = found.values.sumOf { it.size }
-        chips.visibility = if (total == 0) View.GONE else View.VISIBLE
+        chips.visibility = if (total == 0 && people.isEmpty()) View.GONE else View.VISIBLE
+        showPeople(total)
+        if (peopleTab) return
         val count = { type: ContentType -> found[type]?.size ?: 0 }
         val nf = java.text.NumberFormat.getIntegerInstance(java.util.Locale.US)
         findViewById<TextView>(R.id.chip_all).text = "All  ·  ${nf.format(total)}"
@@ -397,6 +413,116 @@ class SearchActivity : AppCompatActivity() {
             }
             results.scrollToPosition(0)
         }
+    }
+
+    /** The People chip after Series, and the People block after the Series row. */
+    private fun setupPeople() {
+        val d = resources.displayMetrics.density
+        val series = findViewById<TextView>(R.id.chip_series)
+        peopleChip = TextView(this, null, 0, R.style.SearchChip).apply {
+            text = "People"
+            visibility = View.GONE
+            setOnClickListener {
+                peopleTab = true
+                section = null
+                showResults()
+                peopleBox?.post { (0 until (peopleBox?.childCount ?: 0)).map { peopleBox!!.getChildAt(it) }.firstOrNull()?.requestFocus() }
+            }
+        }
+        (series.parent as android.view.ViewGroup).addView(peopleChip, (series.parent as android.view.ViewGroup).indexOfChild(series) + 1, series.layoutParams)
+        val row = findViewById<View>(R.id.sec_series)
+        val holder = row.parent as android.view.ViewGroup
+        val title = findViewById<TextView>(R.id.sec_series_title)
+        peopleTitle = TextView(this, null, 0, R.style.HomeRowTitle).apply { visibility = View.GONE }
+        holder.addView(peopleTitle, holder.indexOfChild(row) + 1, android.widget.LinearLayout.LayoutParams(title.layoutParams as android.view.ViewGroup.MarginLayoutParams))
+        peopleBox = FlowRow(this).apply {
+            visibility = View.GONE
+            setPadding((8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt(), (12 * d).toInt())
+        }
+        holder.addView(peopleBox, holder.indexOfChild(peopleTitle) + 1, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /** People: up to 10 after Movies and Series in All; every one of them on the People tab. */
+    private fun showPeople(totalTitles: Int) {
+        val nf = java.text.NumberFormat.getIntegerInstance(java.util.Locale.US)
+        val chip = peopleChip ?: return
+        chip.visibility = if (people.isEmpty()) View.GONE else View.VISIBLE
+        // Left and Right go along the chips shown, in order (Right from a chip jumped up to the microphone).
+        // Once every chip's visibility is settled for these results.
+        if (chip.id == View.NO_ID) chip.id = View.generateViewId()
+        chips.post {
+            val row = listOf(R.id.chip_all, R.id.chip_live, R.id.chip_movies, R.id.chip_series).map { findViewById<View>(it) }
+                .plus(chip).filter { it.visibility == View.VISIBLE }
+            row.forEachIndexed { i, v ->
+                v.nextFocusRightId = row.getOrNull(i + 1)?.id ?: v.id
+                v.nextFocusLeftId = row.getOrNull(i - 1)?.id ?: v.id
+            }
+        }
+        chip.text = "People  ·  ${nf.format(people.size)}"
+        chip.isActivated = peopleTab
+        if (peopleTab) {
+            listOf(R.id.chip_all, R.id.chip_live, R.id.chip_movies, R.id.chip_series).forEach { findViewById<View>(it).isActivated = false }
+            results.visibility = View.GONE
+            sections.visibility = View.VISIBLE
+            for (id in listOf(R.id.sec_live_title, R.id.sec_live, R.id.sec_movies_title, R.id.sec_movies, R.id.sec_series_title, R.id.sec_series)) findViewById<View>(id).visibility = View.GONE
+        }
+        val shownPeople = if (peopleTab) people else people.take(10)
+        val show = people.isNotEmpty() && (peopleTab || section == null)
+        peopleTitle?.apply { visibility = if (show) View.VISIBLE else View.GONE; text = "People  ·  ${nf.format(people.size)}" }
+        val box = peopleBox ?: return
+        box.visibility = if (show) View.VISIBLE else View.GONE
+        box.removeAllViews()
+        if (!show) return
+        val d = resources.displayMetrics.density
+        for (p in shownPeople) {
+            val role = when {
+                p.acts && p.directs -> "Actor and director"
+                p.directs -> "Director"
+                else -> "Actor"
+            }
+            val card = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.bg_glass_choice)
+                setPadding((12 * d).toInt(), (10 * d).toInt(), (20 * d).toInt(), (10 * d).toInt())
+                isFocusable = true
+                isClickable = true
+                setOnClickListener { startActivity(PersonActivity.intent(this@SearchActivity, p.name)) }
+            }
+            val size = (44 * d).toInt()
+            val face = android.widget.FrameLayout(this)
+            face.addView(TextView(this).apply {
+                text = p.name.split(' ').filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1) }.uppercase()
+                gravity = android.view.Gravity.CENTER
+                textSize = 15f
+                setTextColor(themeColor(R.attr.appText))
+                background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x33FFFFFF) }
+            }, android.widget.FrameLayout.LayoutParams(size, size))
+            Tmdb.photoUrl(p.photo)?.let { url ->
+                val img = android.widget.ImageView(this).apply { scaleType = android.widget.ImageView.ScaleType.CENTER_CROP }
+                face.addView(img, android.widget.FrameLayout.LayoutParams(size, size))
+                img.load(url) { transformations(coil.transform.CircleCropTransformation()); crossfade(false); listener(onError = { _, _ -> img.visibility = View.GONE }) }
+            }
+            card.addView(face, android.widget.LinearLayout.LayoutParams(size, size))
+            val words = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding((12 * d).toInt(), 0, 0, 0) }
+            words.addView(TextView(this).apply {
+                text = p.name
+                textSize = 17f
+                setTextColor(androidx.core.content.ContextCompat.getColorStateList(this@SearchActivity, R.color.on_focus_text))
+                isDuplicateParentStateEnabled = true
+            })
+            words.addView(TextView(this).apply {
+                text = "$role · ${p.titles} ${if (p.titles == 1) "title" else "titles"} in your playlist"
+                textSize = 13f
+                setTextColor(androidx.core.content.ContextCompat.getColorStateList(this@SearchActivity, R.color.on_focus_text))
+                isDuplicateParentStateEnabled = true
+            })
+            card.addView(words)
+            box.addView(card, android.view.ViewGroup.MarginLayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                rightMargin = (12 * d).toInt(); bottomMargin = (12 * d).toInt()
+            })
+        }
+        if (totalTitles == 0 && !peopleTab) sections.visibility = View.VISIBLE
     }
 
     private fun showSection(type: ContentType?) {

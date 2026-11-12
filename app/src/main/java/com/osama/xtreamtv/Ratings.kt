@@ -77,6 +77,11 @@ object Ratings {
      * The fill may ask the provider for a movie's details when its id is not known any other way
      * (one every 5 s). Off: only TMDB is used, and what it can't name is left to the title's page.
      */
+    /** The fill goes on under the TV's screensaver (never with the screen off or another app in front). */
+    var fillWhenIdle: Boolean
+        get() = sp.getBoolean("fill_idle", true)
+        set(value) = sp.edit().putBoolean("fill_idle", value).apply()
+
     var askProvider: Boolean
         get() = sp.getBoolean("fill_provider", true)
         set(value) = sp.edit().putBoolean("fill_provider", value).apply()
@@ -175,6 +180,8 @@ object Ratings {
         ID, NAME, NONE, WRONG,
         /** Recognised by TMDB from its name, year and poster (2.2.1: counted apart from the provider's own ids). */
         TMDB,
+        /** The owner chose which title it is (Wrong title, 2026-11-12): sure, and kept. */
+        CHOSEN,
     }
 
     class Entry(
@@ -406,6 +413,9 @@ object Ratings {
     }
 
     private fun entry(type: ContentType, id: String) = synchronized(cache) { cache[cacheKey(type, id)] }
+
+    /** The title's year as the scores service knows it (for clean names when the provider gives none). */
+    fun knownYear(type: ContentType, id: String): Int? = entry(type, id)?.year?.takeIf { it > 0 }
 
     private fun put(type: ContentType, id: String, e: Entry) {
         synchronized(cache) { val k = cacheKey(type, id); cache[k] = e; dirty.add(k) }
@@ -691,6 +701,36 @@ object Ratings {
         return n
     }
 
+    /**
+     * The match may be wrong (package 2, item 5): found by name, or by TMDB from its name and year
+     * without its poster matching. A match by the provider's id, by TMDB's own poster, or chosen by the
+     * owner is sure. Reads the database: off the screen's thread.
+     */
+    fun notSure(type: ContentType, id: String): Boolean = when (entry(type, id)?.how) {
+        How.NAME -> true
+        How.TMDB -> !runCatching { db.isSure(cacheKey(type, id)) }.getOrDefault(false)
+        else -> false
+    }
+
+    /** The owner chose which title this is: its scores, cast and story follow that title from now on. */
+    fun chooseMatch(type: ContentType, id: String, ref: String) {
+        val key = cacheKey(type, id)
+        synchronized(cache) {
+            cache[key] = Entry(null, null, 0L, How.CHOSEN, ref)
+            dirty.add(key)
+        }
+        scoresVersion++
+        runCatching { db.chooseRef(key, ref) }
+        save()
+        Diag.log("ratings", "a title's match was chosen by hand")
+    }
+
+    /** The match a title had before the owner chose another (to offer it again), or null. */
+    fun originalMatch(type: ContentType, id: String): String? = runCatching { db.origRef(cacheKey(type, id)) }.getOrNull()
+
+    /** The title's current match ("tmdb/movie/603"), or null. */
+    fun matchOf(type: ContentType, id: String): String? = entry(type, id)?.ref
+
     /** Mark wrong match: no scores for this title, and never matched again. */
     fun markWrong(type: ContentType, id: String) {
         put(type, id, Entry(null, null, System.currentTimeMillis(), How.WRONG, null))
@@ -827,7 +867,8 @@ object Ratings {
         lock.withLock {
             for ((type, group) in ids) {
                 val kind = mediaType(type)
-                for (chunk in group.keys.toList().chunked(25)) {
+                // Same group size as the background fill: one request for everything on screen (owner, 2026-11-12).
+                for (chunk in group.keys.toList().chunked(RatingsFill.BATCH)) {
                     val numbers = chunk.mapNotNull { it.toLongOrNull() }
                     if (numbers.isEmpty()) continue
                     val body = JSONObject().put("ids", JSONArray(numbers)).toString()
@@ -966,7 +1007,7 @@ object Ratings {
                 }
                 val how = when {
                     fromTmdb != null -> How.TMDB
-                    ref != null && t.tmdb == null && t.imdb == null -> entry(t.type, t.id)?.how?.takeIf { it == How.TMDB } ?: How.NAME
+                    ref != null && t.tmdb == null && t.imdb == null -> entry(t.type, t.id)?.how?.takeIf { it == How.TMDB || it == How.CHOSEN } ?: How.NAME
                     else -> How.ID
                 }
                 return entryFrom(media, how, idRef)
@@ -985,7 +1026,8 @@ object Ratings {
         if (!Tmdb.usable || !Tmdb.canTry(t.name, t.year, t.poster)) return null
         val f = Tmdb.lookup(t.type, t.name, t.year, t.poster).found ?: return null.also { trace("$label · no id: TMDB by name -> not recognised") }
         runCatching {
-            db.putDetail(cacheKey(t.type, t.id), RatingsDb.Detail(RatingsDb.Detail.OK, f.id, null, f.cast?.take(600), f.director?.take(200), f.genres?.take(200), f.year, f.minutes, "tmdb"))
+            db.putDetail(cacheKey(t.type, t.id), f.toDetail())
+            if (f.sure) db.markSure(cacheKey(t.type, t.id))
         }
         trace("$label · no id: TMDB by name -> recognised")
         Diag.log("ratings", "recognised by TMDB")

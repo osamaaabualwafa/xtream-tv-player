@@ -393,6 +393,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             isCatchup = intent.getBooleanExtra(EXTRA_CATCHUP, false)
             askResume = intent.getBooleanExtra(EXTRA_ASK_RESUME, true)
+            if (!isCatchup) loadVersions()
             // Catch-up streams are plain MPEG-TS; the HLS guess only applies to movies/episodes.
             if (prefs.vodIsHls && !isCatchup) vodMimeType = MimeTypes.APPLICATION_M3U8
             // Settings > Player: movies and episodes in another player app.
@@ -1470,6 +1471,10 @@ class PlayerActivity : AppCompatActivity() {
         override fun openSettings() {
             if (menuPanel.visibility == View.VISIBLE) closeMenu() else showSettings()
         }
+        override fun openVersions() {
+            closePanels(refocus = false)
+            showVersions()
+        }
         override fun beforeAction() = closePanels(refocus = false)
         override fun onControlsHidden() {
             playerView.requestFocus()
@@ -1501,7 +1506,8 @@ class PlayerActivity : AppCompatActivity() {
         val key = if (toolbar) "controls" else KeyEvent.keyCodeToString(diagSeekKey).removePrefix("KEYCODE_")
         val where = if (toolbar) "toolbar open" else "toolbar hidden"
         Diag.log("seek", "$key ${if (deltaMs > 0) "+" else "−"}${kotlin.math.abs(deltaMs) / 1000} s, $where: " +
-            "${formatDuration(before)} → ${formatDuration(target)}${if (toolbar) "" else if (bubble) ", bubble shown" else ", bubble NOT shown"}")
+            "${formatDuration(before)} → ${formatDuration(target)}${if (toolbar) "" else if (bubble) ", bubble shown" else ", bubble NOT shown"}" +
+            if (toolbar || diagSeekHow.isEmpty()) "" else " · $diagSeekHow")
         val seq = ++diagSeekSeq
         playerView.postDelayed({
             if (seq != diagSeekSeq) return@postDelayed   // Pressed again since: that seek moved it, not this one.
@@ -1527,7 +1533,23 @@ class PlayerActivity : AppCompatActivity() {
     /** Where playback is, or where it is about to jump to. */
     private fun seekPosition(): Long = if (seekTarget >= 0) seekTarget else player?.currentPosition ?: 0
 
+    /** Test builds: where the player really is, every 300 ms for 6 s after a seek ("SeekProbe" in the log). */
+    private fun probeSeek(target: Long) {
+        if (!BuildConfig.DEBUG) return
+        val started = SystemClock.uptimeMillis()
+        val tick = object : Runnable {
+            override fun run() {
+                val p = player ?: return
+                val t = SystemClock.uptimeMillis() - started
+                android.util.Log.d("SeekProbe", "t=${t}ms target=${target / 1000.0} pos=${p.currentPosition / 1000.0} buffered=${p.bufferedPosition / 1000.0} state=${p.playbackState} playing=${p.isPlaying} pendingTarget=${seekTarget / 1000.0}")
+                if (t < 6000) playerView.postDelayed(this, 300)
+            }
+        }
+        playerView.post(tick)
+    }
+
     private fun requestSeek(target: Long) {
+        probeSeek(target)
         // For the report: where a run of presses started, where it asked to go, and when.
         diagSeek = longArrayOf(diagSeek?.get(0) ?: (player?.currentPosition ?: 0), target, SystemClock.elapsedRealtime())
         diagSeekCount++
@@ -1590,6 +1612,149 @@ class PlayerActivity : AppCompatActivity() {
 
         updateEpisodeButtons()
         loadEpisodeQueue()
+    }
+
+    // ---- Versions: the title's other copies (package 2, item 2, approved 2026-11-12) ----
+
+    private var versions: Versions.CopySet? = null
+
+    /** The copy playing: its type and list id (the movie, or the episode's series). */
+    private fun currentCopy(): Pair<ContentType, String>? {
+        val e = watchEntry ?: return null
+        return if (e.type == ContentType.SERIES) e.seriesId?.let { ContentType.SERIES to it } else ContentType.MOVIE to e.id
+    }
+
+    private fun loadVersions() {
+        val (type, id) = currentCopy() ?: return
+        lifecycleScope.launch {
+            val item = StreamItem(type, id, watchEntry?.title ?: "", watchEntry?.image, null, watchEntry?.ext, null, null)
+            val set = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Versions.of(this@PlayerActivity, api, item) }.getOrNull() }
+                ?: return@launch
+            versions = set
+            val many = set.copies.size > 1
+            controls.showVersions(many)
+            val mine = set.copies.firstOrNull { it.item.id == id }
+            controls.language = if (many && mine != null && set.copies.map { it.lang }.distinct().size > 1) Versions.languageLabel(mine.lang, set.original) else null
+        }
+    }
+
+    /**
+     * The Versions panel: Language, then Quality for that language. A copy this TV cannot play is
+     * shown dimmed and skipped. Choosing another copy continues from the same minute; Back closes it.
+     */
+    private fun showVersions() {
+        val set = versions ?: return
+        val (_, playingId) = currentCopy() ?: return
+        val playing = set.copies.firstOrNull { it.item.id == playingId } ?: return
+        fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(22).toFloat()
+                setColor(0xF0181E22.toInt())
+                setStroke(dp(1).coerceAtLeast(1), 0x40FFFFFF)
+            }
+        }
+        val popup = android.widget.PopupWindow(box, dp(420), android.view.ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        fun label(text: String, size: Float, color: Int, top: Int = 0) = TextView(this).apply {
+            this.text = text; textSize = size; setTextColor(color); setPadding(dp(6), dp(top), dp(6), dp(4))
+        }
+        box.addView(label(watchEntry?.title ?: "", 14f, 0xFFB0C0C4.toInt()))
+        box.addView(label("Versions", 22f, 0xFFF0F6F6.toInt()).apply { setTypeface(typeface, android.graphics.Typeface.BOLD) })
+        var focus: View? = null
+        fun row(text: String, note: String?, selected: Boolean, enabled: Boolean, onPick: () -> Unit) {
+            val r = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.bg_menu_row)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                isActivated = selected
+                isFocusable = enabled
+                isClickable = enabled
+                alpha = if (enabled) 1f else 0.45f
+                addView(TextView(this@PlayerActivity).apply {
+                    this.text = text; textSize = 17f
+                    setTextColor(androidx.core.content.ContextCompat.getColorStateList(this@PlayerActivity, R.color.on_focus_text))
+                    isDuplicateParentStateEnabled = true
+                })
+                if (note != null) addView(TextView(this@PlayerActivity).apply {
+                    this.text = note; textSize = 13f; setPadding(dp(10), 0, 0, 0)
+                    setTextColor(androidx.core.content.ContextCompat.getColorStateList(this@PlayerActivity, R.color.on_focus_text))
+                    isDuplicateParentStateEnabled = true
+                })
+                setOnClickListener { popup.dismiss(); onPick() }
+            }
+            if (selected) focus = r
+            box.addView(r, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        }
+        val ordered = Versions.order(set.copies, set.learned)
+        val langs = ordered.map { it.lang }.distinct()
+        if (langs.size > 1) {
+            box.addView(label("Language", 13f, 0xFFB0C0C4.toInt(), top = 10))
+            for (l in langs) {
+                val isPlaying = l == playing.lang
+                val note = listOfNotNull(if (l == Versions.Lang.ORIGINAL) "original" else null, if (isPlaying) "playing" else null).joinToString(" · ").ifEmpty { null }
+                row(Versions.languageLabel(l, set.original), note, isPlaying, true) {
+                    if (!isPlaying) ordered.firstOrNull { it.lang == l && Versions.playable(Versions.height(it, set.learned)) }?.let { switchTo(it) }
+                }
+            }
+        }
+        val sameLang = ordered.filter { it.lang == playing.lang }
+        if (sameLang.size > 1) {
+            val head = "Quality" + if (langs.size > 1) " · ${Versions.languageLabel(playing.lang, set.original)}" else ""
+            box.addView(label(head, 13f, 0xFFB0C0C4.toInt(), top = 10))
+            for (c in sameLang) {
+                val h = Versions.height(c, set.learned)
+                val ok = Versions.playable(h)
+                val isPlaying = c.item.id == playing.item.id
+                row(Versions.qualityLabel(h) ?: "Quality not known yet", if (!ok) "this TV cannot play it" else if (isPlaying) "playing" else null, isPlaying, ok) {
+                    if (!isPlaying) switchTo(c)
+                }
+            }
+        }
+        box.addView(label("Another choice continues from the same minute", 12f, 0xFFB0C0C4.toInt(), top = 10))
+        popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+        popup.elevation = dp(16).toFloat()
+        popup.isOutsideTouchable = true
+        popup.setOnDismissListener { findViewById<View?>(R.id.vc_versions)?.requestFocus() }
+        popup.showAtLocation(window.decorView, android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL, dp(40), 0)
+        box.post { (focus ?: (0 until box.childCount).map { box.getChildAt(it) }.firstOrNull { it.isFocusable })?.requestFocus() }
+    }
+
+    /** Another copy of the same title, from the same minute. Its place in Continue watching replaces this one's. */
+    private fun switchTo(copy: Versions.Copy) {
+        val p = player ?: return
+        val pos = p.currentPosition.coerceAtLeast(0)
+        val dur = p.duration.takeIf { it > 0 } ?: 0
+        val old = watchEntry ?: return
+        val title = old.title
+        Diag.log("play", "another version chosen: ${Versions.languageLabel(copy.lang, null)} · ${Versions.qualityLabel(copy.height) ?: "unknown quality"}")
+        if (copy.item.type == ContentType.MOVIE) {
+            val key = "movie_${copy.item.id}"
+            val entry = WatchEntry(key, ContentType.MOVIE, copy.item.id, copy.item.ext, title, null, old.image)
+            prefs.removeProgress(old.key)
+            prefs.saveProgress(entry.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
+            startActivity(vodIntent(this, api.movieUrl(copy.item.id, copy.item.ext), title, key, pos, entry, askResume = false))
+            return
+        }
+        // A series: the same season and episode in the other copy.
+        val ep = episodes.getOrNull(episodeIndex) ?: return
+        lifecycleScope.launch {
+            val info = runCatching { api.seriesInfo(copy.item.id) }.getOrNull()
+            val list = info?.playOrder().orEmpty()
+            val same = list.firstOrNull { it.season == ep.season && it.number == ep.number }
+            if (same == null) {
+                showToast(this@PlayerActivity, "This episode is not in that version", Toast.LENGTH_SHORT)
+                return@launch
+            }
+            Session.seriesQueue = SeriesQueue(copy.item.id, title, old.image ?: info?.cover, list)
+            val key = "ep_${same.id}"
+            val entry = WatchEntry(key, ContentType.SERIES, same.id, same.ext, title, same.label(), old.image, seriesId = copy.item.id)
+            prefs.removeProgress(old.key)
+            prefs.saveProgress(entry.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
+            startActivity(vodIntent(this@PlayerActivity, api.episodeUrl(same.id, same.ext), "$title  ·  ${same.label()}", key, pos, entry, askResume = false))
+        }
     }
 
     /** Episodes started from the series page bring the list along; Continue watching loads it. */
@@ -2102,6 +2267,8 @@ class PlayerActivity : AppCompatActivity() {
         ) {
             val fps = if (format.frameRate > 0) " · ${"%.3f".format(java.util.Locale.US, format.frameRate)} fps" else ""
             Diag.log("video", "${format.width}x${format.height} · ${format.sampleMimeType?.substringAfter('/') ?: "?"}$fps")
+            // What this copy really is (its name may say "HD" for 1080p, or nothing): kept for its title's page and cards.
+            currentCopy()?.let { (t, id) -> Versions.noteHeight(this@PlayerActivity, t, id, format.height) }
         }
 
         override fun onVideoDecoderInitialized(
@@ -2128,12 +2295,27 @@ class PlayerActivity : AppCompatActivity() {
         } else {
             now - event.downTime >= SEEK_HOLD_MS && now - lastSeekKeyAt >= SEEK_REPEAT_MS
         }
+        // For the report: how this press came (a new press and how long after the last one, or a held
+        // key), and the copies set aside, so the next report shows what the remote really sends.
+        diagSeekHow = when {
+            event.repeatCount > 0 -> "held ${(now - event.downTime) / 100 / 10.0} s"
+            sameKey && lastSeekKeyAt > 0 -> "new press, ${now - lastSeekKeyAt} ms after the last"
+            else -> "new press"
+        }
+        if (!accept && event.repeatCount == 0) {
+            diagSeekIgnored++
+            if (Diag.enabled) Diag.log("seek", "${KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")} again after ${now - lastSeekKeyAt} ms: taken as the same press")
+        }
         if (accept) {
             lastSeekKey = event.keyCode
             lastSeekKeyAt = now
         }
         return accept
     }
+
+    /** How the last seek key came, for the report line. */
+    private var diagSeekHow = ""
+    private var diagSeekIgnored = 0
 
     private fun quickSeek(deltaMs: Long) {
         val p = player ?: return
@@ -2595,7 +2777,16 @@ class PlayerActivity : AppCompatActivity() {
         }
         val audio = selected(androidx.media3.common.C.TRACK_TYPE_AUDIO) ?: if (present(androidx.media3.common.C.TRACK_TYPE_AUDIO)) "Default" else "Not available"
         val text = selected(androidx.media3.common.C.TRACK_TYPE_TEXT) ?: if (present(androidx.media3.common.C.TRACK_TYPE_TEXT)) "Off" else "Not available"
-        return "Audio: $audio  ·  Subtitles: $text"
+        // How many picture qualities the stream itself offers (one for a plain file; several for an
+        // adaptive stream): for deciding whether a quality choice in the player is possible (2026-11-12).
+        val heights = player?.currentTracks?.groups.orEmpty().filter { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }
+            .flatMap { g -> (0 until g.length).map { g.getTrackFormat(it).height } }.filter { it > 0 }.distinct().sortedDescending()
+        val video = when {
+            heights.isEmpty() -> ""
+            heights.size == 1 -> "  ·  Picture: one quality (${heights[0]}p)"
+            else -> "  ·  Picture: ${heights.size} qualities (${heights.joinToString(", ") { "${it}p" }})"
+        }
+        return "Audio: $audio  ·  Subtitles: $text$video"
     }
 
     private fun firstFocusableIn(v: View): View? {

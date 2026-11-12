@@ -24,7 +24,8 @@ import java.io.File
  * real service, no personal data: the key is a made-up word and every title is "Fill movie 00001".
  *
  * Checked: nothing is asked while the remote is in use; one group at a time, 5 s apart when idle and
- * 30 s apart during playback (none with the setting off); the daily reserve; the limit (429) and a
+ * 30 s apart during playback (none with the setting off); under the screensaver it goes on, with
+ * another app in front or the screen off it does not; the daily reserve; the limit (429) and a
  * refused key (401); nothing asked twice; what a request carries (ids, the media type, the key, nothing
  * else); the highlight staying put; memory. Not covered here: the one-time move of the old scores file,
  * and a real restart of the app in the middle (the test runs inside the app).
@@ -287,5 +288,102 @@ class T13_FillTest : QaTest() {
         assertTrue("The channel stopped playing", Qa.player()?.playing == true)
         Qa.metric("fill_memory_mb_playing", Qa.memoryMb())
         Qa.leavePlayer()
+    }
+
+    /** The TV's own launcher comes in front, as when Home is pressed or the screensaver takes the screen. */
+    private fun leaveTheApp() {
+        Qa.step("the app leaves the screen")
+        Qa.start(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME))
+        SystemClock.sleep(1500)
+    }
+
+    /**
+     * Under the screensaver the fill goes on, at the idle pace, with the big lists out of memory; it
+     * stops when the screen goes off; and it starts again by itself when the app is opened.
+     * (The screensaver and the screen going off are stood in for: the fill is told what the TV would tell it.)
+     */
+    @Test
+    fun goesOnUnderTheScreensaver() {
+        setUp()
+        leaveTheApp()
+        RatingsFill.screenEventForTests(android.content.Intent.ACTION_DREAMING_STARTED)
+        assertTrue("The fill did not go on under the screensaver (state ${RatingsFill.state})", Qa.waitUntil(8000) { RatingsFill.underScreensaver })
+        Qa.metric("fill_memory_mb_screensaver_start", Qa.memoryMb())
+
+        Qa.serverCall("/__mdblog?clear=1")
+        SystemClock.sleep(45_000)
+        val (log, inflight) = asked()
+        val under = groups(log)
+        Qa.metric("fill_groups_in_45s_screensaver", under.size)
+        Qa.metric("fill_min_gap_screensaver_ms", gaps(under).minOrNull() ?: -1)
+        assertTrue("Nothing was asked in 45 s under the screensaver (state ${RatingsFill.state})", under.size >= 3)
+        assertTrue("Groups closer than 5 s under the screensaver: ${gaps(under).minOrNull()} ms", (gaps(under).minOrNull() ?: 5000) >= 4500)
+        assertTrue("$inflight requests at once under the screensaver", inflight <= 1)
+
+        // The big lists have left memory, and the fill works on from its own queue.
+        assertTrue("The big lists stayed in memory under the screensaver", com.osama.xtreamtv.Session.streamCache.isEmpty())
+        Qa.metric("fill_memory_mb_screensaver_lists_gone", Qa.memoryMb())
+        val before = RatingsFill.progress().ready
+        Qa.serverCall("/__mdblog?clear=1")
+        SystemClock.sleep(25_000)
+        assertTrue("The fill stopped once the lists left memory (state ${RatingsFill.state})", groups(asked().first).isNotEmpty())
+        assertTrue("No more titles became ready without the lists", RatingsFill.progress().ready > before)
+
+        // The screen goes off: nothing more is asked.
+        RatingsFill.screenEventForTests(android.content.Intent.ACTION_SCREEN_OFF)
+        assertTrue("The fill went on with the screen off", !RatingsFill.underScreensaver)
+        SystemClock.sleep(6000)
+        Qa.serverCall("/__mdblog?clear=1")
+        SystemClock.sleep(25_000)
+        assertEquals("Groups were asked with the screen off", 0, groups(asked().first).size)
+
+        // The app is opened again: the fill goes on from where it was, and nothing was lost.
+        val ready = RatingsFill.progress().ready
+        Qa.launchApp()
+        Qa.expect(HomeActivity::class.java, "Home", 90_000)
+        Qa.serverCall("/__mdblog?clear=1")
+        assertTrue("The fill did not start again after the app was opened (state ${RatingsFill.state})",
+            Qa.waitUntil(150_000, 1000) { groups(asked().first).isNotEmpty() })
+        assertTrue("Titles that were ready were lost: $ready before, ${RatingsFill.progress().ready} after", RatingsFill.progress().ready >= ready)
+        Qa.metric("fill_memory_mb_back_from_screensaver", Qa.memoryMb())
+    }
+
+    /** Another app in front, a screensaver that starts later over that app, and the switch off: nothing is asked. */
+    @Test
+    fun nothingInTheBackgroundOtherwise() {
+        setUp()
+        // Another app in front, no screensaver.
+        leaveTheApp()
+        SystemClock.sleep(8000)
+        Qa.serverCall("/__mdblog?clear=1")
+        SystemClock.sleep(30_000)
+        assertEquals("Groups were asked with another app in front", 0, groups(asked().first).size)
+
+        // The screensaver starts over that other app, long after this one left the screen.
+        RatingsFill.screenEventForTests(android.content.Intent.ACTION_DREAMING_STARTED)
+        SystemClock.sleep(3000)
+        assertTrue("The fill went on under a screensaver that started over another app", !RatingsFill.underScreensaver)
+        Qa.serverCall("/__mdblog?clear=1")
+        SystemClock.sleep(20_000)
+        assertEquals("Groups were asked under a screensaver over another app", 0, groups(asked().first).size)
+        RatingsFill.screenEventForTests(android.content.Intent.ACTION_DREAMING_STOPPED)
+
+        // "Keep filling when the TV is idle" off: the screensaver over this app changes nothing.
+        Qa.launchApp()
+        Qa.expect(HomeActivity::class.java, "Home", 90_000)
+        Ratings.fillWhenIdle = false
+        try {
+            SystemClock.sleep(3000)
+            leaveTheApp()
+            RatingsFill.screenEventForTests(android.content.Intent.ACTION_DREAMING_STARTED)
+            SystemClock.sleep(6000)
+            assertTrue("The fill went on under the screensaver with the switch off", !RatingsFill.underScreensaver)
+            Qa.serverCall("/__mdblog?clear=1")
+            SystemClock.sleep(25_000)
+            assertEquals("Groups were asked under the screensaver with the switch off", 0, groups(asked().first).size)
+        } finally {
+            RatingsFill.screenEventForTests(android.content.Intent.ACTION_DREAMING_STOPPED)
+            Ratings.fillWhenIdle = true
+        }
     }
 }

@@ -73,6 +73,17 @@ class BrowseActivity : AppCompatActivity() {
         if (cat != null && cat != currentCategory && categoriesView.hasFocus()) selectCategory(cat)
     }
 
+    // ---- The filter (package 2, item 1) ----
+    /** The current choices: kept while moving between categories, gone when the screen closes. */
+    private var filter = TitleFilter.State()
+    private var filterUi: FilterUi? = null
+    private var filterButton: TextView? = null
+    private var filterJob: Job? = null
+    /** The open category's list after the filter (for the header's "23 of 85"). */
+    private var filteredCount = -1
+    /** Info is being held: the panel opened, so its release must not open Sort too. */
+    private var infoHeld = false
+
     /** Items per category id (plus CAT_ALL / CAT_FAV / CAT_CONTINUE), shown next to each category. */
     private var counts: Map<String, Int> = emptyMap()
 
@@ -110,6 +121,9 @@ class BrowseActivity : AppCompatActivity() {
         // No change animations: a new category replaces the posters in one step.
         itemsView.itemAnimator = null
         categoryTitle = findViewById(R.id.category_title)
+        // With Filter in the top bar, a long category name and its count may need two lines: both stay whole.
+        categoryTitle.isSingleLine = false
+        categoryTitle.maxLines = 2
         search = findViewById(R.id.search)
         progress = findViewById(R.id.progress)
         message = findViewById(R.id.message)
@@ -170,6 +184,7 @@ class BrowseActivity : AppCompatActivity() {
             else -> CenterGridLayoutManager(this, 8)
         }
         itemsView.tuneForTv()
+        if (!live) setupFilter()
         setupFocusMap()
 
         if (!live && style != Appearance.BROWSE_PREVIEW) backdrop = FocusBackdrop.attach(this)
@@ -488,15 +503,30 @@ class BrowseActivity : AppCompatActivity() {
      */
     private fun setupFocusMap() {
         val header = focusMap.section {
-            listOfNotNull(search, findViewById<View?>(R.id.sort_button), findViewById<View?>(R.id.tv_guide)).filter { it.isShown }
+            listOfNotNull(filterButton, search, findViewById<View?>(R.id.sort_button), findViewById<View?>(R.id.tv_guide)).filter { it.isShown }
         }
         val categories = focusMap.section { listOf<View>(categoriesView) }
         itemsSection = focusMap.section { listOf<View>(itemsView) }
-        header.exits[View.FOCUS_DOWN] = {
-            if (style == Appearance.BROWSE_CHIPS) categoryRow() else itemsSection.entry()
+        // The filter's line: Up from the top row of posters lands on the chip above; Up from the line
+        // goes to Search; Down from the line, the top bar or the categories returns to the poster left.
+        val lineSection = focusMap.section { listOfNotNull(filterUi?.lineScroll).filter { it.isShown } }
+        val lineShown = { filterUi?.lineScroll?.isShown == true }
+        fun chipAbove(): View? {
+            val f = currentFocus ?: return filterUi?.chipViews?.firstOrNull()
+            val at = IntArray(2); f.getLocationOnScreen(at)
+            return filterUi?.chipNear(at[0] + f.width / 2)
+        }
+        header.exits[View.FOCUS_DOWN] = { itemsSection.entry() }
+        lineSection.exits[View.FOCUS_DOWN] = { itemsSection.entry() }
+        lineSection.exits[View.FOCUS_UP] = {
+            if (style == Appearance.BROWSE_CHIPS) categoryRow() else search.takeIf { it.isShown }
         }
         itemsSection.exits[View.FOCUS_UP] = {
-            if (style == Appearance.BROWSE_CHIPS) categoryRow() else search.takeIf { it.isShown }
+            when {
+                lineShown() -> chipAbove()
+                style == Appearance.BROWSE_CHIPS -> categoryRow()
+                else -> search.takeIf { it.isShown }
+            }
         }
         if (style == Appearance.BROWSE_CHIPS) {
             categories.exits[View.FOCUS_UP] = { search.takeIf { it.isShown } }
@@ -511,6 +541,7 @@ class BrowseActivity : AppCompatActivity() {
             }
             header.exits[View.FOCUS_LEFT] = toCategory
             itemsSection.exits[View.FOCUS_LEFT] = toCategory
+            lineSection.exits[View.FOCUS_LEFT] = toCategory
             categories.exits[View.FOCUS_RIGHT] = {
                 if (itemAdapter.itemCount > 0) {
                     // Show the highlighted category first if it isn't open yet.
@@ -543,11 +574,19 @@ class BrowseActivity : AppCompatActivity() {
             }
             return true
         }
-        // Info key (a short press) on the posters: how they're sorted (1.1E: IMDb score). Holding
-        // Info stays the diagnostics Mark shortcut.
-        if (event.keyCode == android.view.KeyEvent.KEYCODE_INFO && itemsView.hasFocus() && sortApplies()) {
-            if (event.action == android.view.KeyEvent.ACTION_UP && !event.isCanceled && event.eventTime - event.downTime < 600) sortOptions()
-            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0) return super.dispatchKeyEvent(event)
+        // Info key on the posters: a short press is Sort (1.1E: IMDb score); held, it opens the filter
+        // (approved 2026-11-12; holding Info no longer marks a problem).
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_INFO && (itemsView.hasFocus() || infoHeld) && sortApplies()) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) infoHeld = false
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 1 && filterApplies()) {
+                infoHeld = true
+                openFilterPanel()
+            }
+            // The release after a hold is not a short press.
+            if (event.action == android.view.KeyEvent.ACTION_UP) {
+                if (!infoHeld && !event.isCanceled && event.eventTime - event.downTime < 600) sortOptions()
+                infoHeld = false
+            }
             return true
         }
         // Right from the sliding category list closes it.
@@ -764,7 +803,20 @@ class BrowseActivity : AppCompatActivity() {
     private fun showCategoryTitle(category: Category, count: Int?) {
         // Isolate the name so Arabic names don't swap places with the English count.
         val name = "⁨${category.name}⁩"
-        categoryTitle.text = if (count == null) name else "$name  ·  ${countLabel(type, count)}"
+        val filtered = filterApplies() && filter.count > 0 && filteredCount >= 0 && count != null
+        val countText = when {
+            count == null -> null
+            filtered -> "${java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(filteredCount)} of ${countLabel(type, count)}"
+            else -> countLabel(type, count)
+        }
+        categoryTitle.text = if (countText == null) name else "$name  ·  $countText"
+        // Too long for one line: the count goes to the second line whole, never broken inside ("1,5 | 00 movies").
+        if (countText != null) categoryTitle.post {
+            val l = categoryTitle.layout ?: return@post
+            // The name and its count don't fit on one line (big sizes, long names): the name alone. The
+            // count stays beside the category in the list, and the Filter button says when a filter is on.
+            if (l.lineCount > 1 && categoryTitle.text.toString() == "$name  ·  $countText") categoryTitle.text = name
+        }
     }
 
     /** Count per category from the full list (cached on the device, so usually instant). */
@@ -855,6 +907,8 @@ class BrowseActivity : AppCompatActivity() {
                 if (local.isNotEmpty()) return local.also { Session.streamCache[key] = it }
             }
         }
+        // "All": the same read Home may already be making, not a second one.
+        if (categoryId == null) return Session.all(api, type)
         return api.streams(type, categoryId).also { Session.streamCache[key] = it }
     }
 
@@ -863,9 +917,33 @@ class BrowseActivity : AppCompatActivity() {
 
     private fun applyFilter(scrollToTop: Boolean = true) {
         updateSortButton()
+        updateFilterLine()
         val query = search.text.toString().trim()
         val found = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
-        val list = sorted(found)
+        filterJob?.cancel()
+        if (filterApplies()) {
+            // One card per title (copies of a title are one), then the filter: thousands of titles to
+            // look up, off the screen's thread, then shown.
+            val state = filter
+            filterJob = lifecycleScope.launch {
+                val (cards, shown) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val cards = groupCopies(found)
+                    cards to if (state.count > 0) runFilter(cards, state, grouped = true).shown else cards
+                }
+                showList(cards, shown, scrollToTop, query)
+            }
+            return
+        }
+        filteredCount = -1
+        showList(found, found, scrollToTop, query)
+    }
+
+    private fun showList(found: List<StreamItem>, shownItems: List<StreamItem>, scrollToTop: Boolean, query: String) {
+        val filtering = filterApplies() && filter.count > 0
+        filteredCount = if (filtering) shownItems.size else -1
+        // The header counts cards: copies of one title count once.
+        currentCategory?.let { c -> if (c.id != CAT_CONTINUE && (filterApplies() || counts[c.id] == null)) showCategoryTitle(c, found.size) else if (counts[c.id] != null) showCategoryTitle(c, counts[c.id]) }
+        val list = sorted(shownItems)
         itemAdapter.favorites = prefs.favoriteIds(type)
         if (type == ContentType.SERIES) {
             Session.streamCache["SERIES:__all__"]?.let { itemAdapter.newIds = prefs.newEpisodeSeries(it) }
@@ -884,6 +962,11 @@ class BrowseActivity : AppCompatActivity() {
         val catId = currentCategory?.id
         when {
             progress.visibility == View.VISIBLE -> message.visibility = View.GONE
+            list.isEmpty() && filtering -> {
+                showMessage("No ${if (type == ContentType.MOVIE) "movies" else "series"} match.\nChange or remove a filter above.")
+                // Nothing to highlight in the grid: the line, so one press removes a filter.
+                if (itemsView.hasFocus() || currentFocus == null) filterUi?.chipViews?.firstOrNull { it.isActivated }?.requestFocus()
+            }
             list.isEmpty() && catId == CAT_FAV && query.isEmpty() ->
                 showMessage("No favorites yet.\nLong-press OK on an item to add it.")
             list.isEmpty() && catId == CAT_TOP && query.isEmpty() ->
@@ -893,6 +976,86 @@ class BrowseActivity : AppCompatActivity() {
             list.isEmpty() -> showMessage(if (query.isEmpty()) "Nothing here." else "No results for \"$query\".")
             else -> message.visibility = View.GONE
         }
+    }
+
+    // ---- Filter ----
+
+    /** Movies and Series, every category except Continue watching (its cards are episodes and places, not titles). */
+    private fun filterApplies(): Boolean = type != ContentType.LIVE && currentCategory?.id != CAT_CONTINUE
+
+    private fun setupFilter() {
+        val ui = FilterUi(this, type, { filter }, { st, done ->
+            val query = search.text.toString().trim()
+            val found = if (query.isEmpty()) allItems else allItems.filter { it.name.contains(query, ignoreCase = true) }
+            lifecycleScope.launch {
+                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runFilter(found, st) }
+                done(r)
+            }
+        }) { st ->
+            filter = st
+            applyFilter()
+        }
+        filterUi = ui
+        // The line sits right above the posters, in every layout.
+        val frame = itemsView.parent as View
+        (frame.parent as? android.view.ViewGroup)?.let { holder ->
+            holder.addView(ui.lineScroll, holder.indexOfChild(frame), android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = (6 * resources.displayMetrics.density).toInt() })
+        }
+        filterButton = findViewById<TextView?>(R.id.filter_button)?.apply {
+            visibility = View.VISIBLE
+            setOnClickListener { openFilterPanel() }
+        }
+        // Three controls in the top bar now: Filter and Sort as wide as their words, and a narrower
+        // Search box, so the category's name keeps its room at the biggest sizes.
+        val density = resources.displayMetrics.density
+        for (b in listOfNotNull(filterButton, findViewById<TextView?>(R.id.sort_button))) {
+            b.minWidth = 0
+            b.minimumWidth = 0
+            b.setPadding((18 * density).toInt(), b.paddingTop, (18 * density).toInt(), b.paddingBottom)
+        }
+        search.layoutParams = search.layoutParams.apply { width = (170 * density).toInt() }
+    }
+
+    private fun openFilterPanel() {
+        val back = currentFocus
+        filterUi?.openPanel { (back?.takeIf { it.isAttachedToWindow && it.isShown } ?: filterButton)?.requestFocus() }
+    }
+
+    /** The line, the button and the header follow the choices; the line hides where the filter does not apply. */
+    private fun updateFilterLine() {
+        val ui = filterUi ?: return
+        val on = filterApplies()
+        if (!on && (ui.lineScroll.hasFocus() || filterButton?.hasFocus() == true)) search.requestFocus()
+        ui.lineScroll.visibility = if (on) View.VISIBLE else View.GONE
+        filterButton?.visibility = if (on) View.VISIBLE else View.GONE
+        ui.refreshLine()
+        filterButton?.apply {
+            text = if (filter.count == 0) "Filter" else "Filter · ${filter.count}"
+            setBackgroundResource(if (filter.count == 0) R.drawable.bg_glass_pill else R.drawable.bg_glass_choice)
+            isActivated = filter.count > 0
+        }
+    }
+
+    /** Copies of one title become one card, its best copy in front. Off the screen's thread. */
+    private fun groupCopies(items: List<StreamItem>): List<StreamItem> {
+        val facts = TitleFilter.facts(this)
+        return Versions.group(items, { facts["${it.type.name}:${it.id}"]?.ref }, Versions.learned(this))
+    }
+
+    /** The filter over [items] (one card per title), with every section's counts. Off the screen's thread. */
+    private fun runFilter(items: List<StreamItem>, state: TitleFilter.State, grouped: Boolean = false): TitleFilter.Result {
+        val facts = TitleFilter.facts(this)
+        if (!grouped) return runFilter(groupCopies(items), state, grouped = true)
+        val watchedSet = prefs.watchedKeys()
+        val started: Set<String> = if (type == ContentType.SERIES) prefs.continueWatching(ContentType.SERIES).mapNotNullTo(HashSet()) { it.seriesId } else emptySet()
+        return TitleFilter.run(type, items, state,
+            { item -> facts["${item.type.name}:${item.id}"] },
+            { item ->
+                if (item.type == ContentType.MOVIE) "movie_${item.id}" in watchedSet || prefs.position("movie_${item.id}") > 0
+                else item.id in started
+            })
     }
 
     /** The grid's order (Menu on the grid): the provider's, IMDb score, A to Z, or recently added. */
@@ -994,7 +1157,7 @@ class BrowseActivity : AppCompatActivity() {
     /** Info strip under the grid: name, then year · genre · rating, then the start of the plot. */
     private fun showInfo(item: StreamItem) {
         findViewById<View>(R.id.info_strip).visibility = View.VISIBLE
-        findViewById<TextView>(R.id.info_name).text = item.name
+        findViewById<TextView>(R.id.info_name).text = Versions.shownName(item)
         showInfoMeta(item)
         scoresJob?.cancel()
         if (Ratings.needsLookup(item.type, item.id)) scoresJob = lifecycleScope.launch {
