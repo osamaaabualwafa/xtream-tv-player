@@ -40,7 +40,7 @@ class FilterUi(
     val lineScroll = HorizontalScrollView(activity).apply {
         isHorizontalScrollBarEnabled = false
         isFillViewport = false
-        clipToPadding = false
+        FocusBox.usePadding(this)
         setPadding(dp(4), dp(6), dp(4), dp(4))
         addView(line, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }

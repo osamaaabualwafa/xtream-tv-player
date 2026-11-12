@@ -115,7 +115,7 @@ class PersonActivity : AppCompatActivity() {
 
         val frame = android.widget.FrameLayout(this)
         grid = RecyclerView(this).apply {
-            clipToPadding = false
+            FocusBox.usePadding(this)
             setPadding(dp(2), dp(8), dp(2), dp(8))
             itemAnimator = null
         }
