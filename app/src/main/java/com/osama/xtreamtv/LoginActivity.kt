@@ -140,6 +140,8 @@ class LoginActivity : AppCompatActivity() {
     private var phoneCard: DiagUi.Card? = null
     /** What the phone page shows after Send: the TV's answer. */
     @Volatile private var phoneStatus = ""
+    /** The phone page's answer: null while the TV checks, then a tick or a cross. */
+    @Volatile private var phoneOk: Boolean? = null
 
     /** "Use my phone" as the first choice, above the fields. */
     private fun addPhoneButton() {
@@ -171,6 +173,7 @@ class LoginActivity : AppCompatActivity() {
     private fun openPhone() {
         phone?.stop()
         phoneStatus = ""
+        phoneOk = null
         val page = PhonePage(PHONE_PORT, 5 * 60_000L, handle = { path, method, fields, _ -> phoneAnswer(path, method, fields) })
         val url = page.address()
         if (url == null || !page.start()) {
@@ -216,7 +219,7 @@ class LoginActivity : AppCompatActivity() {
 
     /** The phone page: the form (server and username filled when editing, never the password), then the TV's answer. */
     private fun phoneAnswer(path: String, method: String, fields: Map<String, String>): PhonePage.Response {
-        if (path == "/status") return PhonePage.Response(phoneStatus.ifEmpty { "The TV is checking the login…" }, "text/plain; charset=utf-8")
+        if (path == "/status") return PhonePage.Response(phoneResult(), "text/plain; charset=utf-8")
         if (method == "POST") {
             val m3u = fields["m3u"].orEmpty().trim()
             val srv = fields["server"].orEmpty().trim()
@@ -224,6 +227,7 @@ class LoginActivity : AppCompatActivity() {
                 return PhonePage.Response(phoneForm("Fill in the server, username and password, or paste an M3U link."))
             }
             phoneStatus = "Received · the TV is checking the login…"
+            phoneOk = null
             window.decorView.post {
                 fields["name"]?.trim()?.takeIf { it.isNotEmpty() }?.let { name.setText(it) }
                 server.setText(m3u.ifEmpty { srv })
@@ -231,9 +235,10 @@ class LoginActivity : AppCompatActivity() {
                 Diag.log("account", "playlist details received from the phone")
                 submit()
             }
-            return PhonePage.Response(PhonePage.page("Sent", "<h1>Sent to your TV</h1><div class=status id=s>The TV is checking the login…</div>" +
-                "<p class=small>If it doesn't work, the answer shows here: <a href=''>try again</a>.</p>",
-                "setInterval(()=>fetch(location.pathname.replace(/[/]?$/,'/status')).then(r=>r.text()).then(t=>{document.getElementById('s').innerHTML=t}),1500)"))
+            return PhonePage.Response(PhonePage.page("Sent", "<div id=s>${phoneResult()}</div>" +
+                "<p class=small>The TV's answer shows here. Keep this page open for a moment.</p>",
+                "const t=setInterval(()=>fetch(location.pathname.replace(/[/]?$/,'/status')).then(r=>r.text()).then(h=>{s.innerHTML=h;if(h.indexOf('res good')>=0)clearInterval(t)}).catch(()=>{}),1500)",
+                symbol = "playlist", heading = "Sent to your TV"))
         }
         return PhonePage.Response(phoneForm(null))
     }
@@ -243,14 +248,15 @@ class LoginActivity : AppCompatActivity() {
         fun v(s: String?) = PhonePage.esc(s.orEmpty())
         return PhonePage.page(
             "Add playlist",
-            "<h1>${if (e != null) "Edit playlist" else "Add a playlist"}</h1>" + (problem?.let { "<p class=bad>$it</p>" } ?: "") +
-                "<form method=post>" +
+            (problem?.let { PhonePage.result(false, it) } ?: "<p>Type the details from your provider. They go straight to your TV.</p>") +
+                "<form method=post class=card>" +
                 "<label>Name (optional)</label><input name=name value='${v(e?.name)}' autocomplete=off>" +
                 "<label>Server</label><input name=server value='${v(e?.base)}' placeholder='http://example.com:8080' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
                 "<label>Username</label><input name=user value='${v(e?.username)}' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
                 "<label>Password</label><input name=pass type=password autocomplete=off>" +
                 "<label>Or paste an M3U link</label><input name=m3u placeholder='get.php?username=…&amp;password=…' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
-                "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. The details go straight to your TV.</p>",
+                "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. Nothing goes through the internet.</p>",
+            symbol = "playlist", heading = if (e != null) "Edit playlist" else "Add a playlist",
         )
     }
 
@@ -298,8 +304,8 @@ class LoginActivity : AppCompatActivity() {
                 }
                 prefs.savePlaylist(playlist)
                 prefs.activeId = playlist.id
-                if (phone != null) phoneStatus = "<span class=ok>&#10003; Logged in</span> · " + (info.expDate?.let { "expires " + java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.US).format(java.util.Date(it * 1000)) } ?: "no expiry date") + ". You can close this page."
-                phone?.let { p -> window.decorView.postDelayed({ p.stop() }, 4000) }
+                if (phone != null) { phoneStatus = "Logged in · " + (info.expDate?.let { "expires " + java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.US).format(java.util.Date(it * 1000)) } ?: "no expiry date") + ". You can close this page."; phoneOk = true }
+                phone?.let { p -> window.decorView.postDelayed({ p.stop() }, 10_000) }
                 prefs.formats = info.formats.joinToString(",")
                 Session.start(api, info)
                 startActivity(
@@ -327,6 +333,13 @@ class LoginActivity : AppCompatActivity() {
         error.text = message
         error.visibility = View.VISIBLE
         // Sent from the phone: the answer shows there too, so it can be fixed and sent again.
-        if (phone?.running == true) phoneStatus = "<span class=bad>${PhonePage.esc(message)}</span> &middot; <a href=''>Try again</a>"
+        if (phone?.running == true) { phoneStatus = message; phoneOk = false }
+    }
+
+    /** The phone page's answer box: waiting, a tick, or a cross with Try again. */
+    private fun phoneResult(): String = when (phoneOk) {
+        true -> PhonePage.result(true, PhonePage.esc(phoneStatus))
+        false -> PhonePage.result(false, PhonePage.esc(phoneStatus)) + "<button onclick=\"location.href=location.pathname\">Try again</button>"
+        null -> "<div class='res wait'>${PhonePage.icon("phone")}<span>${PhonePage.esc(phoneStatus.ifEmpty { "The TV is checking the login…" })}</span></div>"
     }
 }

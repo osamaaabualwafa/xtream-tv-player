@@ -194,6 +194,19 @@ class SettingsActivity : AppCompatActivity() {
         firstFocusable(body)?.requestFocus()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // A phone joining, leaving or playing something shows here straight away (like a key added in Ratings).
+        PhonePanel.onChange = {
+            if (section == Section.PHONE && hasWindowFocus()) reshow(currentFocus?.tag as? String)
+        }
+    }
+
+    override fun onPause() {
+        PhonePanel.onChange = null
+        super.onPause()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         section?.let { outState.putString("section", it.name) }
@@ -285,7 +298,7 @@ class SettingsActivity : AppCompatActivity() {
                 // Package 5, item 2 (approved 2026-11-13): its own place in the menu (owner: not under Home layout).
                 title.text = "Use Phone"
                 hint.text = "Search, play and use your phone as a remote, on the same Wi-Fi"
-                startAction("Add a phone or remove one", R.drawable.ic_glass_phone, "phone_panel") { phonePanelCard() }
+                phoneOptions()
             }
             Section.CONNECTION -> {
                 title.text = "Connection check"
@@ -978,12 +991,74 @@ class SettingsActivity : AppCompatActivity() {
     private var fillTicker: Runnable? = null
 
     /** Get started's round buttons: icon then words, the card's full width. */
-    /** Settings → Use my phone: a code for a new phone, and the phones that joined, each with Remove. */
+    /**
+     * Settings → Use Phone (owner, 2026-11-13: like Ratings after a key is added, the page shows what is
+     * connected): each phone with when it joined and was last used, the last thing done, then Add and Remove.
+     */
+    private fun phoneOptions() {
+        fun small(text: CharSequence, top: Int = 4) = (target ?: body).addView(TextView(this).apply {
+            this.text = text
+            textSize = 12.5f
+            setTextColor(themeColor(R.attr.appTextSecondary))
+            setPadding(dp(10), dp(top), dp(10), dp(8))
+        })
+        val phones = PhonePanel.phones()
+        if (phones.isEmpty()) {
+            heading("Get started", R.drawable.ic_glass_phone)
+            small("Search the playlist on your phone and play on the TV, or use the phone as a remote. Scan a code once; the phone stays connected for 30 days.", top = 6)
+            startAction("Add a phone", R.drawable.ic_glass_phone, "phone_add") { phonePanelCard() }
+            small("Same Wi-Fi as this TV. Nothing goes through the internet, and the phone never sees your logins.")
+            target = null
+            return
+        }
+        heading("Your phones", R.drawable.ic_glass_phone)
+        val day = java.text.SimpleDateFormat("d MMM", java.util.Locale.US)
+        val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+        fun whenText(t: Long): String {
+            val today = day.format(java.util.Date())
+            val d = day.format(java.util.Date(t))
+            val yesterday = day.format(java.util.Date(System.currentTimeMillis() - 86_400_000L))
+            return when (d) { today -> "today ${time.format(java.util.Date(t))}"; yesterday -> "yesterday ${time.format(java.util.Date(t))}"; else -> "$d ${time.format(java.util.Date(t))}" }
+        }
+        for (p in phones) {
+            linkRow(
+                p.name,
+                "Joined ${day.format(java.util.Date(p.joined))} · used ${whenText(p.lastSeen)}" + (p.lastAction?.takeIf { it != "joined" }?.let { "\nLast: $it" } ?: ""),
+                if (p.connected) "●  Connected" else "●  Remembered",
+                "phone_${p.id}",
+                tint = if (p.connected) DiagUi.GREEN else themeColor(R.attr.appTextSecondary),
+                onClick = null,
+            )
+        }
+        addDivider(target ?: body)
+        (target ?: body).addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(10)) })
+        startAction("Add a phone", R.drawable.ic_glass_phone, "phone_add") { phonePanelCard() }
+        startAction("Remove a phone", R.drawable.ic_glass_trash, "phone_remove", danger = true) {
+            DiagUi.card(this, 560) { c ->
+                c.title("Remove a phone", R.drawable.ic_glass_trash, 0xFFF2A7A7.toInt())
+                c.line("It stops working at once. It can join again later with a new code.", 13f)
+                var first = true
+                for (p in PhonePanel.phones()) {
+                    c.pill(c.row(c.dp(if (first) 14 else 8)), "${p.name} · used ${whenText(p.lastSeen)}") {
+                        c.dialog.dismiss()
+                        PhonePanel.remove(p.id)
+                        reshow(if (PhonePanel.phones().isEmpty()) "phone_add" else "phone_remove")
+                    }
+                    first = false
+                }
+                c.pill(c.row(c.dp(8)), "Cancel") { c.dialog.dismiss() }.let { v -> v.post { v.requestFocus() } }
+            }
+        }
+        small("Phones stay connected for 30 days after they were last used. Same Wi-Fi as this TV; nothing goes through the internet.")
+        target = null
+    }
+
+    /** Add a phone: the code to scan. It closes by itself once a phone joins. */
     private fun phonePanelCard() {
         DiagUi.card(this, 760) { c ->
             fun build() {
                 c.clear()
-                c.title("Use Phone", R.drawable.ic_glass_phone, c.color(R.attr.appAccent))
+                c.title("Add a phone", R.drawable.ic_glass_phone, c.color(R.attr.appAccent))
                 c.line("Search, play and use your phone as a remote. Same Wi-Fi as this TV; nothing goes through the internet.", 13f)
                 val url = PhonePanel.joinAddress()
                 if (url != null) {
@@ -998,24 +1073,20 @@ class SettingsActivity : AppCompatActivity() {
                         setTextColor(c.color(R.attr.appText))
                     })
                 } else c.line("The phone panel needs the TV on your home Wi-Fi.", 15f, top = 12)
-                c.line("Your phones", 16f, top = 16)
-                val phones = PhonePanel.phones()
-                if (phones.isEmpty()) c.line("No phones yet.", 14f, top = 4)
-                val fmt = java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.US)
-                for (p in phones) {
-                    val r = c.row(c.dp(8))
-                    r.addView(TextView(this).apply {
-                        text = "${p.name} · last used ${fmt.format(java.util.Date(p.lastSeen))}"
-                        textSize = 15f
-                        setTextColor(c.color(R.attr.appText))
-                        layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    })
-                    c.pill(r, "Remove", weight = 0f) { PhonePanel.remove(p.id); build() }
-                }
                 val buttons = c.row(c.dp(16))
-                c.pill(buttons, "Done") { c.dialog.dismiss() }.also { it.post { it.requestFocus() } }
+                c.pill(buttons, "Close") { c.dialog.dismiss() }.also { it.post { it.requestFocus() } }
             }
             build()
+            // A phone joined: close and show it in the list.
+            val before = PhonePanel.phones().map { it.id }.toSet()
+            val watch = object : Runnable {
+                override fun run() {
+                    if (!c.dialog.isShowing) return
+                    if (PhonePanel.phones().any { it.id !in before }) { c.dialog.dismiss(); reshow("phone_add"); return }
+                    body.postDelayed(this, 1000)
+                }
+            }
+            body.postDelayed(watch, 1000)
         }
     }
 

@@ -475,6 +475,9 @@ class HomeActivity : AppCompatActivity() {
 
     private var drawer: View? = null
 
+    /** The phone remote's Menu button: opens or closes the quick drawer, whatever the TV's Menu key does. */
+    fun toggleDrawer() { if (drawer?.visibility == View.VISIBLE) closeDrawer() else openDrawer() }
+
     /** Menu key on Home opens the quick drawer; Back or Menu closes it. */
     private fun handleDrawerKey(event: android.view.KeyEvent): Boolean {
         val open = drawer?.visibility == View.VISIBLE

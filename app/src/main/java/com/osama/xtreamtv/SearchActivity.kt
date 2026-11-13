@@ -316,9 +316,23 @@ class SearchActivity : AppCompatActivity() {
             delay(300)
             found = withContext(Dispatchers.Default) {
                 // Names that start with the text first.
-                all.filter { it.name.contains(text, ignoreCase = true) }
+                val byType = all.filter { it.name.contains(text, ignoreCase = true) }
                     .sortedBy { !it.name.startsWith(text, ignoreCase = true) }
                     .groupBy { it.type }
+                // Copies of one movie or series are one card, as in Movies and Series (owner, 2026-11-13:
+                // search showed The Odyssey twice).
+                val facts = runCatching { TitleFilter.facts(this@SearchActivity) }.getOrNull()
+                val learned = Versions.learned(this@SearchActivity)
+                if (facts == null) byType else byType.mapValues { (type, list) ->
+                    if (type == ContentType.LIVE) return@mapValues list
+                    fun ref(s: StreamItem) = facts["${s.type.name}:${s.id}"]?.ref
+                    fun name(s: StreamItem) = runCatching { Versions.shownName(s) }.getOrDefault(s.name).lowercase()
+                    // A copy not matched yet joins a matched copy with exactly the same name (only when
+                    // that name belongs to one title).
+                    val byName = list.mapNotNull { s -> ref(s)?.let { name(s) to it } }.groupBy({ it.first }, { it.second })
+                        .mapValues { (_, refs) -> refs.distinct().singleOrNull() }
+                    Versions.group(list, { s -> ref(s) ?: byName[name(s)] }, learned)
+                }
             }
             // Actors and directors whose name has a word starting with the text (from the notebook, on the TV).
             people = withContext(Dispatchers.IO) {

@@ -92,13 +92,16 @@ object RatingsUi {
             status.text = text
             status.setTextColor(tint)
             status.visibility = View.VISIBLE
+            // The phone shows the TV's answer too (owner, 2026-11-13).
+            drop?.answer = (when (tint) { DiagUi.GREEN -> true; DiagUi.RED -> false; else -> null }) to text
         }
 
         fun tryKey(candidate: String, from: String) {
             if (done) return
             checkKey(activity, candidate, from, ::say, kind) {
                 done = true
-                drop?.stop()
+                // A moment longer, so the phone page shows the tick.
+                drop?.let { d -> main.postDelayed({ d.stop() }, 12_000) }
                 c.body.findViewWithTag<View>("qr_area")?.visibility = View.GONE
                 c.body.findViewWithTag<View>("type_area")?.visibility = View.GONE
                 val buttons = c.body.findViewWithTag<LinearLayout>("buttons")
@@ -274,6 +277,8 @@ object RatingsUi {
      */
     private class KeyDrop(private val token: String, private val kind: Kind, private val onKey: (String) -> Unit) {
         @Volatile private var socket: ServerSocket? = null
+        /** The TV's answer for the phone page: null while testing, then a tick or a cross. */
+        @Volatile var answer: Pair<Boolean?, String>? = null
         private val endsAt = SystemClock.elapsedRealtime() + PHONE_MS
 
         fun start(): Boolean {
@@ -309,7 +314,8 @@ object RatingsUi {
             val method = request.substringBefore(' ')
             val path = request.split(' ').getOrNull(1)?.substringBefore('?') ?: ""
             val (code, page) = when {
-                path != "/k/$token" -> "404 Not Found" to page("Not found", "<p>This address isn't open. On the TV, open Add or change key for a new code.</p>")
+                path == "/k/$token/status" -> "200 OK" to status()
+                path != "/k/$token" -> "404 Not Found" to PhonePage.page("Not found", "<p>This address isn't open. On the TV, open Add or change key for a new code.</p>")
                 method == "POST" -> {
                     val body = CharArray(length.coerceIn(0, 4096)).let { buf ->
                         var read = 0
@@ -323,7 +329,9 @@ object RatingsUi {
                     val key = body.split('&').firstOrNull { it.startsWith("key=") }?.let { URLDecoder.decode(it.removePrefix("key="), "UTF-8").trim() } ?: ""
                     if (kind.looksLike(key)) {
                         onKey(key)
-                        "200 OK" to page("Sent", "<div class=\"big ok\">&#10003;</div><h1>Sent</h1><p>Your TV is testing the key now and shows the result. You can close this page.</p>")
+                        "200 OK" to PhonePage.page("Sent", "<div id=s>${status()}</div><p class=small>The TV's answer shows here.</p>",
+                            "const t=setInterval(()=>fetch(location.pathname.replace(/[/]?$/,'/status')).then(r=>r.text()).then(h=>{s.innerHTML=h;if(h.indexOf('res wait')<0)clearInterval(t)}).catch(()=>{}),1500)",
+                            symbol = "key", heading = "Sent to your TV")
                     } else {
                         "200 OK" to form("That doesn't look like a key. Copy the whole key and try again.")
                     }
@@ -338,22 +346,24 @@ object RatingsUi {
             }
         }
 
-        private fun form(problem: String?) = page(
+        private fun status(): String {
+            val a = answer
+            return when (a?.first) {
+                true -> PhonePage.result(true, PhonePage.esc(a.second))
+                false -> PhonePage.result(false, PhonePage.esc(a.second)) + "<button onclick=\"location.href=location.pathname.replace('/status','')\">Try again</button>"
+                null -> "<div class='res wait'>${PhonePage.icon("key")}<span>${PhonePage.esc(a?.second ?: "The TV is testing the key…")}</span></div>"
+            }
+        }
+
+        private fun form(problem: String?) = PhonePage.page(
             "Send your key",
-            "<h1>Send your ${kind.name} key to the TV</h1><p>Paste the key from <b>${kind.where.replace("→", "&rarr;")}</b>.</p>" +
-                (problem?.let { "<p class=bad>$it</p>" } ?: "") +
-                "<form method=post><input name=key placeholder=\"Paste the key here\" autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
-                "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. The key goes straight to your TV.</p>",
+            "<p>Paste the key from <b>${kind.where.replace("→", "&rarr;")}</b>. It stays on your TV.</p>" +
+                (problem?.let { PhonePage.result(false, it) } ?: "") +
+                "<form method=post class=card><label>${kind.name} key</label><input name=key placeholder=\"Paste the key here\" autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
+                "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. Nothing goes through the internet.</p>",
+            symbol = "key", heading = "${kind.name} key",
         )
 
-        private fun page(title: String, content: String) = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1"><title>$title · Xtream TV</title><style>
-body{font-family:system-ui,-apple-system,Roboto,sans-serif;background:#f6f7f9;color:#16191d;margin:0;padding:24px 18px;max-width:460px;margin:auto}
-.top{font-size:13px;color:#6b7480}h1{font-size:21px;font-weight:600;margin:8px 0}p{font-size:15px;line-height:1.5;color:#3d4550}
-input{box-sizing:border-box;width:100%;font-size:17px;padding:14px;border:1px solid #c5ccd4;border-radius:12px;margin:8px 0 12px}
-button{width:100%;font-size:17px;font-weight:600;padding:14px;border:0;border-radius:12px;background:#2f6fd6;color:#fff}
-.small{font-size:13px;color:#6b7480}.bad{color:#b3261e}.big{font-size:48px;text-align:center;margin-top:30px}.ok{color:#1a7f4b}
-</style></head><body><div class=top>Xtream TV &middot; on your TV</div>$content</body></html>"""
     }
 
     // ---- How it works ----
