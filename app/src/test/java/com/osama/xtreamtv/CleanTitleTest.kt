@@ -22,6 +22,21 @@ class CleanTitleTest {
     }
 
     @Test
+    fun versionTagGoes() {
+        assertEquals("The Odyssey", Versions.clean("The Odyssey v.3", null))
+        assertEquals("The Odyssey", Versions.clean("The Odyssey V2", null))
+        assertEquals("V for Vendetta", Versions.clean("V for Vendetta", null))
+    }
+
+    @Test
+    fun cutShortNamesUseTheFullOne() {
+        assertEquals(true, Versions.cutShort("The Lord of the Rings", "The Lord of the Rings: The Two Towers"))
+        assertEquals(false, Versions.cutShort("The Lord of the Rings: The Two Towers", "The Lord of the Rings: The Two Towers"))
+        assertEquals(false, Versions.cutShort("Dune", "Dune"))
+        assertEquals(false, Versions.cutShort("It", "It Follows"))
+    }
+
+    @Test
     fun yearUnknownOnlyBracketsGo() {
         assertEquals("Memento", Versions.clean("Memento (2000)", null))
         assertEquals("Wonder Woman 1984", Versions.clean("Wonder Woman 1984", null))

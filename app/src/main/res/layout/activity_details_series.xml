@@ -32,7 +32,7 @@
         android:layout_height="1dp"
         android:visibility="gone" />
 
-    <LinearLayout
+    <com.osama.xtreamtv.SeriesColumn
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
@@ -43,8 +43,8 @@
         <!-- Scrolls when large sizes make it taller than the space above the seasons. -->
         <com.osama.xtreamtv.FocusScrollView
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_marginRight="44dp"
+            android:layout_height="wrap_content"
             android:scrollbars="none">
 
         <LinearLayout
@@ -221,5 +221,5 @@
                 android:clipToPadding="false"
                 android:paddingRight="44dp" />
         </LinearLayout>
-    </LinearLayout>
+    </com.osama.xtreamtv.SeriesColumn>
 </FrameLayout>

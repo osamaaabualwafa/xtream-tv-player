@@ -1257,7 +1257,7 @@ object Ratings {
     private val RX_BRACKET_YEAR = Regex("[(\\[]((?:19|20)\\d{2})[)\\]]")
     private val RX_BRACKETS = Regex("[(\\[][^)\\]]*[)\\]]")
     private val RX_FRONT_TAG = Regex("^\\s*\\|?\\s*(?:[A-Z]{2,3}|4K|UHD|FHD|HD)\\s*[-|]\\s*")
-    private val RX_QUALITY_TAGS = Regex("\\b(4K|UHD|FHD|HD|SD|HEVC|H265|MULTI[- ]?SUB|VOSTFR|DUBBED|SUBBED)\\b", RegexOption.IGNORE_CASE)
+    private val RX_QUALITY_TAGS = Regex("\\b(4K|UHD|FHD|HD|SD|HEVC|H265|MULTI[- ]?SUB|VOSTFR|DUBBED|SUBBED|V\\.?[0-9]{1,2})\\b", RegexOption.IGNORE_CASE)
     private val RX_ARABIC_TAGS = Regex("(مدبلج|مدبلجة|مترجم|مترجمة)")
     private val RX_ARABIC_WORDS = Regex("[\\u0600-\\u06FF]+")
     private val RX_NOT_LETTERS = Regex("[^\\p{L}\\p{N}]+")

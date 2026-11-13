@@ -93,22 +93,8 @@ class DetailsActivity : AppCompatActivity() {
         posterUrl = item.image
         Appearance.apply(this)
         setContentView(if (item.type == ContentType.SERIES) R.layout.activity_details_series else R.layout.activity_details)
-        // Series: with the highlight on the seasons or episodes, the top part scrolls to its end, so the
-        // buttons sit whole above the season tabs instead of half under them (owner, 2026-11-13).
-        if (item.type == ContentType.SERIES) window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
-            val card = findViewById<View?>(R.id.episodes_card) ?: return@addOnGlobalFocusChangeListener
-            if (now == null || !isInside(now, card)) return@addOnGlobalFocusChangeListener
-            (findViewById<View>(R.id.info).parent as? android.widget.ScrollView)?.let { sv -> sv.post { sv.smoothScrollTo(0, sv.getChildAt(0).height) } }
-        }
-        // Rows that arrive later (names, chips on two rows) make the top part taller: scrolled to its end
-        // again while the highlight is down on the seasons or episodes.
-        if (item.type == ContentType.SERIES) findViewById<View>(R.id.info).addOnLayoutChangeListener { v, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top == oldBottom - oldTop) return@addOnLayoutChangeListener
-            val card = findViewById<View?>(R.id.episodes_card) ?: return@addOnLayoutChangeListener
-            val now = currentFocus ?: return@addOnLayoutChangeListener
-            if (!isInside(now, card)) return@addOnLayoutChangeListener
-            (v.parent as? android.widget.ScrollView)?.let { sv -> sv.post { sv.scrollTo(0, v.height) } }
-        }
+        // Series: the top part, the seasons and the episodes share the screen by one rule (fitSeriesTop).
+        if (item.type == ContentType.SERIES) fitSeriesTop()
 
         poster = findViewById(R.id.poster)
         title = findViewById(R.id.title)
@@ -234,8 +220,8 @@ class DetailsActivity : AppCompatActivity() {
                     credits.visibility != View.GONE -> credits.visibility = View.GONE
                     // The names keep to one line each before the description gives way.
                     trimNames() -> Unit
-                    plot.visibility != View.GONE && plot.maxLines > 1 -> plot.maxLines = 1
-                    plot.visibility != View.GONE -> plot.visibility = View.GONE
+                    // The story keeps its lines (owner, 2026-11-13): the top part scrolls instead, and
+                    // scrolls to its end while the highlight is on the seasons or episodes.
                 }
             }
         }
@@ -402,6 +388,8 @@ class DetailsActivity : AppCompatActivity() {
             val found = Ratings.lookup(title, onScreen = true)
             scores = found
             if (found != null) Diag.ready("Details", "scores", openedAt)
+            // Matched just now: the page can complete itself from TMDB (it couldn't before the match).
+            if (found != null && pageOfficial == null) completeNow()
             setMeta(metaValues)
             // No trailer from the provider: MDBList's, when it has one (asked once more for titles
             // saved before trailers were kept).
@@ -691,6 +679,73 @@ class DetailsActivity : AppCompatActivity() {
         row.post(attempt)
     }
 
+    /**
+     * Series page (owner, 2026-11-13): the seasons sit right under the buttons with the same gap on every
+     * series, the episodes always show whole, and the buttons are never under the season tabs.
+     * One rule, worked out again whenever anything changes (cards loading, names arriving, the highlight
+     * moving): the seasons and episodes get their full height; the top part takes what is left. When
+     * the top part is taller than that, the names keep to one row first; if it is still too tall it
+     * scrolls, to its end while the highlight is on the seasons or episodes and to the top otherwise.
+     */
+    private fun fitSeriesTop() {
+        val info = findViewById<View>(R.id.info)
+        val sv = info.parent as? android.widget.ScrollView ?: return
+        val root = sv.parent as? View ?: return
+        val card = findViewById<View>(R.id.episodes_card)
+        // A little more room between the buttons and the season tabs (the column, SeriesColumn,
+        // measures the seasons and episodes first; the top part gets what is left).
+        (card.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let { it.topMargin = (12 * resources.displayMetrics.density).toInt(); card.layoutParams = it }
+        val fit = object : Runnable {
+            override fun run() {
+                if (isFinishing || sv.height == 0) return
+                val content = info.height + sv.paddingTop + sv.paddingBottom
+                val capped = content > sv.height + 1
+                // Too tall: the names keep to one row each first (and the old credits line goes).
+                if (capped && card.visibility == View.VISIBLE) {
+                    val credits = findViewById<TextView>(R.id.credits)
+                    if (credits.visibility != View.GONE) { credits.visibility = View.GONE; return }
+                    if (trimNames()) return
+                }
+                // Room left under the episodes: the cards grow into it (up to 1.6 times); too tall: back to normal first.
+                val d = resources.displayMetrics.density
+                // Grow until the space under the episodes equals the space above the title (owner, 2026-11-13).
+                val spare = (root.height - root.paddingTop) - card.bottom
+                val newScale = when {
+                    capped && episodeScale > 1f -> 1f
+                    // Only once the episodes are there (before, the empty row left the whole screen "spare").
+                    // The picture takes exactly the difference (both ways: an overshoot comes back down).
+                    !capped && card.visibility == View.VISIBLE && (findViewById<RecyclerView>(R.id.episodes)?.childCount ?: 0) > 0 && kotlin.math.abs(spare) > 4 * d ->
+                        ((105 * d * episodeScale + spare) / (105 * d)).coerceIn(1f, 1.6f)
+                    else -> episodeScale
+                }
+                if (kotlin.math.abs(newScale - episodeScale) > 0.01f) {
+                    episodeScale = newScale
+                    findViewById<RecyclerView>(R.id.episodes)?.let { r -> for (i in 0 until r.childCount) scaleEpisodeCard(r.getChildAt(i)); r.requestLayout() }
+                    root.postDelayed(this, 300)
+                    return
+                }
+                // Still too tall: it scrolls, to its end while the highlight is on the seasons or episodes.
+                val end = (content - sv.height).coerceAtLeast(0)
+                val down = currentFocus?.let { isInside(it, card) } == true
+                val target = if (!capped) 0 else if (down) end else sv.scrollY.coerceAtMost(end)
+                if (sv.scrollY != target) sv.scrollTo(0, target)
+            }
+        }
+        val again = View.OnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) { root.removeCallbacks(fit); root.post(fit) }
+        }
+        info.addOnLayoutChangeListener(again)
+        sv.addOnLayoutChangeListener(again)
+        card.addOnLayoutChangeListener(again)
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, _ -> root.removeCallbacks(fit); root.post(fit) }
+        // The episodes arrive a moment after the page: worked out again then too.
+        findViewById<RecyclerView>(R.id.episodes)?.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
+            override fun onChildViewAttachedToWindow(view: View) { root.removeCallbacks(fit); root.postDelayed(fit, 150) }
+            override fun onChildViewDetachedFromWindow(view: View) {}
+        })
+        for (ms in longArrayOf(800, 2000, 4000)) root.postDelayed(fit, ms)
+    }
+
     /** A row's height with one of its cards shown in full (null before a card is made). */
     private fun fullHeight(row: RecyclerView): Int? {
         val card = row.getChildAt(0) ?: return null
@@ -907,10 +962,16 @@ class DetailsActivity : AppCompatActivity() {
         }
     }
 
-    /** TMDB's name instead of an Arabic provider name, for a show that isn't Arabic. */
+    /** TMDB's answer for this page (its name wins over the provider's when the provider's arrives later). */
+    private var pageOfficial: Tmdb.Found? = null
+
+    /** TMDB's name instead of an Arabic provider name (for a show that isn't Arabic) or a name cut short. */
     private fun pageTitle(found: Tmdb.Found) {
+        pageOfficial = found
         val name = found.name ?: return
-        if (found.lang == "ar" || !Versions.hasArabic(title.text.toString()) || Versions.hasArabic(name)) return
+        val shown = title.text.toString()
+        val arabic = found.lang != "ar" && Versions.hasArabic(shown) && !Versions.hasArabic(name)
+        if (!arabic && !Versions.cutShort(shown, name)) return
         title.text = Versions.clean(name, found.year.takeIf { it > 0 }?.toString())
     }
 
@@ -950,7 +1011,7 @@ class DetailsActivity : AppCompatActivity() {
             val saved = showSaved()
             try {
                 val info = api.vodInfo(item.id)
-                info.name?.let { title.text = Versions.shownName(item.copy(name = it, year = info.releaseDate ?: item.year)) }
+                info.name?.let { title.text = Versions.shownName(item.copy(name = it, year = info.releaseDate ?: item.year)); pageOfficial?.let(::pageTitle) }
                 // The provider says the picture size: the quality chip needs no playing first.
                 if (info.height > 0) noteQuality(item.id, info.height)
                 if (info.ext != null) ext = info.ext
@@ -1155,7 +1216,20 @@ class DetailsActivity : AppCompatActivity() {
 
     private fun episodeKey(ep: Episode) = "ep_${ep.id}"
 
+    /** Episode cards grow (width and picture together) to fill the space under them (owner, 2026-11-13). */
+    private var episodeScale = 1f
+
+    private fun scaleEpisodeCard(card: View) {
+        val d = resources.displayMetrics.density
+        val pic = (card as? android.view.ViewGroup)?.getChildAt(0) ?: return
+        val w = (200 * d * episodeScale).toInt()
+        val h = (105 * d * episodeScale).toInt()
+        if (card.layoutParams.width != w) card.layoutParams = card.layoutParams.apply { width = w }
+        if (pic.layoutParams.height != h) pic.layoutParams = pic.layoutParams.apply { height = h }
+    }
+
     private fun bindEpisode(vh: TextAdapter.VH, ep: Episode) {
+        scaleEpisodeCard(vh.itemView)
         vh.itemView.alpha = if (ep.id == COMING_ID) 0.55f else 1f
         if (ep.id == COMING_ID) {
             val air = extras?.next?.airAt ?: 0L

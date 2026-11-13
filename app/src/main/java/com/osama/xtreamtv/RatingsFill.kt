@@ -132,6 +132,7 @@ object RatingsFill {
     private var fails = 0
     private var retryAt = 0L
     private var stopped = false
+    private var stoppedAt = 0L
 
     /** Held for each step, and by the library backup, restore, clear and undo: they never overlap. */
     internal val gate = Any()
@@ -378,6 +379,12 @@ object RatingsFill {
         }
         val quick = !playing && Tmdb.usable && (idQueue.isNotEmpty() || detailQueue.isNotEmpty())
         if (now - lastStepAt < (if (playing) PLAYING_STEP_MS else if (quick) TMDB_STEP_MS else IDLE_STEP_MS)) return
+        // Stopped after repeated failures: tried again once the internet works and 15 minutes have passed
+        // (TV report 2026-11-13: it stayed stopped from 04:14 until the app was closed, internet back or not).
+        if (stopped && online() && SystemClock.uptimeMillis() - stoppedAt > 15 * 60_000L) {
+            stopped = false; fails = 0; retryAt = 0L
+            note("fill: trying again (the internet works again)")
+        }
         if (stopped) { state = State.STOPPED; endIdleRun("too many failed requests"); return }
         if (now < retryAt) { state = State.OFFLINE; return }
 
@@ -702,16 +709,34 @@ object RatingsFill {
         }
     }
 
+    /** The TV has a working internet connection now. */
+    private fun online(): Boolean = runCatching {
+        val cm = app.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        if (android.os.Build.VERSION.SDK_INT >= 23) cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        else @Suppress("DEPRECATION") (cm.activeNetworkInfo?.isConnected == true)
+    }.getOrDefault(false)
+
     /** Counts only: never ids, titles, the key or addresses. */
     private fun note(text: String) {
         Diag.log("ratings", text)
         if (BuildConfig.DEBUG) android.util.Log.d("RatingsFill", text)
     }
 
-    /** A request failed: wait 30 s, then 2 min, then 10 min; after that, until the app starts again. */
+    /**
+     * A request failed: wait 30 s, then 2 min, then 10 min; after that, until the app starts again.
+     * With no internet at all (the TV's report, 2026-11-13: the connection dropped at 04:02 with the
+     * screen off and filling stood still until noon), it keeps checking every 20 minutes instead:
+     * nothing reaches the services while offline, so the daily allowance is not used.
+     */
     private fun failed() {
         fails++
-        if (fails > RETRY_MS.size) { stopped = true; state = State.STOPPED; return }
+        if (fails > RETRY_MS.size && !online()) {
+            retryAt = SystemClock.uptimeMillis() + 20 * 60_000L
+            state = State.OFFLINE
+            if (fails == RETRY_MS.size + 1) note("fill: no internet, checking again every 20 min")
+            return
+        }
+        if (fails > RETRY_MS.size) { stopped = true; stoppedAt = SystemClock.uptimeMillis(); state = State.STOPPED; return }
         retryAt = SystemClock.uptimeMillis() + RETRY_MS[fails - 1]
         state = State.OFFLINE
     }

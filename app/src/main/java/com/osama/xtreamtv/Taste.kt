@@ -30,7 +30,10 @@ object Taste {
     fun providerRef(s: StreamItem): String? = s.tmdb?.trim()?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) && it != "0" }
         ?.let { "tmdb/${if (s.type == ContentType.MOVIE) "movie" else "show"}/$it" }
 
-    internal fun refOf(d: RatingsDb.TasteData?, s: StreamItem): String? = d?.refOf?.get("${s.type.name}:${s.id}") ?: providerRef(s)
+    internal fun refOf(d: RatingsDb.TasteData?, s: StreamItem): String? = d?.refOf?.get("${s.type.name}:${s.id}")
+        // Matched moments ago (in memory, not yet written to the notebook), else the provider's own id.
+        ?: runCatching { Ratings.matchOf(s.type, s.ratingId ?: s.id) }.getOrNull()?.takeIf { it.startsWith("tmdb/") || it.startsWith("imdb/") }
+        ?: providerRef(s)
 
     /** A title being compared against: its facts as sets, made once. */
     private class Source(val f: RatingsDb.WorkFacts) {

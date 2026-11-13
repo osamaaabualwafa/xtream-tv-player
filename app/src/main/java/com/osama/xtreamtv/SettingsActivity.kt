@@ -1287,8 +1287,7 @@ class SettingsActivity : AppCompatActivity() {
         sceneSwatches()
         labelRow("Glass style")
         buttonRow(Appearance.GLASS_STYLE_NAMES, prefs.glassStyle, "glass_style") { prefs.glassStyle = it }
-        option("Interface size", Look.UI_SIZES, { prefs.uiSize }, { prefs.uiSize = it; recreate() })
-        option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
+        // Interface size and Text size: kept in the app's data, not offered to the user (owner, 2026-11-13).
 
         cardHost = right
         heading("Selected item", R.drawable.ic_glass_focus)
@@ -1583,8 +1582,7 @@ class SettingsActivity : AppCompatActivity() {
         if (prefs.paletteIndex == 0 && prefs.themeIndex == 0) {
             option("Background", Look.BACKGROUND_NAMES.mapIndexed { i, n -> i to n }, { prefs.backgroundStyle }, { prefs.backgroundStyle = it; recreate() })
         }
-        option("Interface size", Look.UI_SIZES, { prefs.uiSize }, { prefs.uiSize = it; recreate() })
-        option("Text size", Look.TEXT_SIZE_NAMES.mapIndexed { i, n -> i to n }, { prefs.textSize }, { prefs.textSize = it; recreate() })
+        // Interface size and Text size: kept in the app's data, not offered to the user (owner, 2026-11-13).
         heading("Effects")
         option("Background follows the poster", listOf(true to "On", false to "Off"), { prefs.backdropFollows }, { prefs.backdropFollows = it })
         option("Highlighted poster", listOf(true to "Rises with a glow", false to "Simple"), { prefs.posterGlow }, { prefs.posterGlow = it })

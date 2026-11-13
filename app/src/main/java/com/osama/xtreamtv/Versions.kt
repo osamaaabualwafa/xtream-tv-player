@@ -32,7 +32,7 @@ object Versions {
     private val DUB = Regex("(?i)(مدبلج|dubbed|(?<![a-z])dub(?![a-z]))")
     private val SUB = Regex("(?i)(مترجم|subbed|(?<![a-z])sub(?![a-z]))")
     private val MULTI = Regex("(?i)(?<![a-z])multi(?![a-z])")
-    private val OTHER = Regex("(?i)(?<![a-z0-9])(hevc|h\\.?265|x265|h\\.?264|x264|3d|hdr|dv)(?![a-z0-9])")
+    private val OTHER = Regex("(?i)(?<![a-z0-9])(hevc|h\\.?265|x265|h\\.?264|x264|3d|hdr|dv|v\\.?[0-9]{1,2})(?![a-z0-9])")
     private val PREFIX = Regex("^\\s*([A-Za-z]{2,3}|[\\u0600-\\u06FF]{2,})\\s*[-|:]\\s+")
 
     fun copy(item: StreamItem): Copy {
@@ -83,9 +83,20 @@ object Versions {
     fun shownName(item: StreamItem): String {
         if (item.type == ContentType.LIVE) return item.name
         val year = item.year ?: runCatching { Ratings.knownYear(item.type, item.ratingId ?: item.id)?.toString() }.getOrNull()
-        // An Arabic provider name for a show that isn't Arabic: TMDB's name (owner, 2026-11-13).
-        if (hasArabic(item.name)) runCatching { Ratings.tmdbName(item.type, item.ratingId ?: item.id) }.getOrNull()?.let { return clean(it, year) }
-        return clean(item.name, year)
+        val own = clean(item.name, year)
+        val official = runCatching { Ratings.tmdbName(item.type, item.ratingId ?: item.id) }.getOrNull()
+        // TMDB's name for an Arabic provider name of a show that isn't Arabic, or for a name the provider
+        // cut short ("The Lord of the Rings" for The Rings of Power) (owner, 2026-11-13).
+        if (official != null && (hasArabic(item.name) || cutShort(own, official))) return clean(official, year)
+        return own
+    }
+
+    /** [own] is the start of [official], which says more ("The Lord of the Rings" -> "…: The Two Towers"). */
+    fun cutShort(own: String, official: String): Boolean {
+        fun plain(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+        val a = plain(own)
+        val b = plain(official)
+        return a.length >= 3 && b.length > a.length + 2 && b.startsWith("$a ")
     }
 
     fun hasArabic(s: String) = s.any { it in '\u0600'..'\u06FF' }

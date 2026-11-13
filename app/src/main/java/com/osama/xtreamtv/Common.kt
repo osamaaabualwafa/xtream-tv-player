@@ -153,7 +153,9 @@ class Prefs(context: Context) {
         if (!global.contains("buffer_size")) e.putInt("buffer_size", 1)
         if (!global.contains("palette")) e.putInt("palette", 0)
         if (!global.contains("background_style")) e.putInt("background_style", 0)
-        if (!global.contains("ui_size")) e.putInt("ui_size", 0)
+        // New installs start at the small interface with normal text (owner, 2026-11-13); the sizes stay in
+        // the app's data but are no longer offered in Settings.
+        if (!global.contains("ui_size")) e.putInt("ui_size", 3)
         if (!global.contains("text_size")) e.putInt("text_size", 1)
         if (!global.contains("backdrop_follows")) e.putBoolean("backdrop_follows", false)
         if (!global.contains("poster_glow")) e.putBoolean("poster_glow", !Look.isLightDevice(app))
@@ -424,7 +426,7 @@ class Prefs(context: Context) {
 
     /** Interface size: 0 compact, 1 normal, 2 large, 3 small (everything, not just text). */
     var uiSize: Int
-        get() = global.getInt("ui_size", 0)
+        get() = global.getInt("ui_size", 3)
         set(value) = global.edit().putInt("ui_size", value).apply()
 
     /** 0 small, 1 normal, 2 large, 3 extra large. */
