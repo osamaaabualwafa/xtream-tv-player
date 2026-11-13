@@ -721,8 +721,10 @@ class SettingsActivity : AppCompatActivity() {
             }
             buttons.addView(b)
         }
-        button("Back up", R.drawable.ic_glass_download, "lib_backup") { backUpLibrary() }
-        button("Restore", R.drawable.ic_glass_file, "lib_restore") { pickLibrary() }
+        button("Back up", R.drawable.ic_glass_download, "lib_backup") { BackupUi.libraryBackupMenu(this) { backUpLibrary() } }
+        button("Restore", R.drawable.ic_glass_file, "lib_restore") {
+            BackupUi.libraryRestoreMenu(this, { pickLibrary() }) { bytes -> restoreLibrary { tmp -> tmp.writeBytes(bytes) } }
+        }
         if (Library.hasUndo(this)) button("Undo", R.drawable.ic_glass_refresh, "lib_undo") {
             confirm("Undo the last change?", "The library data goes back to how it was before the last Restore or Clear.", "Undo") {
                 libraryWork("Putting the library data back", false) { _, _ -> if (Library.undo(this)) "Last change undone" else "Nothing to undo" }

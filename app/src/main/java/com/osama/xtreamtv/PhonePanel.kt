@@ -273,7 +273,10 @@ object PhonePanel {
                 }
                 else -> DetailsActivity.intent(ctx, item)
             }
-            ctx.startActivity(intent)
+            // A movie played from the phone opens its page underneath, so Back from the player lands on the
+            // movie's page, the same way as choosing it with the remote (owner, 2026-11-13: Back jumped to Home).
+            if (type == ContentType.MOVIE && now) ctx.startActivities(arrayOf(DetailsActivity.intent(ctx, item), intent))
+            else ctx.startActivity(intent)
             Diag.log("phone", "${if (now) "played" else "opened"} from the phone${Diag.title(item.name)}")
         }
         return true

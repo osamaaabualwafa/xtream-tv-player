@@ -29,7 +29,9 @@ class T02_LoginAndPlaylistsTest : QaTest() {
         Qa.launchApp()
         Qa.expect(LoginActivity::class.java, "Add playlist screen")
         Qa.shot("first_start", "First start: no playlist yet")
-        assertTrue("Name field is highlighted first", Qa.focusedDescription().startsWith("name"))
+        // Use Phone comes first since 2.5.0 (approved: typing with the remote is the slow way); else the Name field.
+        val first = Qa.focusedDescription()
+        assertTrue("Use Phone or the Name field is highlighted first (was: $first)", first.startsWith("name") || first.contains("Use Phone"))
         Qa.back()
         Qa.expect(PlaylistsActivity::class.java, "playlist chooser after Back")
         Qa.shot("chooser_empty", "Back from Add playlist: Restore is offered")

@@ -83,6 +83,12 @@
             android:text="Restore" />
 
         <TextView
+            android:id="@+id/undo_restore"
+            style="@style/GlassPill"
+            android:text="Undo restore"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/edit"
             style="@style/GlassPill"
             android:text="Edit" />

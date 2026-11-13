@@ -55,19 +55,21 @@ class PlaylistsActivity : AppCompatActivity() {
     private var lastFocused: Playlist? = null
 
     // Backup files go through the system file picker when the TV has one.
-    private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) {
-            writeBackup { text ->
-                contentResolver.openOutputStream(uri)?.use { out -> out.write(text.toByteArray()) } ?: throw IOException("Can't write there")
-            }
-        }
+    // Backup files go through the system file picker when the TV has one.
+    private var pendingSave: Pair<ByteArray, (String?) -> Unit>? = null
+    private var pendingOpen: ((ByteArray?) -> Unit)? = null
+    private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val (bytes, done) = pendingSave ?: return@registerForActivityResult
+        pendingSave = null
+        if (uri == null) return@registerForActivityResult
+        done(runCatching { contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: throw IOException("Can't write there"); "" }.getOrNull())
     }
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            confirmRestore {
-                contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: throw IOException("Can't read that file")
-            }
-        }
+        val done = pendingOpen ?: return@registerForActivityResult
+        pendingOpen = null
+        if (uri == null) { done(null); return@registerForActivityResult }
+        val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        if (bytes == null) showMessage("Restore failed: can't read that file") else done(bytes)
     }
     private var autoOpenChecked = false
 
@@ -100,6 +102,7 @@ class PlaylistsActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.backup).setOnClickListener { backUp() }
         findViewById<View>(R.id.restore).setOnClickListener { restore() }
+        findViewById<View>(R.id.undo_restore).setOnClickListener { BackupUi.confirmUndo(this) { afterRestore() } }
         findViewById<View>(R.id.edit).setOnClickListener {
             val playlists = prefs.playlists()
             (lastFocused ?: playlists.firstOrNull { it.id == prefs.activeId } ?: playlists.firstOrNull())?.let { showOptions(it) }
@@ -155,6 +158,7 @@ class PlaylistsActivity : AppCompatActivity() {
         val hasPlaylists = playlists.isNotEmpty()
         findViewById<View>(R.id.backup).visibility = if (hasPlaylists) View.VISIBLE else View.GONE
         findViewById<View>(R.id.edit).visibility = if (hasPlaylists) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.undo_restore).visibility = if (Backup.hasUndo(this)) View.VISIBLE else View.GONE
         if (lastFocused?.let { f -> playlists.none { it.id == f.id } } == true) lastFocused = null
         // Focus the playlist used last time.
         val focusIndex = playlists.indexOfFirst { it.id == prefs.activeId }.coerceAtLeast(0)
@@ -225,65 +229,54 @@ class PlaylistsActivity : AppCompatActivity() {
         }
     }
 
+    /** Backup (Package 6): this TV / USB, another TV, or the phone; locked with a code or password. */
     private fun backUp() {
         if (busy) return
-        AlertDialog.Builder(this)
-            .setTitle("Back up playlists and settings")
-            .setMessage("The backup file includes your playlist passwords. Keep it somewhere private.")
-            .setPositiveButton("Continue") { _, _ ->
-                if (hasFilePicker(Intent.ACTION_CREATE_DOCUMENT)) {
-                    try {
-                        createBackup.launch(Backup.FILE_NAME)
-                        return@setPositiveButton
-                    } catch (e: ActivityNotFoundException) {
-                        // fall through to the app folder
-                    }
+        BackupUi.backupMenu(this) { bytes, done ->
+            if (hasFilePicker(Intent.ACTION_CREATE_DOCUMENT)) {
+                try {
+                    pendingSave = bytes to done
+                    createBackup.launch(Backup.fileName())
+                    return@backupMenu
+                } catch (e: ActivityNotFoundException) {
+                    pendingSave = null
                 }
-                // No file picker on this TV: save in the app's own folder.
-                val file = Backup.fallbackFile(this)
-                writeBackup(file.absolutePath) { file.writeText(it) }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    /** [where]: shown to the user when the file went into the app folder (no picker). */
-    private fun writeBackup(where: String? = null, write: (String) -> Unit) {
-        try {
-            write(Backup.export(this))
-            AlertDialog.Builder(this)
-                .setTitle("Backup saved")
-                .setMessage(if (where != null) "Saved to:\n$where\n\nCopy this file to restore on another TV." else "Your backup file is saved.")
-                .setPositiveButton("OK", null)
-                .show()
-        } catch (e: Exception) {
-            showMessage("Backup failed: ${e.message ?: e.javaClass.simpleName}")
+            // No file picker on this TV: save in the app's own folder.
+            val file = Backup.fallbackFile(this)
+            done(runCatching { file.writeBytes(bytes); file.absolutePath }.getOrNull())
         }
     }
 
     private fun restore() {
         if (busy) return
-        if (hasFilePicker(Intent.ACTION_OPEN_DOCUMENT)) {
-            try {
-                openBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"))
-                return
-            } catch (e: ActivityNotFoundException) {
-                // fall through to the app folder
+        BackupUi.restoreMenu(this, { done ->
+            if (hasFilePicker(Intent.ACTION_OPEN_DOCUMENT)) {
+                try {
+                    pendingOpen = done
+                    openBackup.launch(arrayOf("*/*"))
+                    return@restoreMenu
+                } catch (e: ActivityNotFoundException) {
+                    pendingOpen = null
+                }
             }
-        }
-        run {
-            // No file picker on this TV: look in the app's own folder.
-            val file = Backup.fallbackFile(this)
-            if (file.exists()) {
-                confirmRestore { file.readText() }
-            } else {
+            // No file picker on this TV: the newest backup in the app's own folder.
+            val file = Backup.newestFallback(this)
+            if (file != null) done(file.readBytes()) else {
                 AlertDialog.Builder(this)
                     .setTitle("No backup found")
-                    .setMessage("This TV has no file picker. Put the backup file here, then choose Restore again:\n${file.absolutePath}")
+                    .setMessage("This TV has no file picker. Put the backup file here, then choose Restore again:\n${Backup.fallbackFile(this).parent}")
                     .setPositiveButton("OK", null)
                     .show()
             }
-        }
+        }) { afterRestore() }
+    }
+
+    /** After a restore or an undo: the list again, and the Undo button when there is something to undo. */
+    private fun afterRestore() {
+        Session.clear()
+        message.visibility = View.GONE
+        showList(prefs.playlists())
     }
 
     /**
@@ -297,25 +290,6 @@ class PlaylistsActivity : AppCompatActivity() {
         if ("stub" in pkg) return false
         val isTv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         return !isTv || "documentsui" in pkg || pkg == "android"
-    }
-
-    private fun confirmRestore(read: () -> String) {
-        AlertDialog.Builder(this)
-            .setTitle("Restore from backup?")
-            .setMessage("Your current playlists, favorites and progress on this TV are replaced by the backup.")
-            .setPositiveButton("Restore") { _, _ ->
-                try {
-                    val count = Backup.import(this, read())
-                    Session.clear()
-                    message.visibility = View.GONE
-                    showToast(this, "Restored $count playlist${if (count == 1) "" else "s"}", Toast.LENGTH_LONG)
-                    showList(prefs.playlists())
-                } catch (e: Exception) {
-                    showMessage("Restore failed: ${e.message ?: e.javaClass.simpleName}")
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun showMessage(text: String) {

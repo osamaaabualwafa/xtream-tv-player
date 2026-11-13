@@ -96,7 +96,8 @@ class T04_MoviesTest : QaTest() {
         Qa.shot("movie_paused", "Movie paused")
         Qa.key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         Qa.expectPlaying("movie after un-pausing")
-        SystemClock.sleep(8000)
+        // Short: the test movie is 45 s; resuming at 0:42 (2.5.1 run) ended before the check could see it play.
+        SystemClock.sleep(3000)
 
         Qa.step("Back saves the position; details now offer Resume")
         Qa.leavePlayer()
