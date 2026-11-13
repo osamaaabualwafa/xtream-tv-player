@@ -23,7 +23,7 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Look.wrap(newBase))
 
-    private enum class Section { HOME, BROWSE, RATINGS, PLAYER, COLOR, AVATARS, CONNECTION, ABOUT }
+    private enum class Section { HOME, BROWSE, RATINGS, PLAYER, COLOR, AVATARS, PHONE, CONNECTION, ABOUT }
 
     private lateinit var prefs: Prefs
     private lateinit var body: LinearLayout
@@ -117,6 +117,7 @@ class SettingsActivity : AppCompatActivity() {
             R.id.menu_player to Section.PLAYER,
             R.id.menu_color to Section.COLOR,
             R.id.menu_avatars to Section.AVATARS,
+            R.id.menu_phone to Section.PHONE,
             R.id.menu_connection to Section.CONNECTION,
             R.id.menu_about to Section.ABOUT,
         )
@@ -279,6 +280,12 @@ class SettingsActivity : AppCompatActivity() {
                     heading("Avatars", R.drawable.ic_glass_user)
                 }
                 avatars()
+            }
+            Section.PHONE -> {
+                // Package 5, item 2 (approved 2026-11-13): its own place in the menu (owner: not under Home layout).
+                title.text = "Use Phone"
+                hint.text = "Search, play and use your phone as a remote, on the same Wi-Fi"
+                startAction("Add a phone or remove one", R.drawable.ic_glass_phone, "phone_panel") { phonePanelCard() }
             }
             Section.CONNECTION -> {
                 title.text = "Connection check"
@@ -971,6 +978,47 @@ class SettingsActivity : AppCompatActivity() {
     private var fillTicker: Runnable? = null
 
     /** Get started's round buttons: icon then words, the card's full width. */
+    /** Settings → Use my phone: a code for a new phone, and the phones that joined, each with Remove. */
+    private fun phonePanelCard() {
+        DiagUi.card(this, 760) { c ->
+            fun build() {
+                c.clear()
+                c.title("Use Phone", R.drawable.ic_glass_phone, c.color(R.attr.appAccent))
+                c.line("Search, play and use your phone as a remote. Same Wi-Fi as this TV; nothing goes through the internet.", 13f)
+                val url = PhonePanel.joinAddress()
+                if (url != null) {
+                    val row = c.row(c.dp(12))
+                    row.addView(android.widget.ImageView(this).apply {
+                        setImageBitmap(PhonePage.qr(url, c.dp(170)))
+                        layoutParams = android.widget.LinearLayout.LayoutParams(c.dp(170), c.dp(170)).apply { rightMargin = c.dp(18) }
+                    })
+                    row.addView(TextView(this).apply {
+                        text = listOf("Scan with the phone you want to add.", "It stays connected for 30 days.", "This code works for 5 minutes.").joinToString("\n")
+                        textSize = 15f
+                        setTextColor(c.color(R.attr.appText))
+                    })
+                } else c.line("The phone panel needs the TV on your home Wi-Fi.", 15f, top = 12)
+                c.line("Your phones", 16f, top = 16)
+                val phones = PhonePanel.phones()
+                if (phones.isEmpty()) c.line("No phones yet.", 14f, top = 4)
+                val fmt = java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale.US)
+                for (p in phones) {
+                    val r = c.row(c.dp(8))
+                    r.addView(TextView(this).apply {
+                        text = "${p.name} · last used ${fmt.format(java.util.Date(p.lastSeen))}"
+                        textSize = 15f
+                        setTextColor(c.color(R.attr.appText))
+                        layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    })
+                    c.pill(r, "Remove", weight = 0f) { PhonePanel.remove(p.id); build() }
+                }
+                val buttons = c.row(c.dp(16))
+                c.pill(buttons, "Done") { c.dialog.dismiss() }.also { it.post { it.requestFocus() } }
+            }
+            build()
+        }
+    }
+
     private fun startAction(label: String, icon: Int, tag: String, danger: Boolean = false, onClick: () -> Unit) = pill(label).also { b ->
         b.tag = tag
         b.setOnClickListener { onClick() }

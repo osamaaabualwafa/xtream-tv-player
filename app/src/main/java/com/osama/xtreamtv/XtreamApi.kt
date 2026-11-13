@@ -328,9 +328,84 @@ class XtreamApi(val account: Account, private val cacheDir: File? = null) {
             ContentType.MOVIE -> "get_vod_streams"
             ContentType.SERIES -> "get_series"
         }
+        // Package 4, item 4 (2026-11-13): a whole list is read title by title from its saved file, so the
+        // whole text and a tree of 20,000+ titles never sit in memory at once. Anything unusual (an
+        // object instead of a list, a broken file): the old way below.
+        if (categoryId == null) {
+            val started = android.os.SystemClock.elapsedRealtime()
+            val fast = runCatching {
+                val file = withContext(Dispatchers.IO) { listFile("action" to action) } ?: return@runCatching null
+                withContext(Dispatchers.Default) { readList(file, type) }
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
+            if (fast != null) {
+                Diag.log("server", "$action · ${fast.size} items · read in ${"%.1f".format(java.util.Locale.US, (android.os.SystemClock.elapsedRealtime() - started) / 1000.0)} s")
+                return fast
+            }
+        }
         val result = if (categoryId != null) call("action" to action, "category_id" to categoryId) else call("action" to action)
         val list = objects(result)
         return withContext(Dispatchers.Default) { list.mapNotNull { parseItem(type, it) } }
+    }
+
+    /** The saved file of a whole list: fresh, or old (a newer one is fetched behind), or downloaded now. */
+    private fun listFile(vararg params: Pair<String, String>): File? {
+        val action = params.firstOrNull { it.first == "action" }?.second
+        if (action !in CACHED_ACTIONS) return null
+        val dir = listCacheDir() ?: return null
+        val file = File(dir, md5(params.joinToString("&") { p -> p.first + "=" + p.second }) + ".json")
+        val url = StringBuilder(base).append("/player_api.php?username=").append(user).append("&password=").append(pass)
+        for ((k, v) in params) url.append('&').append(k).append('=').append(Uri.encode(v))
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() < LIST_CACHE_MS) return file
+        if (file.exists()) { refreshInBackground(url.toString(), file, action ?: ""); return file }
+        return try {
+            val body = httpGet(url.toString())
+            file.writeText(body)
+            file
+        } catch (e: IOException) {
+            if (file.exists()) file else throw e
+        }
+    }
+
+    /** Titles of a saved list, read one at a time; null when the file isn't a plain list of objects. */
+    private fun readList(file: File, type: ContentType): List<StreamItem>? {
+        val input = java.io.BufferedInputStream(java.io.FileInputStream(file), 64 * 1024)
+        input.mark(4)
+        // A byte-order mark at the start is skipped.
+        val bom = ByteArray(3).also { input.read(it) }
+        if (!(bom[0] == 0xEF.toByte() && bom[1] == 0xBB.toByte() && bom[2] == 0xBF.toByte())) input.reset()
+        android.util.JsonReader(java.io.InputStreamReader(input, Charsets.UTF_8)).use { r ->
+            r.isLenient = true
+            if (r.peek() != android.util.JsonToken.BEGIN_ARRAY) return null
+            val out = ArrayList<StreamItem>(8192)
+            r.beginArray()
+            while (r.hasNext()) {
+                if (r.peek() != android.util.JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
+                val o = readObject(r)
+                parseItem(type, o)?.let { out.add(it) }
+            }
+            r.endArray()
+            return out
+        }
+    }
+
+    private fun readObject(r: android.util.JsonReader): JSONObject {
+        val o = JSONObject()
+        r.beginObject()
+        while (r.hasNext()) {
+            val name = r.nextName()
+            o.put(name, readValue(r))
+        }
+        r.endObject()
+        return o
+    }
+
+    private fun readValue(r: android.util.JsonReader): Any = when (r.peek()) {
+        android.util.JsonToken.BEGIN_OBJECT -> readObject(r)
+        android.util.JsonToken.BEGIN_ARRAY -> JSONArray().also { a -> r.beginArray(); while (r.hasNext()) a.put(readValue(r)); r.endArray() }
+        android.util.JsonToken.BOOLEAN -> r.nextBoolean()
+        android.util.JsonToken.NULL -> { r.nextNull(); JSONObject.NULL }
+        // Numbers stay as written ("123", "7.5"): the same as the old reader for ids and ratings.
+        else -> r.nextString()
     }
 
     private fun parseItem(type: ContentType, o: JSONObject): StreamItem? = when (type) {

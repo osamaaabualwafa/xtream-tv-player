@@ -29,6 +29,8 @@ class BrowseActivity : AppCompatActivity() {
         const val EXTRA_TYPE = "type"
         /** Dock Home's Favorites tile: open on the ★ Favorites category. */
         const val EXTRA_OPEN_FAVORITES = "open_favorites"
+        /** Opened from "and N more" in New since your last visit: newest first for this visit only. */
+        const val EXTRA_NEWEST_FIRST = "newest_first"
         private const val CAT_ALL = "__all__"
         private const val CAT_FAV = "__fav__"
         private const val CAT_CONTINUE = "__continue__"
@@ -36,6 +38,10 @@ class BrowseActivity : AppCompatActivity() {
         /** 1.1E: titles with IMDb 7.5 and up (saved scores), best first. */
         private const val CAT_TOP = "__top__"
     }
+
+    /** The sort in use: the saved one, or newest first when opened from "and N more" (until changed here). */
+    private var sortOverride: Int? = null
+    private fun sortNow(): Int = sortOverride ?: if (intent.getBooleanExtra(EXTRA_NEWEST_FIRST, false)) 3 else prefs.browseSort(type)
 
     private lateinit var type: ContentType
     private lateinit var api: XtreamApi
@@ -125,6 +131,7 @@ class BrowseActivity : AppCompatActivity() {
         categoryTitle.isSingleLine = false
         categoryTitle.maxLines = 2
         search = findViewById(R.id.search)
+        search.post { KeyboardGuard.attach(window, (findViewById<android.view.ViewGroup>(android.R.id.content)).getChildAt(0), listOf(search)) }
         progress = findViewById(R.id.progress)
         message = findViewById(R.id.message)
 
@@ -1062,7 +1069,7 @@ class BrowseActivity : AppCompatActivity() {
     private fun sorted(list: List<StreamItem>): List<StreamItem> {
         val cat = currentCategory?.id
         if (cat == CAT_CONTINUE || cat == CAT_TOP || type == ContentType.LIVE) return list
-        return when (prefs.browseSort(type)) {
+        return when (sortNow()) {
             1 -> Ratings.sortByScore(list)
             2 -> list.sortedBy { it.name.lowercase() }
             3 -> list.sortedByDescending { it.added }
@@ -1082,7 +1089,7 @@ class BrowseActivity : AppCompatActivity() {
         val on = sortApplies()
         if (!on && b.hasFocus()) search.requestFocus()
         b.visibility = if (on) View.VISIBLE else View.GONE
-        b.text = when (prefs.browseSort(type)) {
+        b.text = when (sortNow()) {
             1 -> "Sort · IMDb score"
             2 -> "Sort · A to Z"
             3 -> "Sort · Recently added"
@@ -1096,7 +1103,7 @@ class BrowseActivity : AppCompatActivity() {
      */
     private fun sortOptions() {
         val names = arrayOf("As the provider lists them", "IMDb score", "A to Z", "Recently added")
-        val current = prefs.browseSort(type)
+        val current = sortNow()
         val button = findViewById<View?>(R.id.sort_button)
         val anchor = button?.takeIf { it.isShown } ?: search
         val back = currentFocus
@@ -1131,7 +1138,8 @@ class BrowseActivity : AppCompatActivity() {
                 isClickable = true
                 setOnClickListener {
                     popup.dismiss()
-                    if (i != prefs.browseSort(type)) {
+                    if (i != sortNow()) {
+                        sortOverride = i
                         prefs.setBrowseSort(type, i)
                         applyFilter()
                     }

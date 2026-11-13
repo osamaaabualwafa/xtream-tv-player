@@ -223,6 +223,8 @@ class SearchActivity : AppCompatActivity() {
         Appearance.apply(this)
         setContentView(R.layout.activity_search)
         query = findViewById(R.id.search_query)
+        // Package 5, item 3: the field stays above the TV's keyboard.
+        query.post { KeyboardGuard.attach(window, (findViewById<android.view.ViewGroup>(android.R.id.content)).getChildAt(0), listOf(query)) }
         status = findViewById(R.id.search_status)
         progress = findViewById(R.id.search_progress)
         results = findViewById(R.id.search_results)

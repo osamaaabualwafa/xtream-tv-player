@@ -551,6 +551,8 @@ class DetailsActivity : AppCompatActivity() {
             if (isMovie) {
                 findViewById<View>(R.id.recos_title).visibility = View.VISIBLE
                 view.visibility = View.VISIBLE
+                // Full card height from the start: the screen's edge hides what doesn't fit, nothing is squeezed.
+                view.postDelayed({ (fullHeight(view) ?: 0).takeIf { it > 0 }?.let { h -> view.layoutParams = view.layoutParams.apply { height = h }; for (i in 0 until view.childCount) view.getChildAt(i).requestLayout() } }, 300)
             } else {
                 recosReady = true
             }
@@ -629,7 +631,9 @@ class DetailsActivity : AppCompatActivity() {
                 plot.visibility = View.VISIBLE
                 credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
                 (buttons.parent as? android.view.ViewGroup)?.findViewWithTag<View>("names_rows")?.visibility = View.VISIBLE
-                recosRow.layoutParams = recosRow.layoutParams.apply { height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT }
+                // The row keeps its full card height (squeezed, the cards' names were cut: TV report
+                // 2026-11-13); what doesn't fit goes under the screen's edge until Down.
+                (fullHeight(recosRow) ?: recosRow.height).takeIf { it > 0 }?.let { h -> recosRow.layoutParams = recosRow.layoutParams.apply { height = h } }
                 for (i in 0 until recosRow.childCount) recosRow.getChildAt(i).requestLayout()
                 if (tuckedMeta) findViewById<View>(R.id.meta).visibility = View.VISIBLE
                 tuckedMeta = false

@@ -34,10 +34,14 @@ class T12_New20Test : QaTest() {
     @Test
     fun sortButton() {
         openMovies()
-        Qa.step("Up from the first row of posters lands on the search box")
+        // 2.3.0: Up from the posters goes to the filter line first, then Up again to Search (approved order).
+        Qa.step("Up from the first row of posters lands on the filter line, Up again on the search box")
         Qa.up()
         Qa.settle(500)
-        assertEquals("Up from the posters lands on Search", R.id.search, focusedId())
+        assertTrue("Up from the posters left the posters", Qa.main { Qa.current()?.findViewById<RecyclerView>(R.id.items)?.hasFocus() } != true)
+        Qa.up()
+        Qa.settle(500)
+        assertEquals("Up from the filter line lands on Search", R.id.search, focusedId())
         Qa.hideKeyboard()
         Qa.step("Left from the search box reaches Sort")
         Qa.left()

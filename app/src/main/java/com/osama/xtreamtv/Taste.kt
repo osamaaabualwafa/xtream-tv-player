@@ -238,6 +238,9 @@ object Taste {
         return list.map { s -> refOf(d, s)?.let { byRef[it] }?.takeIf { it.size > 1 }?.let { Versions.represent(it, learned) } ?: s }
     }
 
+    /** The TV is short of memory: the notebook copy and the day's picks go (read again when needed). */
+    fun release() { data = null; dataFor = null; dataAt = 0L; memo = null }
+
     /** The notebook changed (a page completed itself): read again next time. */
     fun invalidate() { dataAt = 0L }
 

@@ -395,7 +395,9 @@ class PlayerActivity : AppCompatActivity() {
             askResume = intent.getBooleanExtra(EXTRA_ASK_RESUME, true)
             if (!isCatchup) loadVersions()
             // Catch-up streams are plain MPEG-TS; the HLS guess only applies to movies/episodes.
-            if (prefs.vodIsHls && !isCatchup) vodMimeType = MimeTypes.APPLICATION_M3U8
+            // This copy's own answer when it was played before; else the provider's usual kind.
+            val known = if (isCatchup) false else prefs.streamIsHls(resumeKey)
+            if (known ?: (prefs.vodIsHls && !isCatchup)) vodMimeType = MimeTypes.APPLICATION_M3U8
             // Settings > Player: movies and episodes in another player app.
             if (!isCatchup && prefs.vodPlayer != 0) {
                 if (ExternalPlayer.open(this, prefs.vodPlayer, vodUrl, vodTitle, startPosition)) {
@@ -699,6 +701,7 @@ class PlayerActivity : AppCompatActivity() {
             // Watched to the end: start from the beginning next time and drop it from Continue watching.
             prefs.removeProgress(resumeKey)
             prefs.setWatched(resumeKey, true)
+            queueNextEpisode()
             startPosition = 0
         } else if (pos > 5_000) {
             startPosition = pos
@@ -753,6 +756,7 @@ class PlayerActivity : AppCompatActivity() {
                 if (!isCatchup) {
                     prefs.removeProgress(resumeKey)
                     prefs.setWatched(resumeKey, true)
+                    queueNextEpisode()
                 }
                 // Series: carry on with the next episode, like a TV binge (unless the sleep timer says stop).
                 if (prefs.autoNext && hasNextEpisode && !sleepAtEnd) {
@@ -850,6 +854,7 @@ class PlayerActivity : AppCompatActivity() {
                     } else {
                         // Remember it so the next movie/episode starts as HLS straight away.
                         prefs.vodIsHls = true
+                        prefs.setStreamIsHls(resumeKey, true)
                         vodMimeType = MimeTypes.APPLICATION_M3U8
                         startVod()
                     }
@@ -857,6 +862,7 @@ class PlayerActivity : AppCompatActivity() {
                 probe != null && probe.code in 200..299 && !isLive && vodMimeType != null -> {
                     // We assumed HLS but this one is a real file: play it as-is.
                     prefs.vodIsHls = false
+                    prefs.setStreamIsHls(resumeKey, false)
                     vodMimeType = null
                     startVod()
                 }
@@ -1735,7 +1741,11 @@ class PlayerActivity : AppCompatActivity() {
             val entry = WatchEntry(key, ContentType.MOVIE, copy.item.id, copy.item.ext, title, null, old.image)
             prefs.removeProgress(old.key)
             prefs.saveProgress(entry.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
-            startActivity(vodIntent(this, api.movieUrl(copy.item.id, copy.item.ext), title, key, pos, entry, askResume = false))
+            val url = api.movieUrl(copy.item.id, copy.item.ext)
+            lifecycleScope.launch {
+                learnKind(key, url)
+                startActivity(vodIntent(this@PlayerActivity, url, title, key, pos, entry, askResume = false))
+            }
             return
         }
         // A series: the same season and episode in the other copy.
@@ -1753,8 +1763,20 @@ class PlayerActivity : AppCompatActivity() {
             val entry = WatchEntry(key, ContentType.SERIES, same.id, same.ext, title, same.label(), old.image, seriesId = copy.item.id)
             prefs.removeProgress(old.key)
             prefs.saveProgress(entry.copy(position = pos, duration = dur, updated = System.currentTimeMillis()))
-            startActivity(vodIntent(this@PlayerActivity, api.episodeUrl(same.id, same.ext), "$title  ·  ${same.label()}", key, pos, entry, askResume = false))
+            val url = api.episodeUrl(same.id, same.ext)
+            learnKind(key, url)
+            startActivity(vodIntent(this@PlayerActivity, url, "$title  ·  ${same.label()}", key, pos, entry, askResume = false))
         }
+    }
+
+    /**
+     * A copy never played before: one quick look at what the server sends (playlist or file), so the
+     * switch starts the right way at once (it failed once on every switch, report 2026-11-13).
+     */
+    private suspend fun learnKind(key: String, url: String) {
+        if (prefs.streamIsHls(key) != null) return
+        val probe = runCatching { probeStream(url) }.getOrNull() ?: return
+        if (probe.code in 200..299 && !probe.isHtml) prefs.setStreamIsHls(key, probe.isHls)
     }
 
     /** Episodes started from the series page bring the list along; Continue watching loads it. */
@@ -1874,6 +1896,20 @@ class PlayerActivity : AppCompatActivity() {
         if (watched && index != episodeIndex) prefs.removeProgress(key)
         showToast(this, if (watched) "Marked as watched" else "Marked as not watched", Toast.LENGTH_SHORT)
         episodeAdapter.items.indexOfFirst { it.id == ep.id }.takeIf { it >= 0 }?.let { episodeAdapter.notifyItemChanged(it, "watched") }
+    }
+
+    /**
+     * Package 4, item 3 (approved 2026-11-13): a finished episode's place in Continue watching goes to the
+     * next one (the next season's first after a season's last), at the front, ready to start. The last
+     * episode the provider has: nothing (New episodes shows the series when another one comes).
+     */
+    private fun queueNextEpisode() {
+        if (isCatchup || episodes.isEmpty() || seriesId == null) return
+        val next = episodes.getOrNull(episodeIndex + 1) ?: return
+        if (nextNotAired != null) return
+        val entry = WatchEntry("ep_${next.id}", ContentType.SERIES, next.id, next.ext, seriesName, next.label(), seriesCover, seriesId = seriesId)
+        prefs.saveProgress(entry.copy(position = 0, duration = 0, updated = System.currentTimeMillis()))
+        Diag.log("resume", "Continue watching moved to the next episode")
     }
 
     private fun playEpisodeAt(index: Int) {
@@ -2200,6 +2236,8 @@ class PlayerActivity : AppCompatActivity() {
 
     private val diagPlayer = object : Player.Listener {
         override fun onRenderedFirstFrame() {
+            // It played: this copy's kind is known for next time (switching versions starts right).
+            if (!isLive && !isCatchup) prefs.setStreamIsHls(resumeKey, vodMimeType == MimeTypes.APPLICATION_M3U8)
             if (diagPlayStart == 0L) return
             val kind = if (isLive) "live" else if (episodes.isNotEmpty()) "episode" else "movie"
             Diag.log(

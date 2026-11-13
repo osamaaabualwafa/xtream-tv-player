@@ -75,6 +75,8 @@ object WrongTitleUi {
                 .setPositiveButton("Search") { _, _ -> input.text.toString().trim().takeIf { it.length >= 2 }?.let { load(it) } }
                 .setNegativeButton("Cancel", null)
                 .show()
+                // Moves up with the TV's keyboard (Package 5, item 3).
+                .window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN or android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         }
         button("None of these: show no scores") { popup.dismiss(); onNone() }
         val cancel = button("Cancel") { popup.dismiss() }

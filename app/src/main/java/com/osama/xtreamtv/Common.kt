@@ -40,9 +40,10 @@ class Prefs(context: Context) {
 
     companion object {
         /** Home rows that can be shown, hidden and moved, in their first order. */
-        val HOME_ROWS = listOf("new", "continue", "picked", "trending", "favorites", "top_movies", "top_series", "channels", "recent_movies", "recent_series")
+        val HOME_ROWS = listOf("new", "fresh", "continue", "picked", "trending", "favorites", "top_movies", "top_series", "channels", "recent_movies", "recent_series")
         val HOME_ROW_NAMES = mapOf(
             "new" to "New episodes",
+            "fresh" to "New since your last visit",
             "continue" to "Continue watching",
             "picked" to "Picked for you",
             "trending" to "Trending this week",
@@ -477,6 +478,32 @@ class Prefs(context: Context) {
         sp.edit().putStringSet("watched", set).apply()
     }
 
+    /**
+     * Learned per copy (2026-11-13): this movie or episode ("movie_123", "ep_456") is an HLS playlist
+     * (true) or a plain file (false); null when not played yet. A provider can mix both, and one guess
+     * for all of them failed on every switch between versions.
+     */
+    fun streamIsHls(key: String): Boolean? {
+        val sp2 = sp
+        return when {
+            sp2.getStringSet("vod_hls_keys", emptySet())?.contains(key) == true -> true
+            sp2.getStringSet("vod_plain_keys", emptySet())?.contains(key) == true -> false
+            else -> null
+        }
+    }
+
+    fun setStreamIsHls(key: String, hls: Boolean) {
+        val add = if (hls) "vod_hls_keys" else "vod_plain_keys"
+        val drop = if (hls) "vod_plain_keys" else "vod_hls_keys"
+        val a = HashSet(sp.getStringSet(add, emptySet()) ?: emptySet())
+        val d = HashSet(sp.getStringSet(drop, emptySet()) ?: emptySet())
+        if (a.contains(key) && !d.contains(key)) return
+        a.add(key); d.remove(key)
+        // Kept small: the newest 2,000 of each.
+        while (a.size > 2000) a.remove(a.first())
+        sp.edit().putStringSet(add, a).putStringSet(drop, d).apply()
+    }
+
     /** Learned per provider: movies/episodes are HLS playlists despite their .mkv/.mp4 names. */
     var vodIsHls: Boolean
         get() = sp.getBoolean("vod_hls", false)
@@ -604,6 +631,8 @@ data class WatchEntry(
 
     /** Short enough for a poster: "21 min left" (the bar on the poster shows how far in). */
     fun progressText(): String {
+        // The next episode, queued when the one before was finished (not started yet).
+        if (duration <= 0 && position <= 0 && type == ContentType.SERIES) return "Next"
         if (duration <= 0) return "▶ ${formatDuration(position)}"
         val minutesLeft = ((duration - position).coerceAtLeast(0) + 59_999) / 60_000
         return when {
@@ -1075,6 +1104,7 @@ class ItemAdapter(
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         recycler = recyclerView
+        live.add(this)
         if (grid) prepareSpareCards(recyclerView)
         // 1.1E: posters on screen fill in their real scores.
         if (grid) Ratings.attachPosters(recyclerView, this)
@@ -1083,6 +1113,27 @@ class ItemAdapter(
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
         if (recycler === recyclerView) recycler = null
     }
+
+    companion object {
+        private val live = java.util.Collections.newSetFromMap(java.util.WeakHashMap<ItemAdapter, Boolean>())
+
+        /** The internet is back: every card whose picture failed meanwhile is drawn again (2026-11-13). */
+        fun networkBack() {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                for (a in live.toList()) a.retryOffline()
+            }, 3000)
+        }
+    }
+
+    private fun retryOffline() {
+        if (failedOffline.isEmpty() || recycler == null) return
+        val again = failedOffline.toSet()
+        failedOffline.clear()
+        items.forEachIndexed { i, it -> if (it in again) notifyItemChanged(i) }
+    }
+
+    /** Cards whose picture failed for lack of internet: drawn again when the connection is back. */
+    private val failedOffline = java.util.Collections.newSetFromMap(java.util.WeakHashMap<StreamItem, Boolean>())
 
     /** Pictures already asked for (so scrolling back and forth doesn't ask again). */
     private val prefetched = HashSet<String>()
@@ -1101,7 +1152,13 @@ class ItemAdapter(
             placeholder(PLACEHOLDER_TINT)
             error(R.drawable.placeholder)
             fallback(R.drawable.placeholder)
-            if (own != null) listener(onError = { _, _ ->
+            listener(onError = { _, result ->
+                val t = result.throwable
+                if (t is java.net.UnknownHostException || t is java.net.ConnectException || t is java.net.SocketTimeoutException) failedOffline.add(item)
+            })
+            if (own != null) listener(onError = { _, result ->
+                val t = result.throwable
+                if (t is java.net.UnknownHostException || t is java.net.ConnectException || t is java.net.SocketTimeoutException) { failedOffline.add(item); return@listener }
                 val other = Ratings.posterFor(item) ?: return@listener
                 // Still the same title on this card (cards are reused while scrolling).
                 if (items.getOrNull(holder.bindingAdapterPosition) === item) holder.image.load(other) {

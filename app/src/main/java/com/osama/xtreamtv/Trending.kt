@@ -41,6 +41,12 @@ object Trending {
         return entries
     }
 
+    /** Every saved week list (mixed, movies, series), without asking anyone: for the rows drawn at start. */
+    fun saved(context: Context): List<Entry> {
+        val sp = sp(context)
+        return listOf("all", "movie", "tv").flatMap { k -> sp.getString("list_$k", null)?.let { parse(it) }.orEmpty() }
+    }
+
     private fun toJson(list: List<Entry>): String {
         val a = JSONArray()
         for (e in list) a.put(JSONObject().put("type", e.trend.type.name).put("id", e.trend.id).put("name", e.trend.name).put("year", e.trend.year)

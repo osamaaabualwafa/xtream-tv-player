@@ -10,4 +10,6 @@
     <item name="row_picked" type="id" />
     <item name="row_trending_title" type="id" />
     <item name="row_trending" type="id" />
+    <item name="row_fresh_title" type="id" />
+    <item name="row_fresh" type="id" />
 </resources>

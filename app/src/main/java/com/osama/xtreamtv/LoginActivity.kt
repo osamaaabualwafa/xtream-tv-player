@@ -24,11 +24,15 @@ class LoginActivity : AppCompatActivity() {
         /** The share of the screen height kept clear of keyboards. */
         private const val KEYBOARD_LINE = 0.52f
         private const val EXTRA_PLAYLIST_ID = "playlist_id"
+        /** Open with the phone page showing (Playlists: hold OK → Edit on my phone). */
+        const val EXTRA_PHONE = "phone"
+        /** The phone page for playlists listens here (the ratings keys use 8096). */
+        private const val PHONE_PORT = 8097
 
         fun addIntent(context: Context) = Intent(context, LoginActivity::class.java)
 
-        fun editIntent(context: Context, playlistId: String) =
-            Intent(context, LoginActivity::class.java).putExtra(EXTRA_PLAYLIST_ID, playlistId)
+        fun editIntent(context: Context, playlistId: String, phone: Boolean = false) =
+            Intent(context, LoginActivity::class.java).putExtra(EXTRA_PLAYLIST_ID, playlistId).putExtra(EXTRA_PHONE, phone)
     }
 
     private lateinit var prefs: Prefs
@@ -126,6 +130,133 @@ class LoginActivity : AppCompatActivity() {
             loginButton.text = "Save"
         }
         name.requestFocus()
+        addPhoneButton()
+        if (intent.getBooleanExtra(EXTRA_PHONE, false)) window.decorView.post { openPhone() }
+    }
+
+    // ---- Package 5, item 1 (approved 2026-11-13): add or edit a playlist from the phone ----
+
+    private var phone: PhonePage? = null
+    private var phoneCard: DiagUi.Card? = null
+    /** What the phone page shows after Send: the TV's answer. */
+    @Volatile private var phoneStatus = ""
+
+    /** "Use my phone" as the first choice, above the fields. */
+    private fun addPhoneButton() {
+        val parent = name.parent as? android.view.ViewGroup ?: return
+        val d = resources.displayMetrics.density
+        val b = TextView(this).apply {
+            // The app's own glass phone icon, in its line style and theme colour, right before the words (owner, 2026-11-13).
+            val icon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_glass_phone)?.mutate()
+            text = if (icon == null) "Use Phone" else android.text.SpannableString("   Use Phone").apply {
+                val size = (22 * d).toInt()
+                icon.setBounds(0, 0, size, size)
+                androidx.core.graphics.drawable.DrawableCompat.setTint(icon, themeColor(R.attr.appText))
+                val align = if (android.os.Build.VERSION.SDK_INT >= 29) android.text.style.ImageSpan.ALIGN_CENTER else android.text.style.ImageSpan.ALIGN_BASELINE
+                setSpan(android.text.style.ImageSpan(icon, align), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            textSize = 17f
+            gravity = android.view.Gravity.CENTER
+            isFocusable = true
+            isClickable = true
+            setBackgroundResource(R.drawable.bg_glass_choice)
+            setTextColor(androidx.core.content.ContextCompat.getColorStateList(context, R.color.on_focus_text))
+            setPadding((18 * d).toInt(), (12 * d).toInt(), (18 * d).toInt(), (12 * d).toInt())
+            setOnClickListener { openPhone() }
+        }
+        parent.addView(b, parent.indexOfChild(name), android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = (14 * d).toInt() })
+        if (!intent.getBooleanExtra(EXTRA_PHONE, false) && editing == null) b.post { b.requestFocus() }
+    }
+
+    private fun openPhone() {
+        phone?.stop()
+        phoneStatus = ""
+        val page = PhonePage(PHONE_PORT, 5 * 60_000L, handle = { path, method, fields, _ -> phoneAnswer(path, method, fields) })
+        val url = page.address()
+        if (url == null || !page.start()) {
+            showError("The phone page needs the TV on your home Wi-Fi. You can type the details here instead.")
+            return
+        }
+        phone = page
+        if (BuildConfig.DEBUG) android.util.Log.d("PlaylistPhone", "page /p/${page.token}")
+        phoneCard = DiagUi.card(this, 760) { c ->
+            c.title(if (editing != null) "Edit this playlist on your phone" else "Add a playlist from your phone", R.drawable.ic_glass_phone, c.color(R.attr.appAccent))
+            c.line("Your phone must be on the same Wi-Fi as this TV", 13f)
+            val row = c.row(c.dp(14))
+            row.addView(android.widget.ImageView(this).apply {
+                setImageBitmap(PhonePage.qr(url, c.dp(184)))
+                layoutParams = android.widget.LinearLayout.LayoutParams(c.dp(184), c.dp(184)).apply { rightMargin = c.dp(20) }
+            })
+            val col = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+            row.addView(col, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            fun text(t: String, size: Float, color: Int, top: Int = 0) = TextView(this).apply {
+                this.text = t; textSize = size; setTextColor(color); setPadding(0, c.dp(top), 0, 0); col.addView(this)
+            }
+            text("1. Scan the code with your phone's camera.", 15f, c.color(R.attr.appText))
+            text("2. Fill in the server, username and password, or paste an M3U link.", 15f, c.color(R.attr.appText), 8)
+            text("3. Tap Send to TV. The TV checks the login straight away.", 15f, c.color(R.attr.appText), 8)
+            text("No camera? Open $url on a phone on the same Wi-Fi.", 12f, c.color(R.attr.appTextSecondary), 12)
+            val timer = text("Works once · 5:00 left", 12f, c.color(R.attr.appTextSecondary), 4)
+            val status = c.line("Waiting for your phone…", 15f, top = 12)
+            val buttons = c.row(c.dp(16))
+            c.pill(buttons, "Type it here instead") { c.dialog.dismiss() }.also { it.post { it.requestFocus() } }
+            c.dialog.setOnDismissListener { phone?.stop(); phone = null; phoneCard = null }
+            val tick = object : Runnable {
+                override fun run() {
+                    if (phoneCard?.dialog?.isShowing != true) return
+                    val left = (page.endsAt - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
+                    timer.text = if (left == 0L) "Closed · open it again for a new code" else "Works once · ${left / 60_000}:${"%02d".format((left / 1000) % 60)} left"
+                    if (phoneStatus.isNotEmpty()) status.text = phoneStatus
+                    window.decorView.postDelayed(this, 1000)
+                }
+            }
+            window.decorView.post(tick)
+        }
+    }
+
+    /** The phone page: the form (server and username filled when editing, never the password), then the TV's answer. */
+    private fun phoneAnswer(path: String, method: String, fields: Map<String, String>): PhonePage.Response {
+        if (path == "/status") return PhonePage.Response(phoneStatus.ifEmpty { "The TV is checking the login…" }, "text/plain; charset=utf-8")
+        if (method == "POST") {
+            val m3u = fields["m3u"].orEmpty().trim()
+            val srv = fields["server"].orEmpty().trim()
+            if (m3u.isEmpty() && (srv.isEmpty() || fields["user"].isNullOrBlank() || fields["pass"].isNullOrEmpty())) {
+                return PhonePage.Response(phoneForm("Fill in the server, username and password, or paste an M3U link."))
+            }
+            phoneStatus = "Received · the TV is checking the login…"
+            window.decorView.post {
+                fields["name"]?.trim()?.takeIf { it.isNotEmpty() }?.let { name.setText(it) }
+                server.setText(m3u.ifEmpty { srv })
+                if (m3u.isEmpty()) { username.setText(fields["user"].orEmpty().trim()); password.setText(fields["pass"].orEmpty()) }
+                Diag.log("account", "playlist details received from the phone")
+                submit()
+            }
+            return PhonePage.Response(PhonePage.page("Sent", "<h1>Sent to your TV</h1><div class=status id=s>The TV is checking the login…</div>" +
+                "<p class=small>If it doesn't work, the answer shows here: <a href=''>try again</a>.</p>",
+                "setInterval(()=>fetch(location.pathname.replace(/[/]?$/,'/status')).then(r=>r.text()).then(t=>{document.getElementById('s').innerHTML=t}),1500)"))
+        }
+        return PhonePage.Response(phoneForm(null))
+    }
+
+    private fun phoneForm(problem: String?): String {
+        val e = editing
+        fun v(s: String?) = PhonePage.esc(s.orEmpty())
+        return PhonePage.page(
+            "Add playlist",
+            "<h1>${if (e != null) "Edit playlist" else "Add a playlist"}</h1>" + (problem?.let { "<p class=bad>$it</p>" } ?: "") +
+                "<form method=post>" +
+                "<label>Name (optional)</label><input name=name value='${v(e?.name)}' autocomplete=off>" +
+                "<label>Server</label><input name=server value='${v(e?.base)}' placeholder='http://example.com:8080' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
+                "<label>Username</label><input name=user value='${v(e?.username)}' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
+                "<label>Password</label><input name=pass type=password autocomplete=off>" +
+                "<label>Or paste an M3U link</label><input name=m3u placeholder='get.php?username=…&amp;password=…' autocomplete=off autocapitalize=off autocorrect=off spellcheck=false>" +
+                "<button>Send to TV</button></form><p class=small>Works once, for 5 minutes, only on your home Wi-Fi. The details go straight to your TV.</p>",
+        )
+    }
+
+    override fun onDestroy() {
+        phone?.stop()
+        super.onDestroy()
     }
 
     private fun submit() {
@@ -167,6 +298,8 @@ class LoginActivity : AppCompatActivity() {
                 }
                 prefs.savePlaylist(playlist)
                 prefs.activeId = playlist.id
+                if (phone != null) phoneStatus = "<span class=ok>&#10003; Logged in</span> · " + (info.expDate?.let { "expires " + java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.US).format(java.util.Date(it * 1000)) } ?: "no expiry date") + ". You can close this page."
+                phone?.let { p -> window.decorView.postDelayed({ p.stop() }, 4000) }
                 prefs.formats = info.formats.joinToString(",")
                 Session.start(api, info)
                 startActivity(
@@ -193,5 +326,7 @@ class LoginActivity : AppCompatActivity() {
     private fun showError(message: String) {
         error.text = message
         error.visibility = View.VISIBLE
+        // Sent from the phone: the answer shows there too, so it can be fixed and sent again.
+        if (phone?.running == true) phoneStatus = "<span class=bad>${PhonePage.esc(message)}</span> &middot; <a href=''>Try again</a>"
     }
 }

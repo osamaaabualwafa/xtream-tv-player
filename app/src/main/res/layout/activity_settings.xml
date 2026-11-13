@@ -58,6 +58,8 @@
 
                 <TextView android:id="@+id/menu_avatars" style="@style/SettingsMenuItem" android:text="Playlists" />
 
+                <TextView android:id="@+id/menu_phone" style="@style/SettingsMenuItem" android:text="Use Phone" />
+
                 <TextView android:id="@+id/menu_connection" style="@style/SettingsMenuItem" android:text="Connection check" />
 
                 <TextView android:id="@+id/menu_about" style="@style/SettingsMenuItem" android:text="About" />

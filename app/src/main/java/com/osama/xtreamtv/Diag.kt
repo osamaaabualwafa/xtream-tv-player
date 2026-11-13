@@ -543,9 +543,32 @@ object Diag {
     @Volatile private var arrowRepeat = 0
     @Volatile private var postersFailed = 0
 
-    /** Coil reports pictures that didn't load; counted per screen. */
-    fun posterFailed() {
-        if (enabled) postersFailed++
+    /** Why pictures failed on this screen ("provider · not found" -> 3): kinds only, never addresses. */
+    private val posterReasons = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** Coil reports pictures that didn't load; counted per screen, with where from and why. */
+    fun posterFailed(url: Any?, error: Throwable?) {
+        if (!enabled) return
+        postersFailed++
+        val u = url?.toString().orEmpty()
+        val from = when {
+            "tmdb.org" in u -> "TMDB"
+            "m.media-amazon" in u || "mdblist" in u -> "scores service"
+            u.isBlank() -> "no link"
+            else -> "provider"
+        }
+        val why = when (error) {
+            is java.net.UnknownHostException -> "no connection"
+            is java.net.SocketTimeoutException -> "too slow"
+            is java.net.ConnectException -> "refused"
+            null -> "unknown"
+            else -> {
+                val m = error.message.orEmpty()
+                Regex("HTTP ([0-9]{3})").find(m)?.groupValues?.get(1)?.let { code -> if (code == "404") "not found (404)" else "server said $code" }
+                    ?: if ("decode" in m.lowercase() || "bitmap" in m.lowercase()) "not a picture" else error.javaClass.simpleName
+            }
+        }
+        posterReasons.merge("$from · $why", 1, Int::plus)
     }
 
     /** The list (RecyclerView) a view is in, or null. */
@@ -739,12 +762,17 @@ object Diag {
         override fun onActivityPaused(activity: Activity) {
             // Nothing highlighted when leaving: an older place must not be expected on return.
             val focus = activity.currentFocus
-            if (focus != null && !activity.isFinishing) leftPlace[activity] = place(focus) else leftPlace.remove(activity)
+            // Only a place the viewer chose (a key was pressed on this screen since it was shown): a page
+            // left while it was still settling had its highlight put there by the page, not the viewer,
+            // and the page rightly puts it on Play again (false alarm, TV report 2026-11-13).
+            val chosen = lastKeyAt > resumedAt
+            if (focus != null && !activity.isFinishing && chosen) leftPlace[activity] = place(focus) else leftPlace.remove(activity)
             flushSmallText(screen)
             remember()
             frames = null
             if (slowFrames > 0) log("smooth", "$screen: $slowFrames stutters (worst $worstFrame ms)")
-            if (postersFailed > 0) log("ui", "$postersFailed posters failed to load on $screen")
+            if (postersFailed > 0) log("ui", "$postersFailed posters failed to load on $screen (" + posterReasons.entries.sortedByDescending { it.value }.joinToString(", ") { "${it.value} ${it.key}" } + ")")
+            posterReasons.clear()
             if (loadingLong) log("ui", "$screen showed the loading circle for ${(SystemClock.elapsedRealtime() - loadingSince) / 1000} s")
             slowFrames = 0
             postersFailed = 0
@@ -934,6 +962,8 @@ object Diag {
                         else -> "other"
                     }
                     if (kind != lastKind) {
+                        // Back after a drop: pictures that failed meanwhile are loaded again.
+                        if (lastKind.isEmpty()) ItemAdapter.networkBack()
                         lastKind = kind
                         val signal = if (Build.VERSION.SDK_INT >= 29 && caps.signalStrength != Int.MIN_VALUE) " · signal ${caps.signalStrength} dBm" else ""
                         log("network", "connected by $kind · ${caps.linkDownstreamBandwidthKbps / 1000} Mbps estimated$signal")

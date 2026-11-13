@@ -113,6 +113,10 @@ class T04_MoviesTest : QaTest() {
             val pos = Qa.player()?.positionMs ?: 0
             if (pos < 8000) Qa.finding("problem", "Resume started from the beginning", "Position after Resume: $pos ms")
             Qa.shot("resumed", "Resumed where it stopped")
+            // Resumed at ~0:44 of the 45 s test movie: leaving there counts as finished (last 5%), so it
+            // would leave Continue watching by design. Back 10 s first, then leave.
+            Qa.left(2)
+            Qa.settle(1200)
             Qa.leavePlayer()
         }
 

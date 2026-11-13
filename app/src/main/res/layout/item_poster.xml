@@ -90,7 +90,7 @@
             android:paddingRight="6dp"
             android:paddingBottom="2dp"
             android:textColor="#FFFFFFFF"
-            android:textSize="11sp"
+            android:textSize="14sp"
             android:visibility="gone" />
     </FrameLayout>
 

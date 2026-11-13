@@ -14,12 +14,20 @@ class XtreamApp : Application(), ImageLoaderFactory {
         Ratings.init(this)
         // A newer list fetched behind the screen reaches the screens that show it.
         XtreamApi.onListChanged = Session::listChanged
+        // Package 5: the phone panel, for phones that joined (home Wi-Fi only).
+        PhonePanel.init(this)
         // The TV is short of memory (2026-11-07: Android closed the app on a TV warning 5 times a minute):
         // let go of what can be made again. In the background, the downloaded lists go too (they are
         // read again from the server when needed); never while a screen shows them.
         registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
-                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) Ratings.trimMemory()
+                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                    Ratings.trimMemory()
+                    // 2026-11-13 (TV low on memory 3 times in Settings): also the suggestions' notebook
+                    // copy and the pictures kept in memory (they come back from the disk cache).
+                    Taste.release()
+                    runCatching { coil.Coil.imageLoader(this@XtreamApp).memoryCache?.clear() }
+                }
                 if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) Session.streamCache.clear()
             }
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {}
@@ -488,7 +496,7 @@ class XtreamApp : Application(), ImageLoaderFactory {
                 val t = started.remove(request) ?: return
                 android.util.Log.d("ImageTime", "ImageTime ${android.os.SystemClock.elapsedRealtime() - t} ms ${result.dataSource}")
             }
-            override fun onError(request: coil.request.ImageRequest, result: coil.request.ErrorResult) = Diag.posterFailed()
+            override fun onError(request: coil.request.ImageRequest, result: coil.request.ErrorResult) = Diag.posterFailed(request.data, result.throwable)
         })
         .diskCache {
             DiskCache.Builder()

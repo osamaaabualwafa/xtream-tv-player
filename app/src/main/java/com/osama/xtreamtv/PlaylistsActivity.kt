@@ -332,18 +332,19 @@ class PlaylistsActivity : AppCompatActivity() {
         val isDefault = prefs.defaultPlaylistId == p.id
         AlertDialog.Builder(this)
             .setTitle(p.name)
-            .setItems(arrayOf("Edit", "Change avatar", if (isDefault) "Stop opening at start" else "Open at start", "Delete")) { _, which ->
+            .setItems(arrayOf("Edit", "Edit on Phone", "Change avatar", if (isDefault) "Stop opening at start" else "Open at start", "Delete")) { _, which ->
                 when (which) {
                     0 -> startActivity(LoginActivity.editIntent(this, p.id))
-                    1 -> AvatarPicker.show(this, p) { showList(prefs.playlists()) }
-                    2 -> {
+                    1 -> startActivity(LoginActivity.editIntent(this, p.id, phone = true))
+                    2 -> AvatarPicker.show(this, p) { showList(prefs.playlists()) }
+                    3 -> {
                         prefs.defaultPlaylistId = if (isDefault) null else p.id
                         showToast(
                             this,
                             if (isDefault) "The app will ask which playlist to open" else "${p.name} will open at start", android.widget.Toast.LENGTH_SHORT)
                         showList(prefs.playlists())
                     }
-                    3 -> confirmDelete(p)
+                    4 -> confirmDelete(p)
                 }
             }
             .setNegativeButton("Cancel", null)

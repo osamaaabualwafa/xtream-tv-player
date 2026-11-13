@@ -60,6 +60,7 @@ class HomeActivity : AppCompatActivity() {
         "recent_movies" to (R.id.row_recent_title to R.id.row_recent),
         "recent_series" to (R.id.row_recent_series_title to R.id.row_recent_series),
         "picked" to (R.id.row_picked_title to R.id.row_picked),
+        "fresh" to (R.id.row_fresh_title to R.id.row_fresh),
         "trending" to (R.id.row_trending_title to R.id.row_trending),
     )
     private lateinit var newAdapter: ItemAdapter
@@ -171,6 +172,11 @@ class HomeActivity : AppCompatActivity() {
         newAdapter = row(R.id.row_new, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
         topRatedAdapter = row(R.id.row_top_rated, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
         topSeriesAdapter = row(R.id.row_top_series, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) }, onLongClick = ::toggleHomeFavorite)
+        freshAdapter = row(R.id.row_fresh, R.layout.item_poster_row, { _, item ->
+            if (item.id.startsWith("more:")) {
+                startActivity(Intent(this, BrowseActivity::class.java).putExtra(BrowseActivity.EXTRA_TYPE, item.type.name).putExtra(BrowseActivity.EXTRA_NEWEST_FIRST, true))
+            } else startActivity(DetailsActivity.intent(this, item))
+        }, onLongClick = ::toggleHomeFavorite)
         pickedAdapter = row(R.id.row_picked, R.layout.item_poster_row, { _, item -> startActivity(DetailsActivity.intent(this, item)) },
             onLongClick = { _, item -> askNotInterested(item) }, onFocus = ::showPickedWhy)
         trendingAdapter = row(R.id.row_trending, R.layout.item_poster_row, { _, item ->
@@ -179,6 +185,8 @@ class HomeActivity : AppCompatActivity() {
         window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, now -> clearSuggestionLines(now) }
         backdrop = FocusBackdrop.attach(this)
         setupFeatured()
+        // Instant start: every row as it was when Home was last left, at once (the lists load behind).
+        applySnapshot()
 
         showAccount()
         loadCounts()
@@ -337,7 +345,74 @@ class HomeActivity : AppCompatActivity() {
      */
     override fun onStop() {
         super.onStop()
+        saveSnapshot()
         allLists.clear()
+    }
+
+    // ---- Instant start (Package 4, item 1, approved 2026-11-13) ----
+
+    /** The rows that wait for the big lists, by Home row key. */
+    private fun snapshotRows(): List<Triple<String, Int, Int>> = listOf(
+        Triple("new", R.id.row_new, R.id.row_new_title),
+        Triple("fresh", R.id.row_fresh, R.id.row_fresh_title),
+        Triple("picked", R.id.row_picked, R.id.row_picked_title),
+        Triple("trending", R.id.row_trending, R.id.row_trending_title),
+        Triple("top_movies", R.id.row_top_rated, R.id.row_top_rated_title),
+        Triple("top_series", R.id.row_top_series, R.id.row_top_series_title),
+        Triple("recent_movies", R.id.row_recent, R.id.row_recent_title),
+        Triple("recent_series", R.id.row_recent_series, R.id.row_recent_series_title),
+    )
+
+    private fun adapterFor(key: String): ItemAdapter? = when (key) {
+        "new" -> newAdapter
+        "picked" -> pickedAdapter
+        "fresh" -> freshAdapter
+        "trending" -> trendingAdapter
+        "top_movies" -> topRatedAdapter
+        "top_series" -> topSeriesAdapter
+        "recent_movies" -> recentAdapter
+        "recent_series" -> recentSeriesAdapter
+        else -> null
+    }
+
+    private fun saveSnapshot() {
+        if (!::trendingAdapter.isInitialized) return
+        val pl = prefs.activeId ?: return
+        val rows = snapshotRows().associate { (key, _, _) -> key to (adapterFor(key)?.items.orEmpty()) }.filterValues { it.isNotEmpty() }
+        if (rows.isEmpty()) return
+        val counts = listOf("tile_live_count" to R.id.tile_live_count, "tile_movies_count" to R.id.tile_movies_count, "tile_series_count" to R.id.tile_series_count)
+            .mapNotNull { (name, id) -> findViewById<TextView?>(id)?.text?.toString()?.takeIf { it.isNotBlank() && it != "Loading…" }?.let { name to it } }.toMap()
+        val because = HashMap<String, String>()
+        for ((k, v) in pickedBecause) if (v != null) because[k] = v
+        for ((id, e) in trendingEntries) because["trend:$id"] = "${e.trend.type.name}:${e.trend.id}"
+        val snap = HomeSnapshot.Snapshot(rows, counts, because, pickedName?.text?.toString())
+        val app = applicationContext
+        Thread({ HomeSnapshot.save(app, pl, snap) }, "home-snapshot").start()
+    }
+
+    private fun applySnapshot() {
+        val pl = prefs.activeId ?: return
+        val snap = HomeSnapshot.load(this, pl) ?: return
+        for ((name, text) in snap.counts) {
+            val id = resources.getIdentifier(name, "id", packageName)
+            if (id != 0) findViewById<TextView?>(id)?.text = text
+        }
+        pickedBecause = snap.because.filterKeys { !it.startsWith("trend:") }
+        snap.pickedName?.let { pickedName?.text = it }
+        // Trending: each card's entry from the saved week list (scores, trailer, place) without asking anyone.
+        val saved = Trending.saved(this).associateBy { "${it.trend.type.name}:${it.trend.id}" }
+        trendingEntries = snap.because.filterKeys { it.startsWith("trend:") }.mapNotNull { (k, v) -> saved[v]?.let { k.removePrefix("trend:") to it } }.toMap()
+        val movieFavs = prefs.favoriteIds(ContentType.MOVIE)
+        val seriesFavs = prefs.favoriteIds(ContentType.SERIES)
+        for ((key, rowId, titleId) in snapshotRows()) {
+            val items = snap.rows[key] ?: continue
+            val adapter = adapterFor(key) ?: continue
+            if (adapter.items.isNotEmpty()) continue
+            if (key == "new") adapter.newIds = items.map { it.id }.toSet()
+            adapter.favorites = movieFavs + seriesFavs
+            showRow(rowId, titleId, adapter, items)
+        }
+        Diag.log("start", "Home drawn from the saved rows (${snap.rows.values.sumOf { it.size }} cards)")
     }
 
     private var playlistsAction: View.OnClickListener? = null
@@ -539,7 +614,7 @@ class HomeActivity : AppCompatActivity() {
             val list = ids.toList().mapNotNull { findViewById<View?>(it) }
             return { list }
         }
-        val rows = listOf(R.id.row_new, R.id.row_continue, R.id.row_picked, R.id.row_trending, R.id.row_channels, R.id.row_favorites, R.id.row_top_rated, R.id.row_top_series, R.id.row_recent, R.id.row_recent_series)
+        val rows = listOf(R.id.row_new, R.id.row_fresh, R.id.row_continue, R.id.row_picked, R.id.row_trending, R.id.row_channels, R.id.row_favorites, R.id.row_top_rated, R.id.row_top_series, R.id.row_recent, R.id.row_recent_series)
             .map { focusMap.section(roots = views(it)) }
             .plus(listOfNotNull(favSwitch?.let { s -> focusMap.section(roots = { listOf(s) }) }))
             .plus(listOfNotNull(pickedSwitch, trendingSwitch).map { s -> focusMap.section(roots = { listOf(s) }) })
@@ -774,7 +849,7 @@ class HomeActivity : AppCompatActivity() {
         )
         for ((id, type) in tiles) {
             val countView = findViewById<TextView>(id)
-            countView.text = "Loading…"
+            if (countView.text.isNullOrBlank() || countView.text.toString() == "Loading…") countView.text = "Loading…"
             lifecycleScope.launch {
                 val drawn = listsSeen
                 val label = try {
@@ -952,6 +1027,7 @@ class HomeActivity : AppCompatActivity() {
     // ---- Package 3 (approved 2026-11-13): Picked for you and Trending this week ----
 
     private lateinit var pickedAdapter: ItemAdapter
+    private lateinit var freshAdapter: ItemAdapter
     private lateinit var trendingAdapter: ItemAdapter
     /** The rows' title boxes: name, the line for the highlighted card, and (when chosen) a Movies / Series switch. */
     private var pickedLine: TextView? = null
@@ -972,7 +1048,7 @@ class HomeActivity : AppCompatActivity() {
         val parent = continueRow.parent as? android.view.ViewGroup ?: return
         val d = resources.displayMetrics.density
         var at = parent.indexOfChild(continueRow) + 1
-        for ((titleId, rowId) in listOf(R.id.row_picked_title to R.id.row_picked, R.id.row_trending_title to R.id.row_trending)) {
+        for ((titleId, rowId) in listOf(R.id.row_fresh_title to R.id.row_fresh, R.id.row_picked_title to R.id.row_picked, R.id.row_trending_title to R.id.row_trending)) {
             val box = LinearLayout(this).apply {
                 id = titleId
                 orientation = LinearLayout.HORIZONTAL
@@ -986,10 +1062,10 @@ class HomeActivity : AppCompatActivity() {
                 typeface = continueTitle.typeface
                 isAllCaps = continueTitle.isAllCaps
                 letterSpacing = continueTitle.letterSpacing
-                text = if (rowId == R.id.row_picked) "Picked for you" else "Trending this week"
+                text = when (rowId) { R.id.row_picked -> "Picked for you"; R.id.row_fresh -> "New since your last visit"; else -> "Trending this week" }
             }
             box.addView(name, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            if (prefs.suggestRowsKind == 1) {
+            if (prefs.suggestRowsKind == 1 && rowId != R.id.row_fresh) {
                 val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
                 for ((kind, label) in listOf("MOVIE" to "Movies", "SERIES" to "Series")) chips.addView(TextView(this).apply {
                     tag = kind
@@ -1051,6 +1127,10 @@ class HomeActivity : AppCompatActivity() {
                 for ((box, kind) in listOf(pickedSwitch to prefs.pickedKind, trendingSwitch to prefs.trendingKind)) box?.let { b ->
                     for (i in 0 until b.childCount) b.getChildAt(i).isActivated = b.getChildAt(i).tag == kind
                 }
+                if ("fresh" !in prefs.homeRowHidden) {
+                    val fresh = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { freshCards(movies, series) }
+                    if (fresh != null) showRow(R.id.row_fresh, R.id.row_fresh_title, freshAdapter, fresh)
+                } else showRow(R.id.row_fresh, R.id.row_fresh_title, freshAdapter, emptyList())
                 if ("picked" !in prefs.homeRowHidden) {
                     val kind = if (mixed) null else ContentType.valueOf(prefs.pickedKind)
                     val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Taste.picked(this@HomeActivity, movies, series, kind) }
@@ -1078,6 +1158,30 @@ class HomeActivity : AppCompatActivity() {
                 // The rows just stay as they were.
             }
         }
+    }
+
+    /**
+     * New since your last visit (Package 4, item 2, approved 2026-11-13): movies and series that were not
+     * in the playlist at the previous visit (at least a day back); copies of titles already there don't
+     * count; best rated first, 40 at most, then "and N more" (opens Movies newest first). Null on the
+     * first visit. Off the main thread.
+     */
+    private fun freshCards(movies: List<StreamItem>, series: List<StreamItem>): List<StreamItem>? {
+        val pl = prefs.activeId ?: return null
+        val added = HomeSnapshot.newSinceLastVisit(this, pl, movies, series) ?: return null
+        if (added.isEmpty()) return emptyList()
+        val d = Taste.data(pl)
+        val addedIds = added.mapTo(HashSet()) { "${it.type.name}:${it.id}" }
+        // Works the playlist already had (another copy of the same film is not new).
+        val oldRefs = (movies + series).filter { "${it.type.name}:${it.id}" !in addedIds }.mapNotNullTo(HashSet()) { Taste.refOf(d, it) }
+        val fresh = added.filter { s -> Taste.refOf(d, s)?.let { it !in oldRefs } ?: true }
+            .distinctBy { Taste.sameKey(d, it) }
+            .sortedWith(compareByDescending<StreamItem> { Ratings.scoreOf(it) }.thenByDescending { it.added })
+        val shown = Taste.cards(this, fresh.take(40), movies + series, d)
+        if (fresh.size <= 40) return shown
+        val more = fresh.size - 40
+        val kind = if (fresh.drop(40).count { it.type == ContentType.SERIES } > more / 2) ContentType.SERIES else ContentType.MOVIE
+        return shown + StreamItem(kind, "more:fresh", "and $more more", null, null, null, null, null)
     }
 
     /** On the highlighted card of Picked for you: why it is there (Settings can turn this off). */

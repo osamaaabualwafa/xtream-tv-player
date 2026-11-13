@@ -224,6 +224,8 @@ object DiagUi {
         }
         dialog.setContentView(body, ViewGroup.LayoutParams((widthDp * density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        // A small window with a typing field moves up with the TV's keyboard (Package 5, item 3).
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN)
         // The screen behind goes darker, so the card reads on its own.
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         dialog.window?.setDimAmount(0.65f)
